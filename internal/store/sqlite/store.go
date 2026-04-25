@@ -62,14 +62,19 @@ func (s *Store) Tx(ctx context.Context, fn func(store.Tx) error) error {
 	if err != nil {
 		return err
 	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
 	if err := fn(&txStore{tx: tx}); err != nil {
-		_ = tx.Rollback()
 		return err
 	}
 	if err := tx.Commit(); err != nil {
-		_ = tx.Rollback()
 		return err
 	}
+	committed = true
 	return nil
 }
 
