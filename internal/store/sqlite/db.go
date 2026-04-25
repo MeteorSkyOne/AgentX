@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -34,12 +35,17 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("sqlite pragmas: %w", err)
 	}
-	goose.SetBaseFS(migrationFS)
-	if err := goose.SetDialect("sqlite3"); err != nil {
+	migrations, err := fs.Sub(migrationFS, "migrations")
+	if err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("sqlite migration dialect: %w", err)
+		return nil, fmt.Errorf("sqlite migration fs: %w", err)
 	}
-	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, migrations)
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("sqlite migration provider: %w", err)
+	}
+	if _, err := provider.Up(ctx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("sqlite migrate: %w", err)
 	}

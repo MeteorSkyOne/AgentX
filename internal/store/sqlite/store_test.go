@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -234,6 +237,51 @@ func TestWorkspaceTimestampRoundTrip(t *testing.T) {
 	}
 	if !got.CreatedAt.Equal(workspace.CreatedAt) || !got.UpdatedAt.Equal(workspace.UpdatedAt) {
 		t.Fatalf("workspace timestamps = %s/%s, want %s/%s", got.CreatedAt, got.UpdatedAt, workspace.CreatedAt, workspace.UpdatedAt)
+	}
+}
+
+func TestConcurrentOpenSeparateFiles(t *testing.T) {
+	const stores = 8
+
+	ctx := context.Background()
+	dir := t.TempDir()
+	errs := make(chan error, stores)
+
+	var wg sync.WaitGroup
+	for i := 0; i < stores; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			suffix := strconv.Itoa(i)
+
+			st, err := Open(ctx, filepath.Join(dir, "store_"+suffix+".db"))
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer st.Close()
+
+			user := domain.User{
+				ID:          "usr_concurrent_" + suffix,
+				DisplayName: "Concurrent",
+				CreatedAt:   time.Now().UTC(),
+			}
+			if err := st.Users().Create(ctx, user); err != nil {
+				errs <- err
+				return
+			}
+			if _, err := st.Users().ByID(ctx, user.ID); err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
