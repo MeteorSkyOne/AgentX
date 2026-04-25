@@ -27,12 +27,13 @@ func (a *App) runAgentForMessage(ctx context.Context, userMessage domain.Message
 	}
 	agent, err := a.store.Agents().ByID(ctx, binding.AgentID)
 	if err != nil {
+		a.setFailedAgentSession(ctx, binding.AgentID, userMessage, "")
 		a.publishAgentRunFailed(userMessage, runID, err)
 		return
 	}
 	workspace, err := a.store.Workspaces().ByID(ctx, binding.WorkspaceID)
 	if err != nil {
-		_ = a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, "", "failed")
+		a.setFailedAgentSession(ctx, agent.ID, userMessage, "")
 		a.publishAgentRunFailed(userMessage, runID, err)
 		return
 	}
@@ -46,7 +47,7 @@ func (a *App) runAgentForMessage(ctx context.Context, userMessage domain.Message
 		SessionKey: sessionKey,
 	})
 	if err != nil {
-		_ = a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, "", "failed")
+		a.setFailedAgentSession(ctx, agent.ID, userMessage, "")
 		a.publishAgentRunFailed(userMessage, runID, err)
 		return
 	}
@@ -68,7 +69,7 @@ func (a *App) runAgentForMessage(ctx context.Context, userMessage domain.Message
 	})
 
 	if err := session.Send(ctx, agentruntime.Input{Prompt: userMessage.Body}); err != nil {
-		_ = a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, providerSessionID, "failed")
+		a.setFailedAgentSession(ctx, agent.ID, userMessage, providerSessionID)
 		a.publishAgentRunFailed(userMessage, runID, err)
 		return
 	}
@@ -76,7 +77,7 @@ func (a *App) runAgentForMessage(ctx context.Context, userMessage domain.Message
 	for {
 		select {
 		case <-ctx.Done():
-			_ = a.store.Sessions().SetAgentSession(context.WithoutCancel(ctx), agent.ID, userMessage.ConversationType, userMessage.ConversationID, providerSessionID, "failed")
+			a.setFailedAgentSession(context.WithoutCancel(ctx), agent.ID, userMessage, providerSessionID)
 			a.publishAgentRunFailed(userMessage, runID, ctx.Err())
 			return
 		case evt, ok := <-session.Events():
@@ -96,7 +97,7 @@ func (a *App) runAgentForMessage(ctx context.Context, userMessage domain.Message
 				a.completeAgentRun(ctx, userMessage, agent, runID, providerSessionID, evt.Text)
 				return
 			case agentruntime.EventFailed:
-				_ = a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, providerSessionID, "failed")
+				a.setFailedAgentSession(ctx, agent.ID, userMessage, providerSessionID)
 				a.publishAgentRunFailed(userMessage, runID, runtimeEventError(evt))
 				return
 			}
@@ -121,7 +122,7 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 		CreatedAt:        createdAt,
 	}
 	if err := a.store.Messages().Create(ctx, botMessage); err != nil {
-		_ = a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, providerSessionID, "failed")
+		a.setFailedAgentSession(ctx, agent.ID, userMessage, providerSessionID)
 		a.publishAgentRunFailed(userMessage, runID, err)
 		return
 	}
@@ -143,6 +144,10 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 		ConversationID:   userMessage.ConversationID,
 		Payload:          domain.AgentRunPayload{RunID: runID, AgentID: agent.ID},
 	})
+}
+
+func (a *App) setFailedAgentSession(ctx context.Context, agentID string, message domain.Message, providerSessionID string) {
+	_ = a.store.Sessions().SetAgentSession(ctx, agentID, message.ConversationType, message.ConversationID, providerSessionID, "failed")
 }
 
 func (a *App) publishAgentRunFailed(message domain.Message, runID string, err error) {

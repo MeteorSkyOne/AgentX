@@ -8,6 +8,7 @@ import (
 
 	"github.com/meteorsky/agentx/internal/domain"
 	"github.com/meteorsky/agentx/internal/eventbus"
+	"github.com/meteorsky/agentx/internal/store"
 	sqlitestore "github.com/meteorsky/agentx/internal/store/sqlite"
 )
 
@@ -117,6 +118,54 @@ func TestListOrganizationsAndChannels(t *testing.T) {
 	}
 }
 
+func TestRunAgentRecordsFailedSessionAfterBindingWhenAgentLookupFails(t *testing.T) {
+	ctx := context.Background()
+	baseApp, bus, bootstrap := newConversationTestApp(t, ctx)
+	sessionStore := &recordingSessionStore{}
+	app := New(&agentLookupFailureStore{
+		Store:    baseApp.store,
+		sessions: sessionStore,
+		err:      errors.New("agent lookup failed"),
+	}, bus, baseApp.opts)
+
+	events, unsubscribe := bus.Subscribe(ctx, eventbus.Filter{
+		OrganizationID: bootstrap.Organization.ID,
+		ConversationID: bootstrap.Channel.ID,
+	})
+	defer unsubscribe()
+
+	app.runAgentForMessage(ctx, domain.Message{
+		ID:               "msg_test",
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		SenderType:       domain.SenderUser,
+		SenderID:         bootstrap.User.ID,
+		Kind:             domain.MessageText,
+		Body:             "hello",
+		CreatedAt:        time.Now().UTC(),
+	})
+
+	if sessionStore.status != "failed" {
+		t.Fatalf("session status = %q, want failed", sessionStore.status)
+	}
+	if sessionStore.agentID != bootstrap.Agent.ID {
+		t.Fatalf("session agentID = %q, want %q", sessionStore.agentID, bootstrap.Agent.ID)
+	}
+	if sessionStore.conversationID != bootstrap.Channel.ID {
+		t.Fatalf("session conversationID = %q, want %q", sessionStore.conversationID, bootstrap.Channel.ID)
+	}
+
+	select {
+	case evt := <-events:
+		if evt.Type != domain.EventAgentRunFailed {
+			t.Fatalf("event type = %s, want %s", evt.Type, domain.EventAgentRunFailed)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for AgentRunFailed")
+	}
+}
+
 func newConversationTestApp(t *testing.T, ctx context.Context) (*App, *eventbus.Bus, BootstrapResult) {
 	t.Helper()
 
@@ -140,4 +189,51 @@ func newConversationTestApp(t *testing.T, ctx context.Context) (*App, *eventbus.
 		t.Fatal(err)
 	}
 	return app, bus, bootstrap
+}
+
+type agentLookupFailureStore struct {
+	store.Store
+	sessions *recordingSessionStore
+	err      error
+}
+
+func (s *agentLookupFailureStore) Agents() store.AgentStore {
+	return failingAgentStore{err: s.err}
+}
+
+func (s *agentLookupFailureStore) Sessions() store.SessionStore {
+	return s.sessions
+}
+
+type failingAgentStore struct {
+	err error
+}
+
+func (s failingAgentStore) Create(ctx context.Context, agent domain.Agent) error {
+	return s.err
+}
+
+func (s failingAgentStore) ByID(ctx context.Context, id string) (domain.Agent, error) {
+	return domain.Agent{}, s.err
+}
+
+func (s failingAgentStore) DefaultForOrganization(ctx context.Context, orgID string) (domain.Agent, error) {
+	return domain.Agent{}, s.err
+}
+
+type recordingSessionStore struct {
+	agentID          string
+	conversationType domain.ConversationType
+	conversationID   string
+	providerID       string
+	status           string
+}
+
+func (s *recordingSessionStore) SetAgentSession(ctx context.Context, agentID string, conversationType domain.ConversationType, conversationID string, providerSessionID string, status string) error {
+	s.agentID = agentID
+	s.conversationType = conversationType
+	s.conversationID = conversationID
+	s.providerID = providerSessionID
+	s.status = status
+	return nil
 }
