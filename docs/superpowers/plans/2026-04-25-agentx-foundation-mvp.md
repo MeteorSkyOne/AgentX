@@ -1060,15 +1060,15 @@ The `Store` and transaction receiver must expose these methods:
 
 ```go
 func (s *Store) Tx(ctx context.Context, fn func(store.Tx) error) error
-func (s *Store) Users() userRepo
-func (s *Store) Organizations() orgRepo
-func (s *Store) Channels() channelRepo
-func (s *Store) Messages() messageRepo
-func (s *Store) BotUsers() botUserRepo
-func (s *Store) Agents() agentRepo
-func (s *Store) Workspaces() workspaceRepo
-func (s *Store) Bindings() bindingRepo
-func (s *Store) Sessions() sessionRepo
+func (s *Store) Users() store.UserStore
+func (s *Store) Organizations() store.OrganizationStore
+func (s *Store) Channels() store.ChannelStore
+func (s *Store) Messages() store.MessageStore
+func (s *Store) BotUsers() store.BotUserStore
+func (s *Store) Agents() store.AgentStore
+func (s *Store) Workspaces() store.WorkspaceStore
+func (s *Store) Bindings() store.BindingStore
+func (s *Store) Sessions() store.SessionStore
 ```
 
 Define a concrete transaction wrapper named `txStore` and implement the same repository accessors on it.
