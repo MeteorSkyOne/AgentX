@@ -146,6 +146,36 @@ func TestForeignKeysRejectInvalidReferences(t *testing.T) {
 	}
 }
 
+func TestOrganizationsAnyReportsWhetherOrganizationExists(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	defer st.Close()
+
+	any, err := st.Organizations().Any(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if any {
+		t.Fatal("Any = true before organization exists")
+	}
+
+	if err := st.Organizations().Create(ctx, domain.Organization{
+		ID:        "org_any",
+		Name:      "Any",
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	any, err = st.Organizations().Any(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !any {
+		t.Fatal("Any = false after organization exists")
+	}
+}
+
 func TestBindingUpsertReplacesAgentAndWorkspace(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)

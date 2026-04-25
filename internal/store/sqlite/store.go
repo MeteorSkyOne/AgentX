@@ -200,6 +200,14 @@ func (r organizationRepo) Create(ctx context.Context, org domain.Organization) e
 	return err
 }
 
+func (r organizationRepo) Any(ctx context.Context) (bool, error) {
+	var exists bool
+	err := r.q.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM organizations LIMIT 1)`,
+	).Scan(&exists)
+	return exists, err
+}
+
 func (r organizationRepo) ListForUser(ctx context.Context, userID string) ([]domain.Organization, error) {
 	rows, err := r.q.QueryContext(ctx, `
 SELECT organizations.id, organizations.name, organizations.created_at

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,8 @@ import (
 )
 
 var ErrUnauthorized = errors.New("unauthorized")
+
+var ErrAlreadyBootstrapped = errors.New("already bootstrapped")
 
 type BootstrapRequest struct {
 	AdminToken  string `json:"admin_token"`
@@ -30,9 +33,19 @@ type BootstrapResult struct {
 }
 
 func (a *App) Bootstrap(ctx context.Context, req BootstrapRequest) (BootstrapResult, error) {
-	if req.AdminToken != a.opts.AdminToken {
+	configuredToken := strings.TrimSpace(a.opts.AdminToken)
+	requestToken := strings.TrimSpace(req.AdminToken)
+	if configuredToken == "" || subtle.ConstantTimeCompare([]byte(requestToken), []byte(configuredToken)) != 1 {
 		return BootstrapResult{}, ErrUnauthorized
 	}
+	bootstrapped, err := a.store.Organizations().Any(ctx)
+	if err != nil {
+		return BootstrapResult{}, err
+	}
+	if bootstrapped {
+		return BootstrapResult{}, ErrAlreadyBootstrapped
+	}
+
 	name := strings.TrimSpace(req.DisplayName)
 	if name == "" {
 		name = "Admin"
@@ -76,7 +89,7 @@ func (a *App) Bootstrap(ctx context.Context, req BootstrapRequest) (BootstrapRes
 	}
 	token := id.NewToken()
 
-	err := a.store.Tx(ctx, func(tx store.Tx) error {
+	err = a.store.Tx(ctx, func(tx store.Tx) error {
 		if err := tx.Users().Create(ctx, user); err != nil {
 			return err
 		}
