@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/meteorsky/agentx/internal/eventbus"
 	"github.com/meteorsky/agentx/internal/id"
 	sqlitestore "github.com/meteorsky/agentx/internal/store/sqlite"
+	"nhooyr.io/websocket"
 )
 
 func TestHTTPBootstrapAuthAndMessagesFlow(t *testing.T) {
@@ -163,9 +165,88 @@ func TestHTTPBoundNonChannelConversationsCanSendAndListMessages(t *testing.T) {
 	}
 }
 
+func TestWebSocketReceivesMessageCreated(t *testing.T) {
+	env := newTestEnv(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	boot, err := env.app.Bootstrap(ctx, app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wsURL := "ws" + strings.TrimPrefix(env.server.URL, "http") + "/api/ws?token=" + boot.SessionToken
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	err = conn.Write(ctx, websocket.MessageText, []byte(`{"type":"subscribe","organization_id":"`+boot.Organization.ID+`","conversation_id":"`+boot.Channel.ID+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = env.app.SendMessage(ctx, app.SendMessageRequest{
+		UserID:           boot.User.ID,
+		OrganizationID:   boot.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   boot.Channel.ID,
+		Body:             "hello ws",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for {
+		_, payload, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(payload), string(domain.EventMessageCreated)) {
+			return
+		}
+	}
+}
+
+func TestWebSocketRejectsMissingOrInvalidToken(t *testing.T) {
+	env := newTestEnv(t)
+	baseURL := "ws" + strings.TrimPrefix(env.server.URL, "http") + "/api/ws"
+
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{name: "missing", url: baseURL},
+		{name: "invalid", url: baseURL + "?token=invalid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+
+			conn, resp, err := websocket.Dial(ctx, tc.url, nil)
+			if err == nil {
+				conn.Close(websocket.StatusNormalClosure, "")
+				t.Fatal("dial succeeded, want unauthorized")
+			}
+			if resp == nil {
+				t.Fatal("missing HTTP response")
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+			}
+		})
+	}
+}
+
 type testEnv struct {
 	server *httptest.Server
 	store  *sqlitestore.Store
+	app    *app.App
 }
 
 func newTestServer(t *testing.T) *httptest.Server {
@@ -191,7 +272,7 @@ func newTestEnv(t *testing.T) testEnv {
 	a := app.New(st, bus, app.Options{AdminToken: "secret", DataDir: t.TempDir()})
 	ts := httptest.NewServer(NewRouter(a, bus))
 	t.Cleanup(ts.Close)
-	return testEnv{server: ts, store: st}
+	return testEnv{server: ts, store: st, app: a}
 }
 
 func postJSON(t *testing.T, url string, token string, body any, wantStatus int, dst any) {

@@ -23,6 +23,7 @@ func NewRouter(a *app.App, bus *eventbus.Bus) http.Handler {
 
 	r.Route("/api", func(r chi.Router) {
 		r.Post("/auth/bootstrap", s.handleBootstrap)
+		r.Get("/ws", s.handleWebSocket)
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.authMiddleware)
