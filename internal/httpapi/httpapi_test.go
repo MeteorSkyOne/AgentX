@@ -189,6 +189,7 @@ func TestWebSocketReceivesMessageCreated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	requireWebSocketSubscribed(t, ctx, conn)
 
 	_, err = env.app.SendMessage(ctx, app.SendMessageRequest{
 		UserID:           boot.User.ID,
@@ -209,6 +210,55 @@ func TestWebSocketReceivesMessageCreated(t *testing.T) {
 		if strings.Contains(string(payload), string(domain.EventMessageCreated)) {
 			return
 		}
+	}
+}
+
+func TestWebSocketRejectsUnauthorizedSubscriptions(t *testing.T) {
+	env := newTestEnv(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	boot, err := env.app.Bootstrap(ctx, app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name           string
+		organizationID string
+		conversationID string
+	}{
+		{name: "mismatched organization", organizationID: "org_unknown", conversationID: boot.Channel.ID},
+		{name: "unknown conversation", organizationID: boot.Organization.ID, conversationID: "chn_unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+
+			wsURL := "ws" + strings.TrimPrefix(env.server.URL, "http") + "/api/ws?token=" + boot.SessionToken
+			conn, _, err := websocket.Dial(ctx, wsURL, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close(websocket.StatusNormalClosure, "")
+
+			err = conn.Write(ctx, websocket.MessageText, []byte(`{"type":"subscribe","organization_id":"`+tc.organizationID+`","conversation_id":"`+tc.conversationID+`"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			publishCtx, stopPublish := context.WithCancel(ctx)
+			defer stopPublish()
+			go publishMatchingWebSocketEvents(publishCtx, env.bus, tc.organizationID, tc.conversationID)
+
+			_, payload, err := conn.Read(ctx)
+			if err == nil {
+				t.Fatalf("read payload %s, want unauthorized subscription close", string(payload))
+			}
+		})
 	}
 }
 
@@ -247,6 +297,7 @@ type testEnv struct {
 	server *httptest.Server
 	store  *sqlitestore.Store
 	app    *app.App
+	bus    *eventbus.Bus
 }
 
 func newTestServer(t *testing.T) *httptest.Server {
@@ -272,7 +323,57 @@ func newTestEnv(t *testing.T) testEnv {
 	a := app.New(st, bus, app.Options{AdminToken: "secret", DataDir: t.TempDir()})
 	ts := httptest.NewServer(NewRouter(a, bus))
 	t.Cleanup(ts.Close)
-	return testEnv{server: ts, store: st, app: a}
+	return testEnv{server: ts, store: st, app: a, bus: bus}
+}
+
+func requireWebSocketSubscribed(t *testing.T, ctx context.Context, conn *websocket.Conn) {
+	t.Helper()
+
+	_, payload, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ack struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(payload, &ack); err != nil {
+		t.Fatal(err)
+	}
+	if ack.Type != "subscribed" {
+		t.Fatalf("ack type = %q, want subscribed", ack.Type)
+	}
+}
+
+func publishMatchingWebSocketEvents(ctx context.Context, bus *eventbus.Bus, organizationID string, conversationID string) {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		bus.Publish(domain.Event{
+			ID:               id.New("evt"),
+			Type:             domain.EventMessageCreated,
+			OrganizationID:   organizationID,
+			ConversationType: domain.ConversationChannel,
+			ConversationID:   conversationID,
+			Payload: domain.MessageCreatedPayload{Message: domain.Message{
+				ID:               id.New("msg"),
+				OrganizationID:   organizationID,
+				ConversationType: domain.ConversationChannel,
+				ConversationID:   conversationID,
+				SenderType:       domain.SenderUser,
+				Kind:             domain.MessageText,
+				Body:             "unauthorized event",
+				CreatedAt:        time.Now().UTC(),
+			}},
+			CreatedAt: time.Now().UTC(),
+		})
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func postJSON(t *testing.T, url string, token string, body any, wantStatus int, dst any) {

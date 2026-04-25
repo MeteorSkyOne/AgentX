@@ -6,16 +6,19 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/meteorsky/agentx/internal/app"
+	"github.com/meteorsky/agentx/internal/domain"
 	"github.com/meteorsky/agentx/internal/eventbus"
 	"nhooyr.io/websocket"
 )
 
 type subscribeMessage struct {
-	Type           string `json:"type"`
-	OrganizationID string `json:"organization_id"`
-	ConversationID string `json:"conversation_id"`
+	Type             string `json:"type"`
+	OrganizationID   string `json:"organization_id"`
+	ConversationType string `json:"conversation_type"`
+	ConversationID   string `json:"conversation_id"`
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -28,7 +31,8 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := s.app.UserForToken(r.Context(), token); err != nil {
+	user, err := s.app.UserForToken(r.Context(), token)
+	if err != nil {
 		if errors.Is(err, app.ErrUnauthorized) {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
@@ -43,8 +47,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.CloseNow()
 
-	_, payload, err := conn.Read(r.Context())
+	subscribeCtx, cancelSubscribe := context.WithTimeout(r.Context(), 5*time.Second)
+	_, payload, err := conn.Read(subscribeCtx)
+	cancelSubscribe()
 	if err != nil {
+		_ = conn.Close(websocket.StatusPolicyViolation, "subscribe message required")
 		return
 	}
 
@@ -58,14 +65,48 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	conversationType := domain.ConversationChannel
+	if msg.ConversationType != "" {
+		var ok bool
+		conversationType, ok = parseConversationType(msg.ConversationType)
+		if !ok {
+			_ = conn.Close(websocket.StatusUnsupportedData, "unknown conversation type")
+			return
+		}
+	}
+
+	authorized, err := s.authorizedOrganization(r, user.ID, msg.OrganizationID)
+	if err != nil {
+		_ = conn.Close(websocket.StatusInternalError, "authorization failed")
+		return
+	}
+	if !authorized {
+		_ = conn.Close(websocket.StatusPolicyViolation, "unauthorized subscription")
+		return
+	}
+
+	resolvedOrganizationID, ok, err := s.authorizedConversationOrganizationID(r, user.ID, conversationType, msg.ConversationID)
+	if err != nil {
+		_ = conn.Close(websocket.StatusInternalError, "authorization failed")
+		return
+	}
+	if !ok || resolvedOrganizationID != msg.OrganizationID {
+		_ = conn.Close(websocket.StatusPolicyViolation, "unauthorized subscription")
+		return
+	}
+
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
 	events, unsubscribe := s.bus.Subscribe(ctx, eventbus.Filter{
-		OrganizationID: msg.OrganizationID,
+		OrganizationID: resolvedOrganizationID,
 		ConversationID: msg.ConversationID,
 	})
 	defer unsubscribe()
+
+	if err := writeWebSocketJSON(ctx, conn, map[string]string{"type": "subscribed"}); err != nil {
+		return
+	}
 
 	readDone := make(chan struct{})
 	go func() {
@@ -91,14 +132,20 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			payload, err := json.Marshal(event)
-			if err != nil {
+			if err := writeWebSocketJSON(ctx, conn, event); err != nil {
 				_ = conn.Close(websocket.StatusInternalError, "failed to marshal event")
-				return
-			}
-			if err := conn.Write(ctx, websocket.MessageText, payload); err != nil {
 				return
 			}
 		}
 	}
+}
+
+func writeWebSocketJSON(ctx context.Context, conn *websocket.Conn, value any) error {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	writeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return conn.Write(writeCtx, websocket.MessageText, payload)
 }
