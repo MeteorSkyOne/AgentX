@@ -15,7 +15,15 @@ AgentX is a self-hosted AI coding agent management service for coordinating orga
 
 ## Development
 
-Run the backend:
+Start the full local stack:
+
+```sh
+make dev
+```
+
+This starts the API on `127.0.0.1:8080`, the web client on `127.0.0.1:5173`, and uses the bootstrap token `dev-token`.
+
+Run the backend only:
 
 ```sh
 AGENTX_ADMIN_TOKEN=dev-token go run ./cmd/agentx
@@ -35,5 +43,6 @@ Open `http://127.0.0.1:5173` and bootstrap with `dev-token`.
 
 ```sh
 go test ./...
+bash scripts/dev_test.sh
 cd web && npm run build
 ```
