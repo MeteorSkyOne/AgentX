@@ -20,7 +20,7 @@ func TestFromEnvDefaults(t *testing.T) {
 		t.Fatalf("SQLitePath = %q, want .agentx/agentx.db", cfg.SQLitePath)
 	}
 	if cfg.AdminToken == "" {
-		t.Fatal("AdminToken should have a generated fallback")
+		t.Fatal("AdminToken should have a generated token when unset")
 	}
 }
 

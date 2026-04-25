@@ -124,7 +124,7 @@ func TestFromEnvDefaults(t *testing.T) {
 		t.Fatalf("SQLitePath = %q, want .agentx/agentx.db", cfg.SQLitePath)
 	}
 	if cfg.AdminToken == "" {
-		t.Fatal("AdminToken should have a generated fallback")
+		t.Fatal("AdminToken should have a generated token when unset")
 	}
 }
 
@@ -165,6 +165,8 @@ Expected: FAIL because package `internal/config` does not exist.
 
 Create `internal/config/config.go`:
 
+Random admin token generation must fail closed: if `crypto/rand` fails, `randomToken()` panics so startup cannot continue with a predictable bootstrap secret.
+
 ```go
 package config
 
@@ -202,7 +204,7 @@ func getenv(key, fallback string) string {
 func randomToken() string {
 	var b [24]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return "agentx-local-dev-token"
+		panic("generate admin token: " + err.Error())
 	}
 	return hex.EncodeToString(b[:])
 }

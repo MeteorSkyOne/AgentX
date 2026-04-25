@@ -34,7 +34,7 @@ func getenv(key, fallback string) string {
 func randomToken() string {
 	var b [24]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return "agentx-local-dev-token"
+		panic("generate admin token: " + err.Error())
 	}
 	return hex.EncodeToString(b[:])
 }
