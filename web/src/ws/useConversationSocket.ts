@@ -3,19 +3,23 @@ import { getToken } from "../api/client";
 import type { AgentXEvent, SocketEvent } from "./events";
 import { isAgentXEvent } from "./events";
 
+const maxReconnectAttempts = 5;
+const baseReconnectDelayMS = 300;
+const maxReconnectDelayMS = 5000;
+
 export function useConversationSocket(
   organizationID: string | undefined,
   conversationID: string | undefined,
   onEvent: (event: AgentXEvent) => void
 ): void {
   const onEventRef = useRef(onEvent);
+  const token = getToken();
 
   useEffect(() => {
     onEventRef.current = onEvent;
   }, [onEvent]);
 
   useEffect(() => {
-    const token = getToken();
     if (!organizationID || !conversationID || !token) {
       return;
     }
@@ -24,32 +28,72 @@ export function useConversationSocket(
     const url = new URL("/api/ws", `${protocol}//${window.location.host}`);
     url.searchParams.set("token", token);
 
-    const socket = new WebSocket(url);
+    let socket: WebSocket | null = null;
+    let stopped = false;
+    let reconnectAttempts = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
-    socket.addEventListener("open", () => {
-      socket.send(
-        JSON.stringify({
-          type: "subscribe",
-          organization_id: organizationID,
-          conversation_type: "channel",
-          conversation_id: conversationID
-        })
-      );
-    });
-
-    socket.addEventListener("message", (message) => {
-      try {
-        const event = JSON.parse(message.data as string) as SocketEvent;
-        if (isAgentXEvent(event)) {
-          onEventRef.current(event);
-        }
-      } catch {
-        // Ignore malformed WebSocket messages; the server closes invalid protocol flows.
+    function connect() {
+      if (stopped) {
+        return;
       }
-    });
+
+      const activeSocket = new WebSocket(url);
+      socket = activeSocket;
+
+      activeSocket.addEventListener("open", () => {
+        activeSocket.send(
+          JSON.stringify({
+            type: "subscribe",
+            organization_id: organizationID,
+            conversation_type: "channel",
+            conversation_id: conversationID
+          })
+        );
+      });
+
+      activeSocket.addEventListener("message", (message) => {
+        try {
+          const event = JSON.parse(message.data as string) as SocketEvent;
+          if (isAgentXEvent(event)) {
+            onEventRef.current(event);
+          }
+        } catch {
+          // Ignore malformed WebSocket messages; the server closes invalid protocol flows.
+        }
+      });
+
+      activeSocket.addEventListener("close", scheduleReconnect);
+      activeSocket.addEventListener("error", () => {
+        scheduleReconnect();
+        activeSocket.close();
+      });
+    }
+
+    function scheduleReconnect() {
+      if (stopped || reconnectTimer || reconnectAttempts >= maxReconnectAttempts) {
+        return;
+      }
+
+      const delay = Math.min(
+        baseReconnectDelayMS * 2 ** reconnectAttempts,
+        maxReconnectDelayMS
+      );
+      reconnectAttempts += 1;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = undefined;
+        connect();
+      }, delay);
+    }
+
+    connect();
 
     return () => {
-      socket.close();
+      stopped = true;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
+      socket?.close();
     };
-  }, [organizationID, conversationID]);
+  }, [organizationID, conversationID, token]);
 }

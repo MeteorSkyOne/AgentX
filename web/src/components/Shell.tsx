@@ -18,7 +18,7 @@ interface ShellProps {
   messagesLoading: boolean;
   streaming: StreamingMessage | null;
   onSelectChannel: (channel: Channel) => void;
-  onMessageSent: () => void;
+  onMessageSent: (message: Message) => void;
   onLogout: () => void;
 }
 

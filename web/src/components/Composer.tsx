@@ -1,11 +1,11 @@
 import { FormEvent, useState } from "react";
 import { SendHorizonal } from "lucide-react";
 import { sendMessage } from "../api/client";
-import type { Channel } from "../api/types";
+import type { Channel, Message } from "../api/types";
 
 interface ComposerProps {
   channel?: Channel;
-  onSent: () => void;
+  onSent: (message: Message) => void;
 }
 
 export function Composer({ channel, onSent }: ComposerProps) {
@@ -23,9 +23,9 @@ export function Composer({ channel, onSent }: ComposerProps) {
     setError(null);
     setSubmitting(true);
     try {
-      await sendMessage("channel", channel.id, trimmed);
+      const message = await sendMessage("channel", channel.id, trimmed);
       setBody("");
-      onSent();
+      onSent(message);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Message failed");
     } finally {

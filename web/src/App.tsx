@@ -4,6 +4,11 @@ import { clearToken, getToken, me, organizations, channels, messages } from "./a
 import type { BootstrapResponse, Channel, Message } from "./api/types";
 import { LoginView } from "./components/LoginView";
 import { Shell } from "./components/Shell";
+import {
+  eventMatchesActiveConversation,
+  mergeMessages,
+  messageMatchesActiveConversation
+} from "./messages/state";
 import type { AgentXEvent } from "./ws/events";
 import { useConversationSocket } from "./ws/useConversationSocket";
 
@@ -70,9 +75,16 @@ export default function App() {
 
   useEffect(() => {
     if (messagesQuery.data) {
-      setConversationMessages(messagesQuery.data);
+      const active = {
+        organizationID: selectedOrganizationID,
+        conversationID: selectedChannelID
+      };
+      const activeMessages = messagesQuery.data.filter((message) =>
+        messageMatchesActiveConversation(message, active)
+      );
+      setConversationMessages((current) => mergeMessages(current, activeMessages));
     }
-  }, [messagesQuery.data, selectedChannelID]);
+  }, [messagesQuery.data, selectedOrganizationID, selectedChannelID]);
 
   useEffect(() => {
     if (meQuery.isError) {
@@ -81,10 +93,19 @@ export default function App() {
   }, [meQuery.isError]);
 
   const handleSocketEvent = useCallback((event: AgentXEvent) => {
+    if (
+      !eventMatchesActiveConversation(event, {
+        organizationID: selectedOrganizationID,
+        conversationID: selectedChannelID
+      })
+    ) {
+      return;
+    }
+
     switch (event.type) {
       case "MessageCreated": {
         const message = event.payload.message;
-        setConversationMessages((current) => appendMessage(current, message));
+        setConversationMessages((current) => mergeMessages(current, [message]));
         if (message.sender_type === "bot") {
           setStreaming(null);
         }
@@ -114,7 +135,7 @@ export default function App() {
         });
         break;
     }
-  }, []);
+  }, [selectedOrganizationID, selectedChannelID]);
 
   useConversationSocket(selectedOrganizationID, selectedChannelID, handleSocketEvent);
 
@@ -143,10 +164,16 @@ export default function App() {
     setStreaming(null);
   }
 
-  function handleMessageSent() {
-    if (selectedChannelID) {
-      void queryClient.invalidateQueries({ queryKey: ["messages", "channel", selectedChannelID] });
+  function handleMessageSent(message: Message) {
+    if (
+      !messageMatchesActiveConversation(message, {
+        organizationID: selectedOrganizationID,
+        conversationID: selectedChannelID
+      })
+    ) {
+      return;
     }
+    setConversationMessages((current) => mergeMessages(current, [message]));
   }
 
   if (!hasSession) {
@@ -180,14 +207,5 @@ export default function App() {
       onMessageSent={handleMessageSent}
       onLogout={clearSession}
     />
-  );
-}
-
-function appendMessage(messages: Message[], message: Message): Message[] {
-  if (messages.some((existing) => existing.id === message.id)) {
-    return messages;
-  }
-  return [...messages, message].sort(
-    (left, right) => Date.parse(left.created_at) - Date.parse(right.created_at)
   );
 }
