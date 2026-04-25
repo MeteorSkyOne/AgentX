@@ -82,6 +82,34 @@ func TestHTTPMeRequiresBearerToken(t *testing.T) {
 	}
 }
 
+func TestHTTPSendMessageRejectsUnknownChannelWithoutCreatingOrphan(t *testing.T) {
+	ts := newTestServer(t)
+
+	var bootstrap app.BootstrapResult
+	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	}, http.StatusOK, &bootstrap)
+
+	postJSON(t, ts.URL+"/api/conversations/channel/not-a-real-channel/messages", bootstrap.SessionToken, map[string]string{
+		"body": "orphan",
+	}, http.StatusNotFound, nil)
+
+	getJSON(t, ts.URL+"/api/conversations/channel/not-a-real-channel/messages", bootstrap.SessionToken, http.StatusNotFound, nil)
+}
+
+func TestHTTPChannelsRejectsOrganizationOutsideAuthenticatedMemberships(t *testing.T) {
+	ts := newTestServer(t)
+
+	var bootstrap app.BootstrapResult
+	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	}, http.StatusOK, &bootstrap)
+
+	getJSON(t, ts.URL+"/api/organizations/not-a-real-org/channels", bootstrap.SessionToken, http.StatusNotFound, nil)
+}
+
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
 

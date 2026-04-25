@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/meteorsky/agentx/internal/app"
 	"github.com/meteorsky/agentx/internal/config"
@@ -38,8 +39,17 @@ func main() {
 		DataDir:    cfg.DataDir,
 	})
 
+	server := &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           httpapi.NewRouter(a, bus),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
 	slog.Info("agentx listening", "addr", cfg.Addr)
-	if err := http.ListenAndServe(cfg.Addr, httpapi.NewRouter(a, bus)); err != nil {
+	if err := server.ListenAndServe(); err != nil {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
