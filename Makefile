@@ -1,4 +1,4 @@
-.PHONY: test build run
+.PHONY: test build run web-build
 
 test:
 	go test ./...
@@ -8,3 +8,6 @@ build:
 
 run:
 	go run ./cmd/agentx
+
+web-build:
+	cd web && npm install && npm run build

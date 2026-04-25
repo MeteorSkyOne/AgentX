@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/meteorsky/agentx/internal/app"
@@ -13,6 +14,8 @@ import (
 	"github.com/meteorsky/agentx/internal/httpapi"
 	sqlitestore "github.com/meteorsky/agentx/internal/store/sqlite"
 )
+
+const webDistDir = "web/dist"
 
 func main() {
 	ctx := context.Background()
@@ -41,7 +44,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpapi.NewRouter(a, bus),
+		Handler:           newHTTPHandler(httpapi.NewRouter(a, bus), webDistDir),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -53,4 +56,16 @@ func main() {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func newHTTPHandler(apiHandler http.Handler, distDir string) http.Handler {
+	if _, err := os.Stat(filepath.Join(distDir, "index.html")); err != nil {
+		return apiHandler
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/api/", apiHandler)
+	mux.Handle("/healthz", apiHandler)
+	mux.Handle("/", http.FileServer(http.Dir(distDir)))
+	return mux
 }
