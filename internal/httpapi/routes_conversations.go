@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"database/sql"
 	"errors"
 	"net/http"
 	"strconv"
@@ -155,14 +156,25 @@ func (s *Server) authorizedOrganization(r *http.Request, userID string, orgID st
 }
 
 func (s *Server) authorizedConversationOrganizationID(r *http.Request, userID string, conversationType domain.ConversationType, conversationID string) (string, bool, error) {
-	if conversationType != domain.ConversationChannel {
-		return "", false, nil
-	}
-
 	orgs, err := s.authenticatedOrganizations(r, userID)
 	if err != nil {
 		return "", false, err
 	}
+
+	if conversationType == domain.ConversationThread || conversationType == domain.ConversationDM {
+		binding, err := s.app.ConversationBinding(r.Context(), conversationType, conversationID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return "", false, nil
+			}
+			return "", false, err
+		}
+		if organizationBelongs(orgs, binding.OrganizationID) {
+			return binding.OrganizationID, true, nil
+		}
+		return "", false, nil
+	}
+
 	for _, org := range orgs {
 		channels, err := s.app.ListChannels(r.Context(), org.ID)
 		if err != nil {
@@ -175,6 +187,15 @@ func (s *Server) authorizedConversationOrganizationID(r *http.Request, userID st
 		}
 	}
 	return "", false, nil
+}
+
+func organizationBelongs(orgs []domain.Organization, orgID string) bool {
+	for _, org := range orgs {
+		if org.ID == orgID {
+			return true
+		}
+	}
+	return false
 }
 
 func parseConversationType(value string) (domain.ConversationType, bool) {

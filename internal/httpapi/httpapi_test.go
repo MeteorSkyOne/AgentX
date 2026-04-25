@@ -12,6 +12,7 @@ import (
 	"github.com/meteorsky/agentx/internal/app"
 	"github.com/meteorsky/agentx/internal/domain"
 	"github.com/meteorsky/agentx/internal/eventbus"
+	"github.com/meteorsky/agentx/internal/id"
 	sqlitestore "github.com/meteorsky/agentx/internal/store/sqlite"
 )
 
@@ -110,7 +111,69 @@ func TestHTTPChannelsRejectsOrganizationOutsideAuthenticatedMemberships(t *testi
 	getJSON(t, ts.URL+"/api/organizations/not-a-real-org/channels", bootstrap.SessionToken, http.StatusNotFound, nil)
 }
 
+func TestHTTPBoundNonChannelConversationsCanSendAndListMessages(t *testing.T) {
+	env := newTestEnv(t)
+
+	var bootstrap app.BootstrapResult
+	postJSON(t, env.server.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	}, http.StatusOK, &bootstrap)
+
+	for _, conversationType := range []domain.ConversationType{domain.ConversationThread, domain.ConversationDM} {
+		conversationID := string(conversationType) + "-conversation"
+		now := time.Now().UTC()
+		if err := env.store.Bindings().Upsert(context.Background(), domain.ConversationBinding{
+			ID:               id.New("bnd"),
+			OrganizationID:   bootstrap.Organization.ID,
+			ConversationType: conversationType,
+			ConversationID:   conversationID,
+			AgentID:          bootstrap.Agent.ID,
+			WorkspaceID:      bootstrap.Workspace.ID,
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		body := "hello " + string(conversationType)
+		var sent domain.Message
+		postJSON(t, env.server.URL+"/api/conversations/"+string(conversationType)+"/"+conversationID+"/messages", bootstrap.SessionToken, map[string]string{
+			"body": body,
+		}, http.StatusOK, &sent)
+		if sent.OrganizationID != bootstrap.Organization.ID {
+			t.Fatalf("%s sent organization_id = %q, want %q", conversationType, sent.OrganizationID, bootstrap.Organization.ID)
+		}
+
+		var messages []domain.Message
+		requireEventually(t, time.Second, func() bool {
+			getJSON(t, env.server.URL+"/api/conversations/"+string(conversationType)+"/"+conversationID+"/messages", bootstrap.SessionToken, http.StatusOK, &messages)
+			var sawUser bool
+			var sawBot bool
+			for _, message := range messages {
+				if message.ID == sent.ID && message.Body == body {
+					sawUser = true
+				}
+				if message.Body == "Echo: "+body && message.SenderType == domain.SenderBot {
+					sawBot = true
+				}
+			}
+			return sawUser && sawBot
+		})
+	}
+}
+
+type testEnv struct {
+	server *httptest.Server
+	store  *sqlitestore.Store
+}
+
 func newTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return newTestEnv(t).server
+}
+
+func newTestEnv(t *testing.T) testEnv {
 	t.Helper()
 
 	ctx := context.Background()
@@ -128,7 +191,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 	a := app.New(st, bus, app.Options{AdminToken: "secret", DataDir: t.TempDir()})
 	ts := httptest.NewServer(NewRouter(a, bus))
 	t.Cleanup(ts.Close)
-	return ts
+	return testEnv{server: ts, store: st}
 }
 
 func postJSON(t *testing.T, url string, token string, body any, wantStatus int, dst any) {

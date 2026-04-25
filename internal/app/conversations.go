@@ -32,6 +32,10 @@ func (a *App) ListMessages(ctx context.Context, conversationType domain.Conversa
 	return a.store.Messages().List(ctx, conversationType, conversationID, limit)
 }
 
+func (a *App) ConversationBinding(ctx context.Context, conversationType domain.ConversationType, conversationID string) (domain.ConversationBinding, error) {
+	return a.store.Bindings().ByConversation(ctx, conversationType, conversationID)
+}
+
 func (a *App) SendMessage(ctx context.Context, req SendMessageRequest) (domain.Message, error) {
 	body := strings.TrimSpace(req.Body)
 	if body == "" {
