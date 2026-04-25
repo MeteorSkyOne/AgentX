@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"crypto/subtle"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -133,7 +134,17 @@ func (a *App) Bootstrap(ctx context.Context, req BootstrapRequest) (BootstrapRes
 func (a *App) UserForToken(ctx context.Context, token string) (domain.User, error) {
 	userID, err := a.store.Users().UserIDByAPISession(ctx, token)
 	if err != nil {
-		return domain.User{}, ErrUnauthorized
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.User{}, ErrUnauthorized
+		}
+		return domain.User{}, err
 	}
-	return a.store.Users().ByID(ctx, userID)
+	user, err := a.store.Users().ByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.User{}, ErrUnauthorized
+		}
+		return domain.User{}, err
+	}
+	return user, nil
 }

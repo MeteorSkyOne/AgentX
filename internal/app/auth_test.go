@@ -118,6 +118,50 @@ func TestUserForTokenReturnsBootstrappedUser(t *testing.T) {
 	}
 }
 
+func TestUserForTokenRejectsInvalidToken(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	app := New(st, eventbus.New(), Options{AdminToken: "secret", DataDir: t.TempDir()})
+	if _, err := app.Bootstrap(ctx, BootstrapRequest{AdminToken: "secret", DisplayName: "Meteorsky"}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = app.UserForToken(ctx, "missing")
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("error = %v, want %v", err, ErrUnauthorized)
+	}
+}
+
+func TestUserForTokenPropagatesStoreFailure(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	app := New(st, eventbus.New(), Options{AdminToken: "secret", DataDir: t.TempDir()})
+	result, err := app.Bootstrap(ctx, BootstrapRequest{AdminToken: "secret", DisplayName: "Meteorsky"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = app.UserForToken(ctx, result.SessionToken)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("error = %v, want operational store error", err)
+	}
+}
+
 func TestBootstrapRejectsConcurrentBootstrapAttempts(t *testing.T) {
 	ctx := context.Background()
 	st, err := sqlitestore.Open(ctx, ":memory:")
