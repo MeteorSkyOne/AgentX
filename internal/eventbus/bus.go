@@ -28,6 +28,10 @@ func New() *Bus {
 }
 
 func (b *Bus) Subscribe(ctx context.Context, filter Filter) (<-chan domain.Event, func()) {
+	if ctx == nil {
+		panic("eventbus: nil context")
+	}
+
 	b.mu.Lock()
 	id := b.next
 	b.next++
@@ -35,18 +39,26 @@ func (b *Bus) Subscribe(ctx context.Context, filter Filter) (<-chan domain.Event
 	b.subs[id] = subscription{filter: filter, ch: ch}
 	b.mu.Unlock()
 
+	done := make(chan struct{})
+	var once sync.Once
 	unsubscribe := func() {
-		b.mu.Lock()
-		if sub, ok := b.subs[id]; ok {
-			delete(b.subs, id)
-			close(sub.ch)
-		}
-		b.mu.Unlock()
+		once.Do(func() {
+			b.mu.Lock()
+			if sub, ok := b.subs[id]; ok {
+				delete(b.subs, id)
+				close(sub.ch)
+			}
+			b.mu.Unlock()
+			close(done)
+		})
 	}
 
 	go func() {
-		<-ctx.Done()
-		unsubscribe()
+		select {
+		case <-ctx.Done():
+			unsubscribe()
+		case <-done:
+		}
 	}()
 
 	return ch, unsubscribe
