@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is AgentX
 
-A self-hosted AI coding agent management service. It coordinates organizations, channels, conversations, and agent activity from a local web UI. Agents (Claude Code CLI, Codex CLI, or a fake echo agent) are spawned as subprocesses and their streaming output is relayed to the frontend via WebSocket.
+A self-hosted AI coding agent management service. It coordinates organizations, channels, conversations, and agent activity from a local web UI. Agents (Claude Code CLI, Codex CLI, or a fake echo agent) are spawned as subprocesses and their streaming output is relayed to the frontend via WebSocket. Supports slash commands, workspace file browsing, agent-level configuration (effort, fast mode, descriptions), and webhook/browser notifications for agent activity.
 
 ## Commands
 
@@ -14,6 +14,8 @@ make build        # Build Go binary
 make test         # All tests: Go + shell scripts + frontend build + frontend tests
 make run          # Backend only (set AGENTX_ADMIN_TOKEN first)
 make web-build    # Build frontend
+scripts/prod.sh   # Build and run production server (auto-generates bootstrap token)
+scripts/dev-worktree.sh <branch>  # Isolated git worktree dev environment per branch
 
 # Go tests
 go test ./...                              # All Go tests
@@ -41,9 +43,13 @@ cmd/agentx/main.go (bootstrap)
   → internal/config/      (env var config)
 ```
 
-**Data model**: Organization → Projects → Channels → Threads → Messages. Agents bind to conversations via ConversationBinding and run in Workspaces.
+**Data model**: Organization → Projects → Channels → Threads → Messages. Agents bind to conversations via ConversationBinding and run in Workspaces. Agents have configurable `effort`, `fast_mode`, and `description` fields.
 
-**Runtime pattern**: `runtime.Runtime` creates a `Session` (spawns a CLI subprocess). The session emits streaming `Event`s (output deltas, run started/completed/failed) over a Go channel. The app layer publishes these to the event bus, which fans them out to WebSocket subscribers.
+**Slash commands**: Built-in commands (`/new`, `/compact`, `/plan`, `/init`, `/model`, `/effort`, `/commit`, `/push`, `/review`) defined in `internal/app/commands.go`. Targeted at specific agents via `@handle` syntax. The composer provides autocomplete for both commands and agent mentions.
+
+**Runtime pattern**: `runtime.Runtime` creates a `Session` (spawns a CLI subprocess). The session emits streaming `Event`s (output deltas, run started/completed/failed) over a Go channel. The app layer publishes these to the event bus, which fans them out to WebSocket subscribers. The runtime passes up to 40 messages of conversation history as context, respecting context boundaries set by `/new`.
+
+**Notifications**: Organization-level webhook notifications (`internal/app/notifications.go`) with HMAC-SHA256 signing and URL templating. Browser native notifications (`web/src/notifications/browser.ts`) fire when agents reply and the page is inactive. Settings managed via `notification_settings` table.
 
 **Event flow**: Agent subprocess → Runtime Session → App (publishes to EventBus) → WebSocket handler → Frontend. Events are scoped by organization + conversation type + conversation ID.
 
@@ -70,4 +76,4 @@ SQLite with Goose migrations in `internal/store/sqlite/migrations/`. The store i
 
 ## Frontend
 
-React 19 app in `web/`. State management via TanStack Query for server state and a custom message state reducer (`web/src/messages/state.ts`) for real-time streaming. WebSocket hook in `web/src/ws/useConversationSocket.ts` handles subscribe/unsubscribe and event dispatch. UI uses Radix primitives with Tailwind 4.
+React 19 app in `web/`. State management via TanStack Query for server state and a custom message state reducer (`web/src/messages/state.ts`) for real-time streaming. WebSocket hook in `web/src/ws/useConversationSocket.ts` handles subscribe/unsubscribe and event dispatch. UI uses Radix primitives with Tailwind 4. Composer supports slash command autocomplete and `@agent` mentions. Workspace file tree (`web/src/components/FileTree.tsx`) shows agent working directory contents. Markdown rendering is lazy-loaded.
