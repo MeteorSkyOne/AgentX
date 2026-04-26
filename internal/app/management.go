@@ -353,7 +353,7 @@ func (a *App) CreateAgent(ctx context.Context, req AgentCreateRequest) (domain.A
 		if err := tx.Agents().Create(ctx, agent); err != nil {
 			return err
 		}
-		return seedAgentMemoryFile(workspace.Path, agent)
+		return ensureAgentInstructionFiles(workspace.Path, agent)
 	})
 	if err != nil {
 		return domain.Agent{}, err
@@ -464,11 +464,34 @@ func deletedAgentHandle(agent domain.Agent) string {
 	return normalizeHandle(handle + "_deleted_" + agent.ID)
 }
 
-func seedAgentMemoryFile(workspacePath string, agent domain.Agent) error {
+func ensureAgentInstructionFiles(workspacePath string, agent domain.Agent) error {
 	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(workspacePath, "memory.md"), []byte(agentMemoryContent(agent)), 0o644)
+	defaultContent := agentMemoryContent(agent)
+	memoryPath := filepath.Join(workspacePath, "memory.md")
+	if err := writeFileIfMissing(memoryPath, defaultContent); err != nil {
+		return err
+	}
+	instructionContent := defaultContent
+	if memoryContent, err := os.ReadFile(memoryPath); err == nil && strings.TrimSpace(string(memoryContent)) != "" {
+		instructionContent = string(memoryContent)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := writeFileIfMissing(filepath.Join(workspacePath, "AGENTS.md"), instructionContent); err != nil {
+		return err
+	}
+	return writeFileIfMissing(filepath.Join(workspacePath, "CLAUDE.md"), "@AGENTS.md\n")
+}
+
+func writeFileIfMissing(path string, content string) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
 }
 
 func agentMemoryContent(agent domain.Agent) string {

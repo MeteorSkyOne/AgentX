@@ -3,16 +3,17 @@ package runtime
 import "context"
 
 type StartSessionRequest struct {
-	AgentID           string
-	Workspace         string
-	Model             string
-	Effort            string
-	PermissionMode    string
-	FastMode          bool
-	YoloMode          bool
-	Env               map[string]string
-	SessionKey        string
-	PreviousSessionID string
+	AgentID              string
+	Workspace            string
+	InstructionWorkspace string
+	Model                string
+	Effort               string
+	PermissionMode       string
+	FastMode             bool
+	YoloMode             bool
+	Env                  map[string]string
+	SessionKey           string
+	PreviousSessionID    string
 }
 
 type Input struct {
@@ -36,11 +37,12 @@ const (
 )
 
 type Event struct {
-	Type     EventType
-	Text     string
-	Thinking string
-	Process  []ProcessItem
-	Error    string
+	Type         EventType
+	Text         string
+	Thinking     string
+	Process      []ProcessItem
+	Error        string
+	StaleSession bool
 }
 
 type ProcessItem struct {

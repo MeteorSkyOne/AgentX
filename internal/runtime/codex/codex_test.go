@@ -37,6 +37,15 @@ func TestBuildArgsStartsAndResumesCodexExec(t *testing.T) {
 	args = rt.buildArgs(req, runtime.Input{Prompt: "quick"})
 	want = []string{"exec", "--json", "--model", "gpt-test", "-c", `model_reasoning_effort="high"`, "-c", `service_tier="fast"`, "-c", "features.fast_mode=true", "--full-auto", "--skip-git-repo-check", "quick"}
 	assertArgs(t, args, want)
+
+	instructionWorkspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(instructionWorkspace, "AGENTS.md"), []byte("agent rule\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	req = runtime.StartSessionRequest{Workspace: "/tmp/project", InstructionWorkspace: instructionWorkspace}
+	args = rt.buildArgs(req, runtime.Input{Prompt: "use memory"})
+	want = []string{"--cd", "/tmp/project", "exec", "--json", "-c", `developer_instructions="agent rule"`, "--full-auto", "--skip-git-repo-check", "use memory"}
+	assertArgs(t, args, want)
 }
 
 func TestLineHandlerParsesCodexJSONEvents(t *testing.T) {
@@ -282,7 +291,7 @@ printf '%s\n' '{"type":"turn.completed"}'
 	if session.CurrentSessionID() != "thread_test" {
 		t.Fatalf("session id = %q", session.CurrentSessionID())
 	}
-	if got := readTrimmed(t, argsFile); !strings.Contains(got, "exec --json --model gpt-test x") {
+	if got := readTrimmed(t, argsFile); !strings.Contains(got, "--cd "+workspace+" exec --json --model gpt-test x") {
 		t.Fatalf("args = %q", got)
 	}
 	if got := readTrimmed(t, cwdFile); got != workspace {

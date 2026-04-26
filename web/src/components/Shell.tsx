@@ -2309,7 +2309,7 @@ function AgentDetailsPanel({
   const [avatarEmoji, setAvatarEmoji] = useState("");
   const [avatarColor, setAvatarColor] = useState("");
   const [activeTab, setActiveTab] = useState("settings");
-  const [filePath, setFilePath] = useState("memory.md");
+  const [filePath, setFilePath] = useState(() => defaultAgentInstructionPath(selectedAgent?.kind));
   const [fileBody, setFileBody] = useState("");
   const [tree, setTree] = useState<WorkspaceTreeEntry>();
   const [workspaceTreeLoading, setWorkspaceTreeLoading] = useState(false);
@@ -2363,6 +2363,7 @@ function AgentDetailsPanel({
     setEnabled(selected.enabled);
     setFastMode(selected.fast_mode);
     setYoloMode(selected.yolo_mode);
+    setFilePath(defaultAgentInstructionPath(selected.kind));
     setEnvBody("{}");
     const av = getAgentAvatar(selected.id);
     setAvatarEmoji(av?.emoji ?? "");
@@ -3004,6 +3005,10 @@ function runWorkspaceOptions(
   }
 
   return options;
+}
+
+function defaultAgentInstructionPath(kind?: string): string {
+  return kind === "claude" ? "CLAUDE.md" : "AGENTS.md";
 }
 
 function blurActiveElement() {

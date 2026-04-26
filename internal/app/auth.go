@@ -171,7 +171,7 @@ func (a *App) Bootstrap(ctx context.Context, req BootstrapRequest) (BootstrapRes
 		if err := tx.Agents().Create(ctx, agent); err != nil {
 			return err
 		}
-		if err := seedAgentMemoryFile(workspace.Path, agent); err != nil {
+		if err := ensureAgentInstructionFiles(workspace.Path, agent); err != nil {
 			return err
 		}
 		if err := tx.ChannelAgents().ReplaceForChannel(ctx, channel.ID, []domain.ChannelAgent{channelAgent}); err != nil {

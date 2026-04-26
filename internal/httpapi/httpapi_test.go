@@ -103,6 +103,20 @@ func TestHTTPAgentCreateAndUpdateRoundTripsEffort(t *testing.T) {
 	if !strings.Contains(memory.Body, "Name: Planner") || !strings.Contains(memory.Body, "Description: Plans implementation work") {
 		t.Fatalf("memory.md = %q", memory.Body)
 	}
+	var agentsFile struct {
+		Body string `json:"body"`
+	}
+	getJSON(t, ts.URL+"/api/workspaces/"+created.ConfigWorkspaceID+"/files?path=AGENTS.md", bootstrap.SessionToken, http.StatusOK, &agentsFile)
+	if !strings.Contains(agentsFile.Body, "Name: Planner") || !strings.Contains(agentsFile.Body, "Description: Plans implementation work") {
+		t.Fatalf("AGENTS.md = %q", agentsFile.Body)
+	}
+	var claudeFile struct {
+		Body string `json:"body"`
+	}
+	getJSON(t, ts.URL+"/api/workspaces/"+created.ConfigWorkspaceID+"/files?path=CLAUDE.md", bootstrap.SessionToken, http.StatusOK, &claudeFile)
+	if strings.TrimSpace(claudeFile.Body) != "@AGENTS.md" {
+		t.Fatalf("CLAUDE.md = %q, want @AGENTS.md", claudeFile.Body)
+	}
 
 	var updated domain.Agent
 	patchJSON(t, ts.URL+"/api/agents/"+created.ID, bootstrap.SessionToken, map[string]any{
@@ -478,7 +492,7 @@ func TestWebSocketReceivesMessageCreated(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(string(payload), string(domain.EventMessageCreated)) {
+		if strings.Contains(string(payload), string(domain.EventMessageCreated)) && strings.Contains(string(payload), "Echo: hello ws") {
 			return
 		}
 	}

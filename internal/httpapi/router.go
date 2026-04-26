@@ -1,9 +1,12 @@
 package httpapi
 
 import (
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/meteorsky/agentx/internal/app"
 	"github.com/meteorsky/agentx/internal/eventbus"
 )
@@ -17,6 +20,7 @@ func NewRouter(a *app.App, bus *eventbus.Bus) http.Handler {
 	s := &Server{app: a, bus: bus}
 
 	r := chi.NewRouter()
+	r.Use(requestLogMiddleware)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -66,4 +70,30 @@ func NewRouter(a *app.App, bus *eventbus.Bus) http.Handler {
 	})
 
 	return r
+}
+
+func requestLogMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startedAt := time.Now()
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		next.ServeHTTP(ww, r)
+
+		status := ww.Status()
+		if status == 0 {
+			status = http.StatusOK
+		}
+		attrs := []any{
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", status,
+			"bytes", ww.BytesWritten(),
+			"duration_ms", time.Since(startedAt).Milliseconds(),
+			"remote_addr", r.RemoteAddr,
+		}
+		if status >= http.StatusInternalServerError {
+			slog.Error("http request failed", attrs...)
+			return
+		}
+		slog.Info("http request completed", attrs...)
+	})
 }

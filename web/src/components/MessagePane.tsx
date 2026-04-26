@@ -182,21 +182,30 @@ function MarkdownFallback({ text }: { text: string }) {
   return <p className="whitespace-pre-wrap">{text}</p>;
 }
 
-function MessageItem({
-  message,
-  agentName,
-  agentKind,
-  agentID,
-  onUpdateMessage,
-  onDeleteMessage,
-}: {
+interface MessageItemProps {
   message: Message;
   agentName?: string;
   agentKind?: string;
   agentID?: string;
   onUpdateMessage: (messageID: string, body: string) => Promise<Message>;
   onDeleteMessage: (message: Message) => Promise<void>;
-}) {
+}
+
+function MessageItem(props: MessageItemProps) {
+  if (isContextSeparatorMessage(props.message)) {
+    return <ContextSeparator message={props.message} />;
+  }
+  return <ConversationMessageItem {...props} />;
+}
+
+function ConversationMessageItem({
+  message,
+  agentName,
+  agentKind,
+  agentID,
+  onUpdateMessage,
+  onDeleteMessage,
+}: MessageItemProps) {
   const [editing, setEditing] = useState(false);
   const [draftBody, setDraftBody] = useState(message.body);
   const [pending, setPending] = useState(false);
@@ -336,6 +345,28 @@ function MessageItem({
         )}
       </div>
     </div>
+  );
+}
+
+function ContextSeparator({ message }: { message: Message }) {
+  return (
+    <div className="flex items-center gap-3 py-2" data-message-id={message.id}>
+      <div className="h-px flex-1 bg-border" />
+      <div className="flex min-w-0 shrink items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground shadow-sm">
+        <span className="truncate font-medium">{message.body}</span>
+        <span className="shrink-0 text-[11px]">{formatTime(message.created_at)}</span>
+      </div>
+      <div className="h-px flex-1 bg-border" />
+    </div>
+  );
+}
+
+function isContextSeparatorMessage(message: Message): boolean {
+  return (
+    message.sender_type === "system" &&
+    message.metadata?.command === true &&
+    message.metadata?.command_name === "new" &&
+    message.metadata?.separator === true
   );
 }
 

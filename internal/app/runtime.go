@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -66,7 +67,14 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 
 	agent := target.Agent
 	workspace := target.RunWorkspace
+	runAttrs := agentRunLogAttrs(runID, userMessage, agent, workspace.Path, target.ConfigWorkspace.Path)
+	slog.Info("agent run starting", runAttrs...)
 	if err := os.MkdirAll(workspace.Path, 0o755); err != nil {
+		a.setFailedAgentSession(ctx, agent.ID, userMessage, "")
+		a.publishAgentRunFailed(userMessage, runID, err)
+		return
+	}
+	if err := ensureAgentInstructionFiles(target.ConfigWorkspace.Path, agent); err != nil {
 		a.setFailedAgentSession(ctx, agent.ID, userMessage, "")
 		a.publishAgentRunFailed(userMessage, runID, err)
 		return
@@ -92,94 +100,126 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 		return
 	}
 
-	sessionKey := agent.ID + ":" + string(userMessage.ConversationType) + ":" + userMessage.ConversationID
-	session, err := rt.StartSession(ctx, agentruntime.StartSessionRequest{
-		AgentID:           agent.ID,
-		Workspace:         workspace.Path,
-		Model:             agent.Model,
-		Effort:            agent.Effort,
-		PermissionMode:    opts.PermissionMode,
-		FastMode:          agent.FastMode,
-		YoloMode:          agent.YoloMode,
-		Env:               agent.Env,
-		SessionKey:        sessionKey,
-		PreviousSessionID: previousSessionID,
-	})
-	if err != nil {
-		a.setFailedAgentSession(ctx, agent.ID, userMessage, "")
-		a.publishAgentRunFailed(userMessage, runID, err)
-		return
-	}
-	defer func() {
-		_ = session.Close(context.WithoutCancel(ctx))
-	}()
-
-	providerSessionID := session.CurrentSessionID()
-	if err := a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, providerSessionID, "running"); err != nil {
-		a.publishAgentRunFailed(userMessage, runID, err)
-		return
-	}
-	a.publishConversationEvent(domain.Event{
-		Type:             domain.EventAgentRunStarted,
-		OrganizationID:   userMessage.OrganizationID,
-		ConversationType: userMessage.ConversationType,
-		ConversationID:   userMessage.ConversationID,
-		Payload:          domain.AgentRunPayload{RunID: runID, AgentID: agent.ID},
-	})
-
 	prompt := opts.Prompt
 	if prompt == "" {
 		prompt = userMessage.Body
 	}
-	if err := session.Send(ctx, agentruntime.Input{Prompt: prompt, Context: runtimeContext}); err != nil {
-		a.setFailedAgentSession(ctx, agent.ID, userMessage, session.CurrentSessionID())
-		a.publishAgentRunFailed(userMessage, runID, err)
-		return
-	}
 
-	var thinkingBuf strings.Builder
-	var processBuf []domain.ProcessItem
+	sessionKey := agent.ID + ":" + string(userMessage.ConversationType) + ":" + userMessage.ConversationID
+	startedPublished := false
 	for {
-		select {
-		case <-ctx.Done():
-			a.setFailedAgentSession(context.WithoutCancel(ctx), agent.ID, userMessage, session.CurrentSessionID())
-			a.publishAgentRunFailed(userMessage, runID, ctx.Err())
+		session, err := rt.StartSession(ctx, agentruntime.StartSessionRequest{
+			AgentID:              agent.ID,
+			Workspace:            workspace.Path,
+			InstructionWorkspace: target.ConfigWorkspace.Path,
+			Model:                agent.Model,
+			Effort:               agent.Effort,
+			PermissionMode:       opts.PermissionMode,
+			FastMode:             agent.FastMode,
+			YoloMode:             agent.YoloMode,
+			Env:                  agent.Env,
+			SessionKey:           sessionKey,
+			PreviousSessionID:    previousSessionID,
+		})
+		if err != nil {
+			slog.Error("agent runtime session start failed", append(runAttrs, "error", err)...)
+			a.setFailedAgentSession(ctx, agent.ID, userMessage, "")
+			a.publishAgentRunFailed(userMessage, runID, err)
 			return
-		case evt, ok := <-session.Events():
-			if !ok {
+		}
+
+		providerSessionID := session.CurrentSessionID()
+		if err := a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, providerSessionID, "running"); err != nil {
+			_ = session.Close(context.WithoutCancel(ctx))
+			a.publishAgentRunFailed(userMessage, runID, err)
+			return
+		}
+		if !startedPublished {
+			startedPublished = true
+			a.publishConversationEvent(domain.Event{
+				Type:             domain.EventAgentRunStarted,
+				OrganizationID:   userMessage.OrganizationID,
+				ConversationType: userMessage.ConversationType,
+				ConversationID:   userMessage.ConversationID,
+				Payload:          domain.AgentRunPayload{RunID: runID, AgentID: agent.ID},
+			})
+		}
+
+		if err := session.Send(ctx, agentruntime.Input{Prompt: prompt, Context: runtimeContext}); err != nil {
+			slog.Error("agent runtime send failed", append(runAttrs, "provider_session_id", session.CurrentSessionID(), "error", err)...)
+			a.setFailedAgentSession(ctx, agent.ID, userMessage, session.CurrentSessionID())
+			a.publishAgentRunFailed(userMessage, runID, err)
+			_ = session.Close(context.WithoutCancel(ctx))
+			return
+		}
+
+		var thinkingBuf strings.Builder
+		var processBuf []domain.ProcessItem
+		retryWithoutPreviousSession := false
+	eventLoop:
+		for {
+			select {
+			case <-ctx.Done():
+				a.setFailedAgentSession(context.WithoutCancel(ctx), agent.ID, userMessage, session.CurrentSessionID())
+				a.publishAgentRunFailed(userMessage, runID, ctx.Err())
+				_ = session.Close(context.WithoutCancel(ctx))
 				return
-			}
-			switch evt.Type {
-			case agentruntime.EventDelta:
-				if evt.Thinking != "" {
-					thinkingBuf.WriteString(evt.Thinking)
+			case evt, ok := <-session.Events():
+				if !ok {
+					_ = session.Close(context.WithoutCancel(ctx))
+					return
 				}
-				process := runtimeProcessItems(evt)
-				processBuf = append(processBuf, process...)
-				a.publishConversationEvent(domain.Event{
-					Type:             domain.EventAgentOutputDelta,
-					OrganizationID:   userMessage.OrganizationID,
-					ConversationType: userMessage.ConversationType,
-					ConversationID:   userMessage.ConversationID,
-					Payload:          domain.AgentOutputDeltaPayload{RunID: runID, AgentID: agent.ID, Text: evt.Text, Thinking: evt.Thinking, Process: process},
-				})
-			case agentruntime.EventCompleted:
-				if evt.Thinking != "" {
-					thinkingBuf.WriteString(evt.Thinking)
-				}
-				processBuf = append(processBuf, runtimeProcessItems(evt)...)
-				a.completeAgentRun(ctx, userMessage, agent, runID, session.CurrentSessionID(), evt.Text, thinkingBuf.String(), processBuf)
-				if opts.OnCompleted != nil {
-					if err := opts.OnCompleted(ctx); err != nil {
-						a.publishAgentRunFailed(userMessage, runID, err)
+				switch evt.Type {
+				case agentruntime.EventDelta:
+					if evt.Thinking != "" {
+						thinkingBuf.WriteString(evt.Thinking)
 					}
+					process := runtimeProcessItems(evt)
+					processBuf = append(processBuf, process...)
+					a.publishConversationEvent(domain.Event{
+						Type:             domain.EventAgentOutputDelta,
+						OrganizationID:   userMessage.OrganizationID,
+						ConversationType: userMessage.ConversationType,
+						ConversationID:   userMessage.ConversationID,
+						Payload:          domain.AgentOutputDeltaPayload{RunID: runID, AgentID: agent.ID, Text: evt.Text, Thinking: evt.Thinking, Process: process},
+					})
+				case agentruntime.EventCompleted:
+					if evt.Thinking != "" {
+						thinkingBuf.WriteString(evt.Thinking)
+					}
+					processBuf = append(processBuf, runtimeProcessItems(evt)...)
+					a.completeAgentRun(ctx, userMessage, agent, runID, session.CurrentSessionID(), evt.Text, thinkingBuf.String(), processBuf)
+					if opts.OnCompleted != nil {
+						if err := opts.OnCompleted(ctx); err != nil {
+							a.publishAgentRunFailed(userMessage, runID, err)
+						}
+					}
+					_ = session.Close(context.WithoutCancel(ctx))
+					return
+				case agentruntime.EventFailed:
+					err := runtimeEventError(evt)
+					if evt.StaleSession && previousSessionID != "" {
+						slog.Warn("agent runtime stale provider session; retrying without resume", append(runAttrs, "provider_session_id", previousSessionID, "error", err)...)
+						if err := a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, "", "stale"); err != nil {
+							a.publishAgentRunFailed(userMessage, runID, err)
+							_ = session.Close(context.WithoutCancel(ctx))
+							return
+						}
+						previousSessionID = ""
+						retryWithoutPreviousSession = true
+						break eventLoop
+					}
+					slog.Error("agent runtime event failed", append(runAttrs, "provider_session_id", session.CurrentSessionID(), "error", err)...)
+					a.setFailedAgentSession(ctx, agent.ID, userMessage, session.CurrentSessionID())
+					a.publishAgentRunFailed(userMessage, runID, err)
+					_ = session.Close(context.WithoutCancel(ctx))
+					return
 				}
-				return
-			case agentruntime.EventFailed:
-				a.setFailedAgentSession(ctx, agent.ID, userMessage, session.CurrentSessionID())
-				a.publishAgentRunFailed(userMessage, runID, runtimeEventError(evt))
-				return
 			}
+		}
+		_ = session.Close(context.WithoutCancel(ctx))
+		if !retryWithoutPreviousSession {
+			return
 		}
 	}
 }
@@ -323,6 +363,20 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 		ConversationID:   userMessage.ConversationID,
 		Payload:          domain.AgentRunPayload{RunID: runID, AgentID: agent.ID},
 	})
+	slog.Info(
+		"agent run completed",
+		"run_id", runID,
+		"agent_id", agent.ID,
+		"agent_kind", agent.Kind,
+		"provider_session_id", providerSessionID,
+		"organization_id", userMessage.OrganizationID,
+		"conversation_type", userMessage.ConversationType,
+		"conversation_id", userMessage.ConversationID,
+		"message_id", userMessage.ID,
+		"response_chars", len([]rune(body)),
+		"thinking_chars", len([]rune(thinking)),
+		"process_items", len(process),
+	)
 }
 
 func (a *App) setFailedAgentSession(ctx context.Context, agentID string, message domain.Message, providerSessionID string) {
@@ -334,6 +388,15 @@ func (a *App) publishAgentRunFailed(message domain.Message, runID string, err er
 	if err != nil {
 		errText = err.Error()
 	}
+	slog.Error(
+		"agent run failed",
+		"run_id", runID,
+		"organization_id", message.OrganizationID,
+		"conversation_type", message.ConversationType,
+		"conversation_id", message.ConversationID,
+		"message_id", message.ID,
+		"error", errText,
+	)
 	a.publishConversationEvent(domain.Event{
 		Type:             domain.EventAgentRunFailed,
 		OrganizationID:   message.OrganizationID,
@@ -354,6 +417,25 @@ func runtimeEventError(evt agentruntime.Event) error {
 		return errors.New(evt.Error)
 	}
 	return errors.New("agent runtime failed")
+}
+
+func agentRunLogAttrs(runID string, message domain.Message, agent domain.Agent, workspace string, instructionWorkspace string) []any {
+	return []any{
+		"run_id", runID,
+		"agent_id", agent.ID,
+		"agent_kind", agent.Kind,
+		"agent_name", agent.Name,
+		"model", agent.Model,
+		"effort", agent.Effort,
+		"fast_mode", agent.FastMode,
+		"yolo_mode", agent.YoloMode,
+		"organization_id", message.OrganizationID,
+		"conversation_type", message.ConversationType,
+		"conversation_id", message.ConversationID,
+		"message_id", message.ID,
+		"workspace", workspace,
+		"instruction_workspace", instructionWorkspace,
+	}
 }
 
 func runtimeProcessItems(evt agentruntime.Event) []domain.ProcessItem {

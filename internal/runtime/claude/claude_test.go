@@ -67,6 +67,60 @@ func TestBuildArgsStartsAndResumesClaudePrint(t *testing.T) {
 		"--append-system-prompt", "be brief", "quick",
 	}
 	assertArgs(t, args, want)
+
+	projectWorkspace := filepath.Join(t.TempDir(), "project")
+	instructionWorkspace := filepath.Join(t.TempDir(), "agent")
+	req = runtime.StartSessionRequest{Workspace: projectWorkspace, InstructionWorkspace: instructionWorkspace}
+	args = rt.buildArgs(req, runtime.Input{Prompt: "use memory"})
+	want = []string{
+		"--print", "--verbose", "--output-format", "stream-json", "--input-format", "text",
+		"--permission-mode", "acceptEdits",
+		"--allowedTools", "Read,Bash", "--disallowedTools", "WebSearch",
+		"--append-system-prompt", "be brief", "--add-dir", instructionWorkspace, "--", "use memory",
+	}
+	assertArgs(t, args, want)
+	if got := rt.buildEnv(req)["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"]; got != "1" {
+		t.Fatalf("CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD = %q, want 1", got)
+	}
+}
+
+func TestBuildArgsAppendsExpandedAgentWorkspaceInstructions(t *testing.T) {
+	tempDir := t.TempDir()
+	projectWorkspace := filepath.Join(tempDir, "project")
+	instructionWorkspace := filepath.Join(tempDir, "agent")
+	if err := os.Mkdir(projectWorkspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(instructionWorkspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(instructionWorkspace, "AGENTS.md"), []byte("你的名字是claudef，你是一只猫娘，每句话以喵~结尾\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(instructionWorkspace, "CLAUDE.md"), []byte("@AGENTS.md\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := Runtime{opts: Options{PermissionMode: "acceptEdits", AppendSystemPrompt: "base prompt"}}
+	args := rt.buildArgs(runtime.StartSessionRequest{
+		Workspace:            projectWorkspace,
+		InstructionWorkspace: instructionWorkspace,
+	}, runtime.Input{Prompt: "你是猫娘吗"})
+
+	prompt := argAfter(t, args, "--append-system-prompt")
+	if !strings.Contains(prompt, "base prompt") {
+		t.Fatalf("append prompt = %q, want base prompt", prompt)
+	}
+	if !strings.Contains(prompt, "AgentX agent workspace instructions") || !strings.Contains(prompt, "你是一只猫娘") {
+		t.Fatalf("append prompt = %q, want expanded agent workspace instructions", prompt)
+	}
+	wantSuffix := []string{"--add-dir", instructionWorkspace, "--", "你是猫娘吗"}
+	gotSuffix := args[len(args)-len(wantSuffix):]
+	for i := range gotSuffix {
+		if gotSuffix[i] != wantSuffix[i] {
+			t.Fatalf("args suffix = %#v, want %#v", gotSuffix, wantSuffix)
+		}
+	}
 }
 
 func TestLineHandlerParsesClaudeStreamJSON(t *testing.T) {
@@ -188,6 +242,36 @@ func TestCompletedResultDoesNotIncludeThinking(t *testing.T) {
 	}
 }
 
+func TestErrorResultIncludesRawPayload(t *testing.T) {
+	handler := newLineHandler("fallback")
+
+	events, err := handler.HandleLine([]byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"uuid":"u1","permission_denials":[{"tool":"Bash"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != runtime.EventFailed {
+		t.Fatalf("events = %#v", events)
+	}
+	if !strings.Contains(events[0].Error, "error_during_execution") || !strings.Contains(events[0].Error, "permission_denials") {
+		t.Fatalf("error = %q, want raw error details", events[0].Error)
+	}
+}
+
+func TestErrorResultMarksStaleSession(t *testing.T) {
+	handler := newLineHandler("fallback")
+
+	events, err := handler.HandleLine([]byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["No conversation found with session ID: cff6d6ca-8603-49ff-a850-2c2f2c1496d7"],"session_id":"15bf2ee8-9c49-4ef2-9594-2551960067e1"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != runtime.EventFailed {
+		t.Fatalf("events = %#v", events)
+	}
+	if !events[0].StaleSession {
+		t.Fatalf("stale session = false, want true for error %q", events[0].Error)
+	}
+}
+
 func TestRuntimeExecutesClaudeCommandWithoutModelCall(t *testing.T) {
 	tempDir := t.TempDir()
 	command := writeExecutable(t, tempDir, "claude", `#!/bin/sh
@@ -253,6 +337,17 @@ func assertArgs(t *testing.T, got []string, want []string) {
 			t.Fatalf("args = %#v, want %#v", got, want)
 		}
 	}
+}
+
+func argAfter(t *testing.T, args []string, flag string) string {
+	t.Helper()
+	for i, arg := range args {
+		if arg == flag && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	t.Fatalf("flag %q not found in %#v", flag, args)
+	return ""
 }
 
 func writeExecutable(t *testing.T, dir string, name string, body string) string {

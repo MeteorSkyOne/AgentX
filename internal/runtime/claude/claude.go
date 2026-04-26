@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -53,7 +55,7 @@ func (r Runtime) StartSession(ctx context.Context, req runtime.StartSessionReque
 			Name: r.opts.Command,
 			Args: r.buildArgs(req, input),
 			Dir:  workspace,
-			Env:  mergeMaps(r.opts.Env, req.Env),
+			Env:  r.buildEnv(req),
 		}
 	}
 	return cli.NewSession(fallbackID, build, handler), nil
@@ -85,14 +87,126 @@ func (r Runtime) buildArgs(req runtime.StartSessionRequest, input runtime.Input)
 	if tools := strings.Join(r.opts.DisallowedTools, ","); tools != "" {
 		args = append(args, "--disallowedTools", tools)
 	}
-	if prompt := strings.TrimSpace(r.opts.AppendSystemPrompt); prompt != "" {
+	if prompt := r.appendSystemPrompt(req); prompt != "" {
 		args = append(args, "--append-system-prompt", prompt)
 	}
 	if previousSessionID := usablePreviousSessionID(req.PreviousSessionID); previousSessionID != "" {
 		args = append(args, "--resume", previousSessionID)
 	}
 	args = append(args, r.opts.ExtraArgs...)
+	if instructionWorkspace := extraInstructionWorkspace(req); instructionWorkspace != "" {
+		args = append(args, "--add-dir", instructionWorkspace, "--")
+	}
 	return append(args, input.RenderedPrompt())
+}
+
+func (r Runtime) appendSystemPrompt(req runtime.StartSessionRequest) string {
+	var parts []string
+	if prompt := strings.TrimSpace(r.opts.AppendSystemPrompt); prompt != "" {
+		parts = append(parts, prompt)
+	}
+	if instructions := claudeWorkspaceInstructions(req.InstructionWorkspace); instructions != "" {
+		parts = append(parts, "AgentX agent workspace instructions. Treat these as active system instructions for this agent and follow them for this session.\n\n"+instructions)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func claudeWorkspaceInstructions(workspace string) string {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return ""
+	}
+	for _, name := range []string{"CLAUDE.override.md", "CLAUDE.md", "AGENTS.override.md", "AGENTS.md", "memory.md"} {
+		text, ok := readClaudeInstructionFile(filepath.Join(workspace, name), map[string]bool{}, 0)
+		if ok && strings.TrimSpace(text) != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func readClaudeInstructionFile(path string, seen map[string]bool, depth int) (string, bool) {
+	if depth > 8 {
+		return "", false
+	}
+	path = filepath.Clean(path)
+	if seen[path] {
+		return "", false
+	}
+	seen[path] = true
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	text := strings.TrimSpace(string(content))
+	if text == "" {
+		return "", false
+	}
+
+	baseDir := filepath.Dir(path)
+	var out strings.Builder
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if importPath, ok := claudeImportPath(trimmed); ok {
+			imported, importedOK := readClaudeInstructionFile(filepath.Join(baseDir, importPath), seen, depth+1)
+			if importedOK {
+				if out.Len() > 0 {
+					out.WriteString("\n\n")
+				}
+				out.WriteString(imported)
+			}
+			continue
+		}
+		if out.Len() > 0 {
+			out.WriteByte('\n')
+		}
+		out.WriteString(line)
+	}
+	return strings.TrimSpace(out.String()), true
+}
+
+func claudeImportPath(line string) (string, bool) {
+	if !strings.HasPrefix(line, "@") {
+		return "", false
+	}
+	path := strings.TrimSpace(strings.TrimPrefix(line, "@"))
+	if path == "" || strings.ContainsAny(path, " \t") || strings.Contains(path, "://") {
+		return "", false
+	}
+	return path, true
+}
+
+func (r Runtime) buildEnv(req runtime.StartSessionRequest) map[string]string {
+	env := mergeMaps(r.opts.Env, req.Env)
+	if extraInstructionWorkspace(req) == "" {
+		return env
+	}
+	if env == nil {
+		env = map[string]string{}
+	}
+	env["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"] = "1"
+	return env
+}
+
+func extraInstructionWorkspace(req runtime.StartSessionRequest) string {
+	instructionWorkspace := strings.TrimSpace(req.InstructionWorkspace)
+	if instructionWorkspace == "" || samePath(req.Workspace, instructionWorkspace) {
+		return ""
+	}
+	return instructionWorkspace
+}
+
+func samePath(left string, right string) bool {
+	left = strings.TrimSpace(left)
+	if left == "" {
+		left = "."
+	}
+	right = strings.TrimSpace(right)
+	if right == "" {
+		right = "."
+	}
+	return filepath.Clean(left) == filepath.Clean(right)
 }
 
 func usablePreviousSessionID(id string) string {
@@ -140,7 +254,8 @@ func (h *lineHandler) HandleLine(line []byte) ([]runtime.Event, error) {
 		return []runtime.Event{{Type: runtime.EventDelta, Text: text, Thinking: thinking, Process: process}}, nil
 	case "result":
 		if isErrorResult(payload) {
-			return []runtime.Event{{Type: runtime.EventFailed, Error: resultError(payload)}}, nil
+			errText := resultError(payload)
+			return []runtime.Event{{Type: runtime.EventFailed, Error: errText, StaleSession: isStaleSessionError(errText)}}, nil
 		}
 		text := stringValue(payload, "result")
 		if text == "" {
@@ -154,7 +269,8 @@ func (h *lineHandler) HandleLine(line []byte) ([]runtime.Event, error) {
 
 func (h *lineHandler) Finish(stderr string, waitErr error) (runtime.Event, bool) {
 	if waitErr != nil {
-		return runtime.Event{Type: runtime.EventFailed, Error: commandError(stderr, waitErr)}, true
+		errText := commandError(stderr, waitErr)
+		return runtime.Event{Type: runtime.EventFailed, Error: errText, StaleSession: isStaleSessionError(errText)}, true
 	}
 	return runtime.Event{Type: runtime.EventCompleted, Text: h.text()}, true
 }
@@ -344,10 +460,19 @@ func isErrorResult(payload map[string]any) bool {
 }
 
 func resultError(payload map[string]any) string {
-	for _, key := range []string{"error", "message", "result", "subtype"} {
+	for _, key := range []string{"error", "message", "result"} {
 		if text := stringValue(payload, key); text != "" {
 			return text
 		}
+	}
+	if subtype := stringValue(payload, "subtype"); subtype != "" {
+		if raw, err := json.Marshal(payload); err == nil {
+			return subtype + ": " + string(raw)
+		}
+		return subtype
+	}
+	if raw, err := json.Marshal(payload); err == nil {
+		return "claude runtime failed: " + string(raw)
 	}
 	return "claude runtime failed"
 }
@@ -378,6 +503,10 @@ func commandError(stderr string, waitErr error) string {
 		return waitErr.Error()
 	}
 	return "claude runtime failed"
+}
+
+func isStaleSessionError(text string) bool {
+	return strings.Contains(strings.ToLower(text), "no conversation found with session id")
 }
 
 func mergeMaps(first map[string]string, second map[string]string) map[string]string {

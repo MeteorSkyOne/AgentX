@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -56,7 +59,11 @@ func (r Runtime) StartSession(ctx context.Context, req runtime.StartSessionReque
 }
 
 func (r Runtime) buildArgs(req runtime.StartSessionRequest, input runtime.Input) []string {
-	args := []string{"exec"}
+	var args []string
+	if workspace := strings.TrimSpace(req.Workspace); workspace != "" {
+		args = append(args, "--cd", workspace)
+	}
+	args = append(args, "exec")
 	previousSessionID := usablePreviousSessionID(req.PreviousSessionID)
 	if previousSessionID != "" {
 		args = append(args, "resume")
@@ -72,6 +79,9 @@ func (r Runtime) buildArgs(req runtime.StartSessionRequest, input runtime.Input)
 	if req.FastMode {
 		args = append(args, "-c", `service_tier="fast"`, "-c", "features.fast_mode=true")
 	}
+	if instructions := codexDeveloperInstructions(req); instructions != "" {
+		args = append(args, "-c", "developer_instructions="+strconv.Quote(instructions))
+	}
 	if r.opts.BypassSandbox || req.YoloMode {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	} else if r.opts.FullAuto {
@@ -85,6 +95,35 @@ func (r Runtime) buildArgs(req runtime.StartSessionRequest, input runtime.Input)
 		args = append(args, previousSessionID)
 	}
 	return append(args, input.RenderedPrompt())
+}
+
+func codexDeveloperInstructions(req runtime.StartSessionRequest) string {
+	instructionWorkspace := strings.TrimSpace(req.InstructionWorkspace)
+	if instructionWorkspace == "" || samePath(req.Workspace, instructionWorkspace) {
+		return ""
+	}
+	for _, name := range []string{"AGENTS.override.md", "AGENTS.md"} {
+		content, err := os.ReadFile(filepath.Join(instructionWorkspace, name))
+		if err != nil {
+			continue
+		}
+		if text := strings.TrimSpace(string(content)); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func samePath(left string, right string) bool {
+	left = strings.TrimSpace(left)
+	if left == "" {
+		left = "."
+	}
+	right = strings.TrimSpace(right)
+	if right == "" {
+		right = "."
+	}
+	return filepath.Clean(left) == filepath.Clean(right)
 }
 
 func usablePreviousSessionID(id string) string {

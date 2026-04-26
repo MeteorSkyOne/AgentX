@@ -6,8 +6,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -77,6 +79,7 @@ func (s *Session) Send(ctx context.Context, input runtime.Input) error {
 	s.mu.Unlock()
 
 	command := s.build(input)
+	slog.Info("agent cli command starting", "session_id", s.fallbackID, "command", command.Name, "args", safeCommandArgs(command.Args), "dir", command.Dir)
 	cmd := exec.CommandContext(runCtx, command.Name, command.Args...)
 	if command.Dir != "" {
 		cmd.Dir = command.Dir
@@ -85,20 +88,23 @@ func (s *Session) Send(ctx context.Context, input runtime.Input) error {
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		slog.Error("agent cli stdout pipe failed", "session_id", s.fallbackID, "command", command.Name, "dir", command.Dir, "error", err)
 		s.finishStartFailure(cancel)
 		return err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		slog.Error("agent cli stderr pipe failed", "session_id", s.fallbackID, "command", command.Name, "dir", command.Dir, "error", err)
 		s.finishStartFailure(cancel)
 		return err
 	}
 	if err := cmd.Start(); err != nil {
+		slog.Error("agent cli command start failed", "session_id", s.fallbackID, "command", command.Name, "args", safeCommandArgs(command.Args), "dir", command.Dir, "error", err)
 		s.finishStartFailure(cancel)
 		return err
 	}
 
-	go s.run(runCtx, cancel, cmd, stdout, stderr)
+	go s.run(runCtx, cancel, cmd, command, stdout, stderr)
 	return nil
 }
 
@@ -147,7 +153,7 @@ func (s *Session) Close(ctx context.Context) error {
 	}
 }
 
-func (s *Session) run(ctx context.Context, cancel context.CancelFunc, cmd *exec.Cmd, stdout io.Reader, stderr io.Reader) {
+func (s *Session) run(ctx context.Context, cancel context.CancelFunc, cmd *exec.Cmd, command Command, stdout io.Reader, stderr io.Reader) {
 	defer cancel()
 	defer func() {
 		s.mu.Lock()
@@ -167,9 +173,31 @@ func (s *Session) run(ctx context.Context, cancel context.CancelFunc, cmd *exec.
 	terminalEmitted := s.scanStdout(ctx, stdout)
 	waitErr := cmd.Wait()
 	stderrWG.Wait()
+	stderrText := stderrBuffer.String()
+
+	if waitErr != nil {
+		slog.Error(
+			"agent cli command failed",
+			"session_id", s.fallbackID,
+			"provider_session_id", s.CurrentSessionID(),
+			"command", command.Name,
+			"args", safeCommandArgs(command.Args),
+			"dir", command.Dir,
+			"error", waitErr,
+			"stderr", truncateForLog(stderrText, 4000),
+		)
+	} else {
+		slog.Info(
+			"agent cli command completed",
+			"session_id", s.fallbackID,
+			"provider_session_id", s.CurrentSessionID(),
+			"command", command.Name,
+			"dir", command.Dir,
+		)
+	}
 
 	if !terminalEmitted {
-		if evt, ok := s.handler.Finish(stderrBuffer.String(), waitErr); ok {
+		if evt, ok := s.handler.Finish(stderrText, waitErr); ok {
 			s.emit(evt)
 		}
 	}
@@ -187,6 +215,7 @@ func (s *Session) scanStdout(ctx context.Context, stdout io.Reader) bool {
 		}
 		events, err := s.handler.HandleLine(line)
 		if err != nil {
+			slog.Error("agent cli output parse failed", "session_id", s.fallbackID, "provider_session_id", s.CurrentSessionID(), "error", err, "line", truncateForLog(string(line), 4000))
 			terminalEmitted = true
 			s.emit(runtime.Event{Type: runtime.EventFailed, Error: err.Error()})
 			continue
@@ -200,6 +229,7 @@ func (s *Session) scanStdout(ctx context.Context, stdout io.Reader) bool {
 	}
 
 	if err := scanner.Err(); err != nil && ctx.Err() == nil {
+		slog.Error("agent cli stdout scan failed", "session_id", s.fallbackID, "provider_session_id", s.CurrentSessionID(), "error", err)
 		terminalEmitted = true
 		s.emit(runtime.Event{Type: runtime.EventFailed, Error: err.Error()})
 	}
@@ -254,6 +284,47 @@ func mergeEnv(base []string, overrides map[string]string) []string {
 		env = append(env, key+"="+value)
 	}
 	return env
+}
+
+func safeCommandArgs(args []string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	safe := append([]string(nil), args...)
+	for i, arg := range safe {
+		if i == len(safe)-1 {
+			safe[i] = redactedArg("prompt", arg)
+			continue
+		}
+		if strings.HasPrefix(arg, "developer_instructions=") {
+			key, value, _ := strings.Cut(arg, "=")
+			safe[i] = key + "=" + redactedArg("value", value)
+			continue
+		}
+		if i > 0 && safe[i-1] == "--append-system-prompt" {
+			safe[i] = redactedArg("system-prompt", arg)
+		}
+	}
+	return safe
+}
+
+func redactedArg(label string, value string) string {
+	if value == "" {
+		return "<" + label + ":0 chars>"
+	}
+	return "<" + label + ":" + strconv.Itoa(len([]rune(value))) + " chars>"
+}
+
+func truncateForLog(text string, limit int) string {
+	text = strings.TrimSpace(text)
+	if text == "" || limit <= 0 {
+		return text
+	}
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return string(runes[:limit]) + "\n[truncated]"
 }
 
 type lockedBuffer struct {

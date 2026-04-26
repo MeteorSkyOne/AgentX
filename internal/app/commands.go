@@ -90,14 +90,20 @@ func slashTargetToken(field string) (string, bool) {
 }
 
 func (a *App) dispatchSlashCommand(ctx context.Context, req SendMessageRequest, agents []ConversationAgentContext, command slashCommand) (domain.Message, error) {
+	if command.Name == "new" {
+		targets, err := resolveNewCommandTargets(agents, command.Targets)
+		if err != nil {
+			return domain.Message{}, err
+		}
+		return a.handleNewCommand(ctx, req, targets, len(command.Targets) == 0)
+	}
+
 	target, err := resolveSlashCommandTarget(agents, command.Targets)
 	if err != nil {
 		return domain.Message{}, err
 	}
 
 	switch command.Name {
-	case "new":
-		return a.handleNewCommand(ctx, req, target)
 	case "compact":
 		return a.handleCompactCommand(ctx, req, target, command.Args)
 	case "model":
@@ -152,15 +158,90 @@ func resolveSlashCommandTarget(agents []ConversationAgentContext, handles []stri
 	return ConversationAgentContext{}, commandInputError(fmt.Sprintf("unknown agent @%s", uniqueHandles[0]))
 }
 
-func (a *App) handleNewCommand(ctx context.Context, req SendMessageRequest, target ConversationAgentContext) (domain.Message, error) {
-	message, err := a.createSystemMessage(ctx, req, fmt.Sprintf("Started a new context for @%s.", target.Agent.Handle))
+func resolveNewCommandTargets(agents []ConversationAgentContext, handles []string) ([]ConversationAgentContext, error) {
+	if len(agents) == 0 {
+		return nil, commandInputError("no agents are available in this conversation")
+	}
+	uniqueHandles := make([]string, 0, len(handles))
+	seen := make(map[string]struct{}, len(handles))
+	for _, handle := range handles {
+		handle = strings.ToLower(strings.TrimSpace(handle))
+		if handle == "" {
+			continue
+		}
+		if _, ok := seen[handle]; ok {
+			continue
+		}
+		seen[handle] = struct{}{}
+		uniqueHandles = append(uniqueHandles, handle)
+	}
+	if len(uniqueHandles) == 0 {
+		return agents, nil
+	}
+
+	targets := make([]ConversationAgentContext, 0, len(uniqueHandles))
+	for _, handle := range uniqueHandles {
+		var found bool
+		for _, agent := range agents {
+			if strings.EqualFold(agent.Agent.Handle, handle) {
+				targets = append(targets, agent)
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, commandInputError(fmt.Sprintf("unknown agent @%s", handle))
+		}
+	}
+	return targets, nil
+}
+
+func (a *App) handleNewCommand(ctx context.Context, req SendMessageRequest, targets []ConversationAgentContext, allAgents bool) (domain.Message, error) {
+	agentIDs := make([]string, 0, len(targets))
+	agentHandles := make([]string, 0, len(targets))
+	for _, target := range targets {
+		agentIDs = append(agentIDs, target.Agent.ID)
+		agentHandles = append(agentHandles, target.Agent.Handle)
+	}
+
+	message, err := a.createCommandSystemMessage(ctx, req, newContextMessageBody(agentHandles, allAgents), map[string]any{
+		"command_name":  "new",
+		"separator":     true,
+		"agent_ids":     agentIDs,
+		"agent_handles": agentHandles,
+		"scope":         newContextScope(allAgents),
+	})
 	if err != nil {
 		return domain.Message{}, err
 	}
-	if err := a.store.Sessions().ResetAgentSessionContext(ctx, target.Agent.ID, req.ConversationType, req.ConversationID, time.Now().UTC()); err != nil {
-		return domain.Message{}, err
+	boundary := time.Now().UTC()
+	for _, target := range targets {
+		if err := a.store.Sessions().ResetAgentSessionContext(ctx, target.Agent.ID, req.ConversationType, req.ConversationID, boundary); err != nil {
+			return domain.Message{}, err
+		}
 	}
 	return message, nil
+}
+
+func newContextMessageBody(handles []string, allAgents bool) string {
+	if allAgents {
+		return "New context for all agents"
+	}
+	if len(handles) == 1 {
+		return fmt.Sprintf("New context for @%s", handles[0])
+	}
+	mentions := make([]string, 0, len(handles))
+	for _, handle := range handles {
+		mentions = append(mentions, "@"+handle)
+	}
+	return "New context for " + strings.Join(mentions, ", ")
+}
+
+func newContextScope(allAgents bool) string {
+	if allAgents {
+		return "all"
+	}
+	return "selected"
 }
 
 func (a *App) handleCompactCommand(ctx context.Context, req SendMessageRequest, target ConversationAgentContext, args string) (domain.Message, error) {
@@ -253,7 +334,15 @@ func commandRunPrompt(commandName string, args string, agent domain.Agent) (stri
 }
 
 func (a *App) createSystemMessage(ctx context.Context, req SendMessageRequest, body string) (domain.Message, error) {
-	return a.createConversationMessage(ctx, req, domain.SenderSystem, "system", body, map[string]any{"command": true})
+	return a.createCommandSystemMessage(ctx, req, body, nil)
+}
+
+func (a *App) createCommandSystemMessage(ctx context.Context, req SendMessageRequest, body string, metadata map[string]any) (domain.Message, error) {
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	metadata["command"] = true
+	return a.createConversationMessage(ctx, req, domain.SenderSystem, "system", body, metadata)
 }
 
 func (a *App) createConversationMessage(ctx context.Context, req SendMessageRequest, senderType domain.SenderType, senderID string, body string, metadata map[string]any) (domain.Message, error) {
