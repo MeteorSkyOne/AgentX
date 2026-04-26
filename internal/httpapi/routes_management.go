@@ -580,6 +580,24 @@ func (s *Server) handleSetChannelAgents(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, redactConversationAgents(agents))
 }
 
+func (s *Server) handleWorkspace(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	workspace, ok, err := s.authorizedWorkspace(r, userID, chi.URLParam(r, "workspaceID"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, workspace)
+}
+
 func (s *Server) handleWorkspaceTree(w http.ResponseWriter, r *http.Request) {
 	userID, ok := userIDFromContext(r.Context())
 	if !ok {

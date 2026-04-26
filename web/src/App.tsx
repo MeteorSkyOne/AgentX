@@ -24,7 +24,9 @@ import {
   updateAgent,
   updateChannel,
   updateMessage,
+  updateProject,
   updateThread,
+  workspace,
   workspaceFile,
   workspaceTree
 } from "./api/client";
@@ -123,6 +125,12 @@ export default function App() {
     () => projectsQuery.data?.find((project) => project.id === selectedProjectID),
     [projectsQuery.data, selectedProjectID]
   );
+
+  const selectedProjectWorkspaceQuery = useQuery({
+    queryKey: ["workspace", selectedProject?.workspace_id],
+    queryFn: () => workspace(selectedProject!.workspace_id),
+    enabled: hasSession && Boolean(selectedProject?.workspace_id)
+  });
 
   const channelsQuery = useQuery({
     queryKey: ["project-channels", selectedProjectID],
@@ -505,6 +513,18 @@ export default function App() {
     return created;
   }
 
+  async function handleUpdateProject(
+    projectID: string,
+    payload: { name?: string; workspace_path?: string }
+  ): Promise<Project> {
+    const updated = await updateProject(projectID, payload);
+    await queryClient.invalidateQueries({ queryKey: ["projects", selectedOrganizationID] });
+    await queryClient.invalidateQueries({ queryKey: ["conversation-context"] });
+    await queryClient.invalidateQueries({ queryKey: ["channel-agents", selectedChannelID] });
+    await queryClient.invalidateQueries({ queryKey: ["workspace", updated.workspace_id] });
+    return updated;
+  }
+
   async function handleCreateChannel(name: string, type: Channel["type"]): Promise<Channel> {
     const created = await createChannel(selectedProjectID as string, name, type);
     await queryClient.invalidateQueries({ queryKey: ["project-channels", selectedProjectID] });
@@ -652,6 +672,7 @@ export default function App() {
       organization={selectedOrganization}
       projects={projectsQuery.data ?? []}
       project={selectedProject}
+      projectWorkspace={selectedProjectWorkspaceQuery.data}
       channels={channelsQuery.data ?? []}
       selectedChannel={selectedChannel}
       activeConversation={activeConversation}
@@ -668,6 +689,7 @@ export default function App() {
       theme={theme}
       onSelectProject={handleSelectProject}
       onCreateProject={handleCreateProject}
+      onUpdateProject={handleUpdateProject}
       onSelectChannel={selectChannel}
       onCreateChannel={handleCreateChannel}
       onUpdateChannel={handleUpdateChannel}

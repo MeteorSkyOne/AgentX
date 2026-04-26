@@ -9,7 +9,6 @@ import {
   Database,
   FileText,
   Folder,
-  FolderClosed,
   FolderOpen,
   Hash,
   Home,
@@ -23,8 +22,6 @@ import {
   Save,
   Send,
   Settings,
-  Sliders,
-  SlidersHorizontal,
   Sun,
   Trash2,
   Eye,
@@ -49,6 +46,7 @@ import type {
   Project,
   Thread,
   User,
+  Workspace,
   WorkspaceTreeEntry
 } from "../api/types";
 import {
@@ -89,7 +87,6 @@ import {
   agentKindColor,
   getAgentAvatar,
   setAgentAvatar,
-  type AgentAvatarData,
 } from "./AgentAvatar";
 import type { ThemeMode } from "../theme";
 
@@ -114,6 +111,7 @@ interface ShellProps {
   organization?: Organization;
   projects: Project[];
   project?: Project;
+  projectWorkspace?: Workspace;
   channels: Channel[];
   selectedChannel?: Channel;
   activeConversation?: ActiveConversation;
@@ -130,6 +128,10 @@ interface ShellProps {
   theme: ThemeMode;
   onSelectProject: (projectID: string) => void;
   onCreateProject: (name: string) => Promise<Project>;
+  onUpdateProject: (
+    projectID: string,
+    payload: { name?: string; workspace_path?: string }
+  ) => Promise<Project>;
   onSelectChannel: (channel: Channel) => void;
   onCreateChannel: (name: string, type: Channel["type"]) => Promise<Channel>;
   onUpdateChannel: (channelID: string, name: string) => Promise<Channel>;
@@ -172,6 +174,7 @@ export function Shell({
   organization,
   projects,
   project,
+  projectWorkspace,
   channels,
   selectedChannel,
   activeConversation,
@@ -188,6 +191,7 @@ export function Shell({
   theme,
   onSelectProject,
   onCreateProject,
+  onUpdateProject,
   onSelectChannel,
   onCreateChannel,
   onUpdateChannel,
@@ -214,6 +218,14 @@ export function Shell({
   const [membersPanelOpen, setMembersPanelOpen] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [projectDraftOpen, setProjectDraftOpen] = useState(false);
+  const [projectEditOpen, setProjectEditOpen] = useState(false);
+  const [projectEditName, setProjectEditName] = useState("");
+  const [projectEditWorkspacePath, setProjectEditWorkspacePath] = useState("");
+  const [projectEditEmoji, setProjectEditEmoji] = useState("");
+  const [projectEditColor, setProjectEditColor] = useState("");
+  const [projectEditError, setProjectEditError] = useState<string | null>(null);
+  const [projectEditPending, setProjectEditPending] = useState(false);
+  const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
   const [channelDraftOpen, setChannelDraftOpen] = useState(false);
   const [channelName, setChannelName] = useState("");
   const [channelType, setChannelType] = useState<Channel["type"]>("text");
@@ -246,6 +258,31 @@ export function Shell({
     setThreadEditOpen(false);
   }, [activeThread?.id]);
 
+  useEffect(() => {
+    if (project) {
+      setProjectEditName(project.name);
+      setProjectEditWorkspacePath(projectWorkspace?.path ?? "");
+      const avatar = getProjectAvatar(project.id);
+      setProjectEditEmoji(avatar?.emoji ?? "");
+      setProjectEditColor(avatar?.color ?? "");
+    }
+    setProjectEditError(null);
+    setProjectEditOpen(false);
+  }, [project?.id]);
+
+  useEffect(() => {
+    if (!projectEditOpen) {
+      setProjectEditName(project?.name ?? "");
+      setProjectEditWorkspacePath(projectWorkspace?.path ?? "");
+    }
+  }, [project?.name, projectWorkspace?.path, projectEditOpen]);
+
+  useEffect(() => {
+    if (projectEditOpen && !projectEditWorkspacePath && projectWorkspace?.path) {
+      setProjectEditWorkspacePath(projectWorkspace.path);
+    }
+  }, [projectEditOpen, projectEditWorkspacePath, projectWorkspace?.path]);
+
   async function submitProject() {
     const name = projectName.trim();
     if (!name) return;
@@ -253,6 +290,57 @@ export function Shell({
     setProjectName("");
     setProjectDraftOpen(false);
     onSelectProject(created.id);
+  }
+
+  async function submitProjectEdit() {
+    if (!project) return;
+    const name = projectEditName.trim();
+    const workspacePath = projectEditWorkspacePath.trim();
+    if (!name || !workspacePath) return;
+    setProjectEditError(null);
+    setProjectEditPending(true);
+    try {
+      await onUpdateProject(project.id, {
+        name,
+        workspace_path: workspacePath,
+      });
+      setProjectAvatar(
+        project.id,
+        projectEditEmoji.trim()
+          ? {
+              emoji: projectEditEmoji.trim(),
+              color: projectEditColor || "bg-primary",
+            }
+          : null
+      );
+      setProjectEditOpen(false);
+    } catch (err) {
+      setProjectEditError(err instanceof Error ? err.message : "Update project failed");
+    } finally {
+      setProjectEditPending(false);
+    }
+  }
+
+  function openProjectSettings() {
+    if (!project) return;
+    blurActiveElement();
+    setProjectEditName(project.name);
+    setProjectEditWorkspacePath(projectWorkspace?.path ?? "");
+    const avatar = getProjectAvatar(project.id);
+    setProjectEditEmoji(avatar?.emoji ?? "");
+    setProjectEditColor(avatar?.color ?? "");
+    setProjectEditError(null);
+    setProjectEditOpen(true);
+  }
+
+  function openCreateProject() {
+    blurActiveElement();
+    setProjectDraftOpen(true);
+  }
+
+  function openAccountSettings() {
+    blurActiveElement();
+    setAccountSettingsOpen(true);
   }
 
   async function submitChannel() {
@@ -285,6 +373,17 @@ export function Shell({
       });
       if (newAgentEmoji) {
         setAgentAvatar(created.id, { emoji: newAgentEmoji, color: newAgentColor || agentKindColor(newAgentKind) });
+      }
+      if (selectedChannel) {
+        await onSaveChannelAgents([
+          ...boundAgents
+            .filter((item) => item.agent.id !== created.id)
+            .map((item) => ({
+              agent_id: item.agent.id,
+              run_workspace_id: item.binding.run_workspace_id || undefined,
+            })),
+          { agent_id: created.id },
+        ]);
       }
       setNewAgentName("");
       setNewAgentHandle("");
@@ -342,7 +441,7 @@ export function Shell({
         : undefined;
 
   return (
-    <div className="flex h-screen w-screen">
+    <div className="flex h-screen w-screen select-none">
       {/* Project Rail */}
       <TooltipProvider delayDuration={0}>
         <div className="flex h-full w-[72px] flex-col items-center gap-2 border-r border-sidebar-border/70 bg-sidebar py-3">
@@ -361,28 +460,41 @@ export function Shell({
 
           <ScrollArea className="min-h-0 w-full flex-1">
             <div className="flex flex-col items-center gap-2">
-              {projects.map((item) => (
-                <Tooltip key={item.id}>
-                  <TooltipTrigger asChild>
-                    <button
-                      className={cn(
-                        "relative flex h-12 w-12 items-center justify-center rounded-2xl bg-secondary text-secondary-foreground transition-all hover:rounded-xl hover:bg-primary hover:text-primary-foreground",
-                        item.id === project?.id &&
-                          "rounded-xl bg-primary text-primary-foreground"
-                      )}
-                      title={item.name}
-                      aria-label={item.name}
-                      onClick={() => onSelectProject(item.id)}
-                    >
-                      <span className="text-lg font-semibold">{initials(item.name)}</span>
-                      {item.id === project?.id && (
-                        <div className="absolute -left-3 h-10 w-1 rounded-r-full bg-foreground" />
-                      )}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">{item.name}</TooltipContent>
-                </Tooltip>
-              ))}
+              {projects.map((item) => {
+                const avatar = getProjectAvatar(item.id);
+                const isSelected = item.id === project?.id;
+                return (
+                  <Tooltip key={item.id}>
+                    <TooltipTrigger asChild>
+                      <button
+                        className={cn(
+                          "relative flex h-12 w-12 items-center justify-center rounded-2xl transition-all hover:rounded-xl",
+                          avatar?.emoji
+                            ? cn("text-white", avatar.color || "bg-primary")
+                            : "bg-secondary text-secondary-foreground hover:bg-primary hover:text-primary-foreground",
+                          isSelected &&
+                            (avatar?.emoji
+                              ? "rounded-xl ring-2 ring-ring ring-offset-2 ring-offset-sidebar"
+                              : "rounded-xl bg-primary text-primary-foreground")
+                        )}
+                        title={item.name}
+                        aria-label={item.name}
+                        onClick={() => onSelectProject(item.id)}
+                      >
+                        {avatar?.emoji ? (
+                          <span className="text-xl">{avatar.emoji}</span>
+                        ) : (
+                          <span className="text-lg font-semibold">{initials(item.name)}</span>
+                        )}
+                        {isSelected && (
+                          <div className="absolute -left-3 h-10 w-1 rounded-r-full bg-foreground" />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">{item.name}</TooltipContent>
+                  </Tooltip>
+                );
+              })}
             </div>
           </ScrollArea>
 
@@ -395,7 +507,7 @@ export function Shell({
                 )}
                 title="Create project"
                 aria-label="Create project"
-                onClick={() => setProjectDraftOpen(true)}
+                onClick={openCreateProject}
               >
                 <Plus className="h-5 w-5" />
               </button>
@@ -445,7 +557,15 @@ export function Shell({
               <h2 className="truncate text-base font-semibold">
                 {project?.name ?? "No project"}
               </h2>
-              <Button variant="ghost" size="icon" className="h-8 w-8">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="Project settings"
+                aria-label="Project settings"
+                disabled={!project}
+                onClick={openProjectSettings}
+              >
                 <ChevronDown className="h-4 w-4" />
               </Button>
             </div>
@@ -484,7 +604,14 @@ export function Shell({
                 <p className="text-sm font-medium">{user.display_name}</p>
                 <p className="text-xs text-muted-foreground">online</p>
               </div>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onLogout}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="User settings"
+                aria-label="User settings"
+                onClick={openAccountSettings}
+              >
                 <Settings className="h-4 w-4" />
               </Button>
             </div>
@@ -573,11 +700,12 @@ export function Shell({
                   variant="ghost"
                   size="icon"
                   className="h-8 w-8"
-                  title="Agent settings"
-                  aria-label="Agent settings"
-                  onClick={() => setAgentPanelOpen((open) => !open)}
+                  title="Project settings"
+                  aria-label="Project settings"
+                  disabled={!project}
+                  onClick={openProjectSettings}
                 >
-                  <SlidersHorizontal className="h-4 w-4" />
+                  <Settings className="h-4 w-4" />
                 </Button>
               </div>
             </div>
@@ -627,6 +755,7 @@ export function Shell({
               <MembersPanel
                 agents={activeAgents}
                 boundAgents={boundAgents}
+                projectWorkspace={projectWorkspace}
                 selectedChannel={selectedChannel}
                 onSaveChannelAgents={onSaveChannelAgents}
                 onClose={() => setMembersPanelOpen(false)}
@@ -642,6 +771,7 @@ export function Shell({
             <ResizablePanel defaultSize={27} minSize={20} maxSize={35}>
               <AgentDetailsPanel
                 selectedChannel={selectedChannel}
+                projectWorkspace={projectWorkspace}
                 agents={activeAgents}
                 boundAgents={boundAgents}
                 selectedAgent={selectedAgent}
@@ -685,9 +815,144 @@ export function Shell({
         </DialogContent>
       </Dialog>
 
+      {/* Account Settings Modal */}
+      <Dialog open={accountSettingsOpen} onOpenChange={setAccountSettingsOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>User settings</DialogTitle>
+            <DialogDescription>Session and workspace details.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid gap-3 rounded-md border border-border p-3 text-sm">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-muted-foreground">User</span>
+                <span className="truncate font-medium">{user.display_name}</span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-muted-foreground">Organization</span>
+                <span className="truncate font-medium">{organization?.name ?? "None"}</span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-muted-foreground">Project</span>
+                <span className="truncate font-medium">{project?.name ?? "None"}</span>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAccountSettingsOpen(false)}>
+              Close
+            </Button>
+            <Button variant="destructive" onClick={onLogout}>
+              <LogOut className="h-4 w-4" />
+              Log out
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Project Modal */}
+      <Dialog open={projectEditOpen} onOpenChange={setProjectEditOpen}>
+        <DialogContent onOpenAutoFocus={(event) => event.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle>Project settings</DialogTitle>
+            <DialogDescription>Update this project.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="flex items-center gap-4">
+              <div
+                className={cn(
+                  "flex h-14 w-14 shrink-0 items-center justify-center rounded-xl text-white",
+                  projectEditEmoji ? projectEditColor || "bg-primary" : "bg-primary"
+                )}
+              >
+                {projectEditEmoji ? (
+                  <span className="text-2xl">{projectEditEmoji}</span>
+                ) : (
+                  <span className="text-lg font-semibold">{initials(projectEditName || project?.name || "Project")}</span>
+                )}
+              </div>
+              <div className="min-w-0 flex-1 space-y-2">
+                <Input
+                  value={projectEditEmoji}
+                  onChange={(e) => setProjectEditEmoji(e.target.value)}
+                  placeholder="Icon emoji"
+                  aria-label="Project icon"
+                />
+                <div className="flex flex-wrap gap-1.5">
+                  {AVATAR_COLORS.map((color) => (
+                    <button
+                      key={color}
+                      className={cn(
+                        "h-5 w-5 rounded-full transition-all",
+                        color,
+                        projectEditColor === color
+                          ? "ring-2 ring-ring ring-offset-1 ring-offset-background"
+                          : "opacity-60 hover:opacity-100"
+                      )}
+                      aria-label="Project color"
+                      onClick={() => setProjectEditColor(color)}
+                      type="button"
+                    />
+                  ))}
+                  {projectEditEmoji && (
+                    <button
+                      className="h-5 rounded-full border border-border px-2 text-[10px] text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        setProjectEditEmoji("");
+                        setProjectEditColor("");
+                      }}
+                      type="button"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="project-edit-name">Project name</Label>
+              <Input
+                id="project-edit-name"
+                value={projectEditName}
+                onChange={(e) => setProjectEditName(e.target.value)}
+                aria-label="Project name"
+                onKeyDown={(e) => { if (e.key === "Enter") void submitProjectEdit(); }}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="project-edit-workspace">Workspace path</Label>
+              <Input
+                id="project-edit-workspace"
+                value={projectEditWorkspacePath}
+                onChange={(e) => setProjectEditWorkspacePath(e.target.value)}
+                placeholder={projectWorkspace ? "" : "Loading workspace..."}
+                aria-label="Workspace path"
+                onKeyDown={(e) => { if (e.key === "Enter") void submitProjectEdit(); }}
+              />
+            </div>
+            {projectEditError && <p className="text-sm text-destructive">{projectEditError}</p>}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setProjectEditOpen(false)}
+              disabled={projectEditPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={submitProjectEdit}
+              disabled={!projectEditName.trim() || !projectEditWorkspacePath.trim() || projectEditPending}
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Create Project Modal */}
       <Dialog open={projectDraftOpen} onOpenChange={setProjectDraftOpen}>
-        <DialogContent>
+        <DialogContent onOpenAutoFocus={(event) => event.preventDefault()}>
           <DialogHeader>
             <DialogTitle>Create project</DialogTitle>
             <DialogDescription>Add a new project to organize your channels and agents.</DialogDescription>
@@ -702,7 +967,6 @@ export function Shell({
                 placeholder="My Project"
                 aria-label="Project name"
                 onKeyDown={(e) => { if (e.key === "Enter") submitProject(); }}
-                autoFocus
               />
             </div>
           </div>
@@ -955,26 +1219,32 @@ function AgentsSidebar({
 function MembersPanel({
   agents,
   boundAgents,
+  projectWorkspace,
   selectedChannel,
   onSaveChannelAgents,
   onClose,
 }: {
   agents: Agent[];
   boundAgents: ConversationAgentContext[];
+  projectWorkspace?: Workspace;
   selectedChannel?: Channel;
   onSaveChannelAgents: ShellProps["onSaveChannelAgents"];
   onClose: () => void;
 }) {
   const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const [runWorkspaceIDs, setRunWorkspaceIDs] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const next: Record<string, boolean> = {};
+    const nextRunWorkspaces: Record<string, string> = {};
     for (const item of boundAgents) {
       next[item.agent.id] = true;
+      nextRunWorkspaces[item.agent.id] = item.binding.run_workspace_id ?? "";
     }
     setChecked(next);
+    setRunWorkspaceIDs(nextRunWorkspaces);
     setDirty(false);
   }, [boundAgents]);
 
@@ -988,13 +1258,10 @@ function MembersPanel({
     try {
       const bindings = agents
         .filter((a) => checked[a.id])
-        .map((a) => {
-          const existing = boundAgents.find((b) => b.agent.id === a.id);
-          return {
-            agent_id: a.id,
-            run_workspace_id: existing?.binding.run_workspace_id || undefined,
-          };
-        });
+        .map((a) => ({
+          agent_id: a.id,
+          run_workspace_id: runWorkspaceIDs[a.id]?.trim() || undefined,
+        }));
       await onSaveChannelAgents(bindings);
       setDirty(false);
     } finally {
@@ -1028,31 +1295,48 @@ function MembersPanel({
                 Bound — {bound.length}
               </p>
               {bound.map((a) => (
-                <label
+                <div
                   key={a.id}
-                  className="picker-row flex items-center gap-2.5 rounded-md px-2 py-2 hover:bg-accent/50 cursor-pointer"
+                  className="picker-row rounded-md px-2 py-2 hover:bg-accent/50"
                 >
-                  <input
-                    type="checkbox"
-                    checked
-                    onChange={() => toggle(a.id, false)}
-                    className="rounded border-border"
-                  />
-                  <div className="relative">
-                    <AgentAvatar agentID={a.id} kind={a.kind} size="sm" />
-                    <div className={cn(
-                      "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card",
-                      a.enabled ? "bg-green-500" : "bg-gray-500"
-                    )} />
+                  <div className="flex items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked
+                      onChange={() => toggle(a.id, false)}
+                      className="rounded border-border"
+                    />
+                    <div className="relative">
+                      <AgentAvatar agentID={a.id} kind={a.kind} size="sm" />
+                      <div className={cn(
+                        "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card",
+                        a.enabled ? "bg-green-500" : "bg-gray-500"
+                      )} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{a.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">@{a.handle}</p>
+                    </div>
+                    <Badge variant="outline" className={cn("shrink-0 text-[10px]", agentToneColor(a.kind))}>
+                      {agentKindLabel(a.kind)}
+                    </Badge>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{a.name}</p>
-                    <p className="text-xs text-muted-foreground truncate">@{a.handle}</p>
-                  </div>
-                  <Badge variant="outline" className={cn("text-[10px] shrink-0", agentToneColor(a.kind))}>
-                    {agentKindLabel(a.kind)}
-                  </Badge>
-                </label>
+                  <select
+                    value={runWorkspaceIDs[a.id] ?? ""}
+                    onChange={(e) => {
+                      setRunWorkspaceIDs((current) => ({ ...current, [a.id]: e.target.value }));
+                      setDirty(true);
+                    }}
+                    aria-label={`${a.name} run workspace`}
+                    className="mt-2 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+                  >
+                    {runWorkspaceOptions(a, boundAgents, projectWorkspace).map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               ))}
             </div>
           )}
@@ -1270,6 +1554,7 @@ function ThreadForum({
 
 function AgentDetailsPanel({
   selectedChannel,
+  projectWorkspace,
   agents,
   boundAgents,
   selectedAgent,
@@ -1283,6 +1568,7 @@ function AgentDetailsPanel({
   onClose
 }: {
   selectedChannel?: Channel;
+  projectWorkspace?: Workspace;
   agents: Agent[];
   boundAgents: ConversationContext["agents"];
   selectedAgent?: Agent;
@@ -1469,7 +1755,15 @@ function AgentDetailsPanel({
         </div>
         <div className="workspace-path mt-2 flex items-center gap-1 text-xs text-muted-foreground">
           <Database className="h-3 w-3" />
-          <span>{selectedBinding?.config_workspace.path ?? selected?.config_workspace_id ?? ""}</span>
+          <span className="truncate">
+            Run: {selectedBinding?.run_workspace.path ?? projectWorkspace?.path ?? "project workspace"}
+          </span>
+        </div>
+        <div className="workspace-path mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+          <FolderOpen className="h-3 w-3" />
+          <span className="truncate">
+            Own: {selectedBinding?.config_workspace.path ?? selected?.config_workspace_id ?? ""}
+          </span>
         </div>
         <div className="mt-1 text-xs text-muted-foreground">
           {envEntries.length > 0
@@ -1637,26 +1931,31 @@ function AgentDetailsPanel({
                 {selectedChannel ? `#${selectedChannel.name}` : "No channel selected"}
               </p>
               {agents.map((a) => (
-                <label key={a.id} className="picker-row flex items-center gap-2 rounded-lg border border-border p-3">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(checkedAgents[a.id])}
-                    onChange={(e) =>
-                      setCheckedAgents((c) => ({ ...c, [a.id]: e.target.checked }))
-                    }
-                    className="rounded border-border"
-                  />
-                  <div className="flex-1">
-                    <span className="text-sm font-medium">{a.name}</span>
-                    <Input
-                      value={overrides[a.id] ?? ""}
-                      onChange={(e) => setOverrides((c) => ({ ...c, [a.id]: e.target.value }))}
-                      placeholder="Workspace override"
-                      aria-label={`${a.name} workspace override`}
-                      className="mt-1 text-xs"
+                <div key={a.id} className="picker-row rounded-lg border border-border p-3">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(checkedAgents[a.id])}
+                      onChange={(e) =>
+                        setCheckedAgents((c) => ({ ...c, [a.id]: e.target.checked }))
+                      }
+                      className="rounded border-border"
                     />
-                  </div>
-                </label>
+                    <span className="text-sm font-medium">{a.name}</span>
+                  </label>
+                  <select
+                    value={overrides[a.id] ?? ""}
+                    onChange={(e) => setOverrides((c) => ({ ...c, [a.id]: e.target.value }))}
+                    aria-label={`${a.name} run workspace`}
+                    className="mt-2 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+                  >
+                    {runWorkspaceOptions(a, boundAgents, projectWorkspace).map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               ))}
               <Button size="sm" className="w-full gap-2" onClick={saveBindings}>
                 <Save className="h-4 w-4" />
@@ -1795,6 +2094,85 @@ function flattenTree(tree: WorkspaceTreeEntry, depth = 0): Array<WorkspaceTreeEn
   const current = { ...tree, depth };
   const children = tree.children?.flatMap((child) => flattenTree(child, depth + 1)) ?? [];
   return [current, ...children];
+}
+
+function runWorkspaceOptions(
+  agent: Agent,
+  boundAgents: ConversationAgentContext[],
+  projectWorkspace?: Workspace
+): Array<{ value: string; label: string }> {
+  const bound = boundAgents.find((item) => item.agent.id === agent.id);
+  const currentOverride = bound?.binding.run_workspace_id ?? "";
+  const ownWorkspaceID = agent.config_workspace_id || agent.default_workspace_id;
+  const options = [
+    {
+      value: "",
+      label: projectWorkspace?.path
+        ? `Project workspace - ${projectWorkspace.path}`
+        : "Project workspace",
+    },
+  ];
+
+  if (ownWorkspaceID) {
+    options.push({
+      value: ownWorkspaceID,
+      label: bound?.config_workspace.path
+        ? `Agent workspace - ${bound.config_workspace.path}`
+        : "Agent workspace",
+    });
+  }
+
+  if (currentOverride && currentOverride !== ownWorkspaceID) {
+    const isProjectWorkspace = currentOverride === projectWorkspace?.id;
+    options.push({
+      value: currentOverride,
+      label: isProjectWorkspace
+        ? "Project workspace (pinned)"
+        : `Custom workspace - ${bound?.run_workspace.path ?? currentOverride}`,
+    });
+  }
+
+  return options;
+}
+
+function blurActiveElement() {
+  const active = document.activeElement;
+  if (active instanceof HTMLElement) {
+    active.blur();
+  }
+}
+
+const projectAvatarStorageKey = "agentx.project_avatars";
+
+interface ProjectAvatarData {
+  emoji: string;
+  color: string;
+}
+
+function getProjectAvatar(projectID: string): ProjectAvatarData | null {
+  try {
+    const raw = localStorage.getItem(projectAvatarStorageKey);
+    if (!raw) return null;
+    const map = JSON.parse(raw) as Record<string, ProjectAvatarData>;
+    return map[projectID] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function setProjectAvatar(projectID: string, data: ProjectAvatarData | null): void {
+  try {
+    const raw = localStorage.getItem(projectAvatarStorageKey);
+    const map: Record<string, ProjectAvatarData> = raw ? JSON.parse(raw) : {};
+    if (data) {
+      map[projectID] = data;
+    } else {
+      delete map[projectID];
+    }
+    localStorage.setItem(projectAvatarStorageKey, JSON.stringify(map));
+  } catch {
+    // ignore
+  }
 }
 
 function conversationTitle(

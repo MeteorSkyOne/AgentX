@@ -12,6 +12,7 @@ import type {
   Project,
   Thread,
   User,
+  Workspace,
   WorkspaceFile,
   WorkspaceTreeEntry
 } from "./types";
@@ -119,6 +120,10 @@ export function updateProject(
     method: "PATCH",
     body: JSON.stringify(payload)
   });
+}
+
+export function workspace(workspaceID: string): Promise<Workspace> {
+  return request<Workspace>(`/api/workspaces/${encodeURIComponent(workspaceID)}`);
 }
 
 export function projectChannels(projectID: string): Promise<Channel[]> {

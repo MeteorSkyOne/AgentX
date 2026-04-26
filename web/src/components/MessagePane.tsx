@@ -239,7 +239,7 @@ function MessageItem({
         </Avatar>
       )}
 
-      <div className="flex-1 space-y-1">
+      <div className="flex-1 select-text space-y-1">
         <div className="flex items-center gap-2">
           <span className="font-semibold">{label}</span>
           {isBot && (
@@ -314,7 +314,7 @@ function MessageItem({
         ) : (
           <>
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <div className="prose prose-sm max-w-none dark:prose-invert">
+            <div className="prose prose-sm max-w-none select-text dark:prose-invert">
               <MarkdownRenderer text={message.body} />
             </div>
           </>
@@ -357,7 +357,7 @@ function StreamingItem({
         </Avatar>
       )}
 
-      <div className="flex-1 space-y-1">
+      <div className="flex-1 select-text space-y-1">
         <div className="flex items-center gap-2">
           <span className="font-semibold">{label}</span>
           {!isError && (
@@ -368,7 +368,7 @@ function StreamingItem({
           <span className="text-xs text-muted-foreground animate-pulse">streaming...</span>
         </div>
         {process.length > 0 && <ProcessBlock items={process} />}
-        <div className="prose prose-sm max-w-none dark:prose-invert">
+        <div className="prose prose-sm max-w-none select-text dark:prose-invert">
           <MarkdownRenderer text={item.error ?? item.text} />
         </div>
       </div>

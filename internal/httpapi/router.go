@@ -49,6 +49,7 @@ func NewRouter(a *app.App, bus *eventbus.Bus) http.Handler {
 			r.Delete("/threads/{threadID}", s.handleArchiveThread)
 			r.Patch("/agents/{agentID}", s.handleUpdateAgent)
 			r.Delete("/agents/{agentID}", s.handleDisableAgent)
+			r.Get("/workspaces/{workspaceID}", s.handleWorkspace)
 			r.Get("/workspaces/{workspaceID}/tree", s.handleWorkspaceTree)
 			r.Get("/workspaces/{workspaceID}/files", s.handleWorkspaceFile)
 			r.Put("/workspaces/{workspaceID}/files", s.handlePutWorkspaceFile)

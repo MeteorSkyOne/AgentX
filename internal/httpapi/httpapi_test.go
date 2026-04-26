@@ -218,6 +218,37 @@ func TestHTTPWorkspaceFilesRejectTraversalAndRoundTripText(t *testing.T) {
 	putJSON(t, ts.URL+"/api/workspaces/"+bootstrap.Workspace.ID+"/files?path=/tmp/secret", bootstrap.SessionToken, map[string]string{"body": "bad"}, http.StatusBadRequest, nil)
 }
 
+func TestHTTPWorkspaceMetadataAndProjectWorkspacePathUpdate(t *testing.T) {
+	ts := newTestServer(t)
+
+	var bootstrap app.BootstrapResult
+	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	}, http.StatusOK, &bootstrap)
+
+	var workspace domain.Workspace
+	getJSON(t, ts.URL+"/api/workspaces/"+bootstrap.ProjectWorkspace.ID, bootstrap.SessionToken, http.StatusOK, &workspace)
+	if workspace.ID != bootstrap.ProjectWorkspace.ID || workspace.Path != bootstrap.ProjectWorkspace.Path {
+		t.Fatalf("workspace = %#v, want project workspace %#v", workspace, bootstrap.ProjectWorkspace)
+	}
+
+	nextPath := bootstrap.ProjectWorkspace.Path + "-next"
+	var project domain.Project
+	patchJSON(t, ts.URL+"/api/projects/"+bootstrap.Project.ID, bootstrap.SessionToken, map[string]string{
+		"name":           "Renamed",
+		"workspace_path": nextPath,
+	}, http.StatusOK, &project)
+	if project.Name != "Renamed" {
+		t.Fatalf("project name = %q, want Renamed", project.Name)
+	}
+
+	getJSON(t, ts.URL+"/api/workspaces/"+project.WorkspaceID, bootstrap.SessionToken, http.StatusOK, &workspace)
+	if workspace.Path != nextPath {
+		t.Fatalf("workspace path = %q, want %q", workspace.Path, nextPath)
+	}
+}
+
 func TestHTTPBoundNonChannelConversationsCanSendAndListMessages(t *testing.T) {
 	env := newTestEnv(t)
 
