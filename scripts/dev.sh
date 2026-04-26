@@ -17,13 +17,13 @@ if [[ "${AGENTX_DEV_DRY_RUN:-}" == "1" ]]; then
   echo "AGENTX_DATA_DIR=$data_dir"
   echo "AGENTX_SQLITE_PATH=$sqlite_path"
   echo "go run ./cmd/agentx"
-  echo "npm run dev -- --host $web_host --port $web_port"
+  echo "pnpm run dev -- --host $web_host --port $web_port"
   exit 0
 fi
 
 if [[ ! -d web/node_modules ]]; then
   echo "Installing web dependencies..."
-  (cd web && npm install)
+  (cd web && pnpm install)
 fi
 
 pids=()
@@ -53,7 +53,7 @@ pids+=("$!")
 echo "Starting AgentX web at http://$web_host:$web_port"
 (
   cd web
-  npm run dev -- --host "$web_host" --port "$web_port"
+  pnpm run dev -- --host "$web_host" --port "$web_port"
 ) &
 pids+=("$!")
 

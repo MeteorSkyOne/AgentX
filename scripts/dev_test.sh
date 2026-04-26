@@ -35,7 +35,7 @@ case "$output" in
 esac
 
 case "$output" in
-  *"npm run dev -- --host 127.0.0.1 --port 5173"* ) ;;
+  *"pnpm run dev -- --host 127.0.0.1 --port 5173"* ) ;;
   * )
     echo "dry run did not include default vite host and port" >&2
     echo "$output" >&2

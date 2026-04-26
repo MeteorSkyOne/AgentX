@@ -21,9 +21,9 @@ go test ./internal/app/...                 # Single package
 go test ./internal/app/... -run TestName   # Single test
 
 # Frontend
-cd web && npm test                         # Vitest unit tests
-cd web && npm run e2e                      # Playwright E2E (needs: npx playwright install chromium)
-cd web && npm run dev                      # Dev server only
+cd web && pnpm test                        # Vitest unit tests
+cd web && pnpm run e2e                     # Playwright E2E (needs: pnpm exec playwright install chromium)
+cd web && pnpm run dev                     # Dev server only
 ```
 
 ## Architecture

@@ -14,4 +14,4 @@ dev:
 	bash scripts/dev.sh
 
 web-build:
-	cd web && npm install && npm run build
+	cd web && pnpm install --frozen-lockfile && pnpm run build

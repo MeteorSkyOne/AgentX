@@ -25,6 +25,8 @@ make dev
 
 This starts the API on `127.0.0.1:8080`, the web client on `127.0.0.1:5173`, and uses the bootstrap token `dev-token`.
 
+The frontend uses pnpm. If pnpm is not already available, enable Corepack once with `corepack enable`.
+
 Run the backend only:
 
 ```sh
@@ -49,7 +51,7 @@ Codex uses `codex exec --json` and Claude Code uses `claude --print --output-for
 Run the web client:
 
 ```sh
-cd web && npm install && npm run dev
+cd web && pnpm install && pnpm run dev
 ```
 
 Open `http://127.0.0.1:5173` and bootstrap with `dev-token`.
@@ -59,16 +61,16 @@ Open `http://127.0.0.1:5173` and bootstrap with `dev-token`.
 ```sh
 go test ./...
 bash scripts/dev_test.sh
-cd web && npm test
-cd web && npm run build
+cd web && pnpm test
+cd web && pnpm run build
 ```
 
 Run the browser e2e smoke test:
 
 ```sh
 cd web
-npx playwright install chromium
-npm run e2e
+pnpm exec playwright install chromium
+pnpm run e2e
 ```
 
-On Linux, Playwright may also need system browser libraries. Install them once with `npx playwright install-deps chromium` when the environment allows it.
+On Linux, Playwright may also need system browser libraries. Install them once with `pnpm exec playwright install-deps chromium` when the environment allows it.

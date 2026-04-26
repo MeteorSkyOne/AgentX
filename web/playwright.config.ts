@@ -25,7 +25,7 @@ export default defineConfig({
     },
     {
       command:
-        "AGENTX_API_TARGET=http://127.0.0.1:18080 npm run dev -- --host 127.0.0.1 --port 5174",
+        "AGENTX_API_TARGET=http://127.0.0.1:18080 pnpm run dev -- --host 127.0.0.1 --port 5174",
       url: "http://127.0.0.1:5174",
       timeout: 30_000,
       reuseExistingServer: false
