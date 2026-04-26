@@ -74,6 +74,58 @@ func TestHTTPBootstrapAuthAndMessagesFlow(t *testing.T) {
 	})
 }
 
+func TestHTTPAgentCreateAndUpdateRoundTripsEffort(t *testing.T) {
+	ts := newTestServer(t)
+
+	var bootstrap app.BootstrapResult
+	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	}, http.StatusOK, &bootstrap)
+
+	var created domain.Agent
+	postJSON(t, ts.URL+"/api/organizations/"+bootstrap.Organization.ID+"/agents", bootstrap.SessionToken, map[string]any{
+		"name":   "Planner",
+		"handle": "planner",
+		"kind":   "codex",
+		"model":  "gpt-test",
+		"effort": "medium",
+	}, http.StatusOK, &created)
+	if created.Effort != "medium" {
+		t.Fatalf("created effort = %q, want medium", created.Effort)
+	}
+
+	var updated domain.Agent
+	patchJSON(t, ts.URL+"/api/agents/"+created.ID, bootstrap.SessionToken, map[string]any{
+		"effort": "high",
+	}, http.StatusOK, &updated)
+	if updated.Effort != "high" || updated.Model != "gpt-test" {
+		t.Fatalf("updated agent = %#v", updated)
+	}
+}
+
+func TestHTTPSlashCommandErrorsAndSuccess(t *testing.T) {
+	ts := newTestServer(t)
+
+	var bootstrap app.BootstrapResult
+	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	}, http.StatusOK, &bootstrap)
+
+	postJSON(t, ts.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages", bootstrap.SessionToken, map[string]string{
+		"body": "/does-not-exist",
+	}, http.StatusBadRequest, nil)
+
+	var message domain.Message
+	postJSON(t, ts.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages", bootstrap.SessionToken, map[string]string{
+		"body": "/effort high",
+	}, http.StatusOK, &message)
+	if message.SenderType != domain.SenderSystem || !strings.Contains(message.Body, "effort") {
+		t.Fatalf("slash command response = %#v", message)
+	}
+}
+
 func TestHTTPMessagesCanBeUpdatedAndDeleted(t *testing.T) {
 	ts := newTestServer(t)
 

@@ -25,7 +25,7 @@ export default defineConfig({
     },
     {
       command:
-        "AGENTX_API_TARGET=http://127.0.0.1:18080 pnpm run dev -- --host 127.0.0.1 --port 5174",
+        "AGENTX_API_TARGET=http://127.0.0.1:18080 pnpm exec vite --host 127.0.0.1 --port 5174 --strictPort",
       url: "http://127.0.0.1:5174",
       timeout: 30_000,
       reuseExistingServer: false
@@ -33,8 +33,19 @@ export default defineConfig({
   ],
   projects: [
     {
-      name: "chromium",
+      name: "desktop-chromium",
+      testMatch: /(?:app|screenshots)\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] }
+    },
+    {
+      name: "mobile-chrome",
+      testMatch: /(?:mobile|screenshots)\.spec\.ts/,
+      use: { ...devices["Pixel 5"], browserName: "chromium" }
+    },
+    {
+      name: "mobile-iphone",
+      testMatch: /(?:mobile|screenshots)\.spec\.ts/,
+      use: { ...devices["iPhone 12"], browserName: "chromium" }
     }
   ]
 });

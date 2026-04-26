@@ -283,6 +283,7 @@ type AgentCreateRequest struct {
 	Handle         string
 	Kind           string
 	Model          string
+	Effort         string
 	YoloMode       bool
 	Env            map[string]string
 }
@@ -323,6 +324,7 @@ func (a *App) CreateAgent(ctx context.Context, req AgentCreateRequest) (domain.A
 		Name:               name,
 		Handle:             handle,
 		Model:              strings.TrimSpace(req.Model),
+		Effort:             strings.TrimSpace(req.Effort),
 		ConfigWorkspaceID:  workspace.ID,
 		DefaultWorkspaceID: workspace.ID,
 		Enabled:            true,
@@ -357,6 +359,7 @@ type AgentUpdateRequest struct {
 	Handle   *string
 	Kind     *string
 	Model    *string
+	Effort   *string
 	Enabled  *bool
 	YoloMode *bool
 	Env      map[string]string
@@ -398,6 +401,9 @@ func (a *App) UpdateAgent(ctx context.Context, agentID string, req AgentUpdateRe
 	}
 	if req.Model != nil {
 		agent.Model = strings.TrimSpace(*req.Model)
+	}
+	if req.Effort != nil {
+		agent.Effort = strings.TrimSpace(*req.Effort)
 	}
 	if req.Enabled != nil {
 		agent.Enabled = *req.Enabled

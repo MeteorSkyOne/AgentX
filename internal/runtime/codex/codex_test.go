@@ -27,6 +27,11 @@ func TestBuildArgsStartsAndResumesCodexExec(t *testing.T) {
 	args = rt.buildArgs(req, runtime.Input{Prompt: "ship it"})
 	want = []string{"exec", "--json", "--model", "gpt-test", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "ship it"}
 	assertArgs(t, args, want)
+
+	req = runtime.StartSessionRequest{Model: "gpt-test", Effort: "high"}
+	args = rt.buildArgs(req, runtime.Input{Prompt: "think"})
+	want = []string{"exec", "--json", "--model", "gpt-test", "-c", `model_reasoning_effort="high"`, "--full-auto", "--skip-git-repo-check", "think"}
+	assertArgs(t, args, want)
 }
 
 func TestLineHandlerParsesCodexJSONEvents(t *testing.T) {

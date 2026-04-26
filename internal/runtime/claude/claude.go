@@ -64,8 +64,13 @@ func (r Runtime) buildArgs(req runtime.StartSessionRequest, input runtime.Input)
 	if model := strings.TrimSpace(req.Model); model != "" {
 		args = append(args, "--model", model)
 	}
+	if effort := strings.TrimSpace(req.Effort); effort != "" {
+		args = append(args, "--effort", effort)
+	}
 	mode := strings.TrimSpace(r.opts.PermissionMode)
-	if req.YoloMode {
+	if override := strings.TrimSpace(req.PermissionMode); override != "" {
+		mode = override
+	} else if req.YoloMode {
 		mode = "bypassPermissions"
 	}
 	if mode != "" {

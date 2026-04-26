@@ -8,6 +8,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "e2e": "LD_LIBRARY_PATH=../.playwright-libs/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH playwright test",
+    "e2e:screenshots": "rm -rf ../.agentx-screenshot && AGENTX_CAPTURE_SCREENSHOTS=1 LD_LIBRARY_PATH=../.playwright-libs/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH playwright test e2e/screenshots.spec.ts",
     "typecheck": "tsc -b",
     "test": "vitest run"
   },

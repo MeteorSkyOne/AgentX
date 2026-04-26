@@ -98,7 +98,7 @@ export function MessagePane({
 
   if (isLoading) {
     return (
-      <section className="flex flex-1 items-center justify-center">
+      <section className="flex min-h-0 flex-1 items-center justify-center">
         <span className="text-sm text-muted-foreground">Loading messages...</span>
       </section>
     );
@@ -106,7 +106,7 @@ export function MessagePane({
 
   if (messages.length === 0 && streaming.length === 0) {
     return (
-      <section className="flex flex-1 flex-col items-center justify-center gap-3">
+      <section className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
         <MessageSquare className="h-12 w-12 text-muted-foreground" />
         <span className="text-sm text-muted-foreground">No messages yet</span>
       </section>
@@ -120,7 +120,7 @@ export function MessagePane({
       viewportRef={viewportRef}
       onViewportScroll={handleScroll}
     >
-      <section className="p-4">
+      <section className="p-3 md:p-4">
         <div className="space-y-4">
           {isLoadingOlder && (
             <div className="py-2 text-center text-xs text-muted-foreground">
@@ -228,7 +228,7 @@ function MessageItem({
 
   return (
     <div
-      className="group flex gap-4 rounded-md px-2 py-1 hover:bg-accent/30"
+      className="group flex gap-3 rounded-md px-1 py-1 hover:bg-accent/30 md:gap-4 md:px-2"
       data-message-id={message.id}
     >
       {isBot && agentID ? (
@@ -239,8 +239,8 @@ function MessageItem({
         </Avatar>
       )}
 
-      <div className="flex-1 select-text space-y-1">
-        <div className="flex items-center gap-2">
+      <div className="min-w-0 flex-1 select-text space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="font-semibold">{label}</span>
           {isBot && (
             <Badge variant="secondary" className="text-xs">
@@ -251,7 +251,7 @@ function MessageItem({
             {formatTime(message.created_at)}
           </span>
           {!editing && (
-            <div className="ml-auto flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+            <div className="ml-auto flex items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
               <Button
                 variant="ghost"
                 size="icon"
@@ -314,7 +314,7 @@ function MessageItem({
         ) : (
           <>
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <div className="prose prose-sm max-w-none select-text dark:prose-invert">
+            <div className="prose prose-sm max-w-none overflow-hidden break-words select-text dark:prose-invert">
               <MarkdownRenderer text={message.body} />
             </div>
           </>
@@ -340,7 +340,7 @@ function StreamingItem({
   const process = processFromStreaming(item);
 
   return (
-    <div className={cn("group flex gap-4 rounded-md px-2 py-1", isError && "opacity-70")}>
+    <div className={cn("group flex gap-3 rounded-md px-1 py-1 md:gap-4 md:px-2", isError && "opacity-70")}>
       {isError ? (
         <Avatar className="h-10 w-10 shrink-0">
           <AvatarFallback className="text-white text-sm bg-destructive">
@@ -357,8 +357,8 @@ function StreamingItem({
         </Avatar>
       )}
 
-      <div className="flex-1 select-text space-y-1">
-        <div className="flex items-center gap-2">
+      <div className="min-w-0 flex-1 select-text space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="font-semibold">{label}</span>
           {!isError && (
             <Badge variant="secondary" className="text-xs">
@@ -368,7 +368,7 @@ function StreamingItem({
           <span className="text-xs text-muted-foreground animate-pulse">streaming...</span>
         </div>
         {process.length > 0 && <ProcessBlock items={process} />}
-        <div className="prose prose-sm max-w-none select-text dark:prose-invert">
+        <div className="prose prose-sm max-w-none overflow-hidden break-words select-text dark:prose-invert">
           <MarkdownRenderer text={item.error ?? item.text} />
         </div>
       </div>

@@ -600,6 +600,7 @@ export default function App() {
     handle?: string;
     kind?: string;
     model?: string;
+    effort?: string;
     yolo_mode?: boolean;
     env?: Record<string, string>;
   }): Promise<Agent> {
@@ -610,7 +611,7 @@ export default function App() {
 
   async function handleUpdateAgent(
     agentID: string,
-    payload: Partial<Pick<Agent, "name" | "handle" | "kind" | "model" | "enabled" | "yolo_mode">> & {
+    payload: Partial<Pick<Agent, "name" | "handle" | "kind" | "model" | "effort" | "enabled" | "yolo_mode">> & {
       env?: Record<string, string>;
     }
   ) {

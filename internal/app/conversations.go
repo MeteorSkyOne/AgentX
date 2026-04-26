@@ -120,6 +120,13 @@ func (a *App) SendMessage(ctx context.Context, req SendMessageRequest) (domain.M
 		return domain.Message{}, err
 	}
 
+	if command, ok, err := parseSlashCommand(body); ok {
+		if err != nil {
+			return domain.Message{}, err
+		}
+		return a.dispatchSlashCommand(ctx, req, agents, command)
+	}
+
 	message := domain.Message{
 		ID:               id.New("msg"),
 		OrganizationID:   req.OrganizationID,

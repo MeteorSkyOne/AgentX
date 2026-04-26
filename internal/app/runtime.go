@@ -17,6 +17,12 @@ import (
 const runtimeContextMessageLimit = 40
 const runtimeContextBodyLimit = 4000
 
+type agentRunOptions struct {
+	Prompt         string
+	PermissionMode string
+	OnCompleted    func(context.Context) error
+}
+
 func (a *App) runAgentForMessage(ctx context.Context, userMessage domain.Message, targets ...ConversationAgentContext) {
 	runID := id.New("run")
 	defer func() {
@@ -48,6 +54,16 @@ func (a *App) runAgentForMessage(ctx context.Context, userMessage domain.Message
 		target = resolved[0]
 	}
 
+	a.runAgentForMessageWithTarget(ctx, userMessage, target, runID, agentRunOptions{})
+}
+
+func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage domain.Message, target ConversationAgentContext, runID string, opts agentRunOptions) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			a.publishAgentRunFailed(userMessage, runID, fmt.Errorf("agent run panic: %v", recovered))
+		}
+	}()
+
 	agent := target.Agent
 	workspace := target.RunWorkspace
 	if err := os.MkdirAll(workspace.Path, 0o755); err != nil {
@@ -69,7 +85,7 @@ func (a *App) runAgentForMessage(ctx context.Context, userMessage domain.Message
 		return
 	}
 
-	runtimeContext, err := a.runtimeContextForMessage(ctx, userMessage)
+	runtimeContext, err := a.runtimeContextForMessage(ctx, agent.ID, userMessage)
 	if err != nil {
 		a.setFailedAgentSession(ctx, agent.ID, userMessage, "")
 		a.publishAgentRunFailed(userMessage, runID, err)
@@ -81,6 +97,8 @@ func (a *App) runAgentForMessage(ctx context.Context, userMessage domain.Message
 		AgentID:           agent.ID,
 		Workspace:         workspace.Path,
 		Model:             agent.Model,
+		Effort:            agent.Effort,
+		PermissionMode:    opts.PermissionMode,
 		YoloMode:          agent.YoloMode,
 		Env:               agent.Env,
 		SessionKey:        sessionKey,
@@ -108,7 +126,11 @@ func (a *App) runAgentForMessage(ctx context.Context, userMessage domain.Message
 		Payload:          domain.AgentRunPayload{RunID: runID, AgentID: agent.ID},
 	})
 
-	if err := session.Send(ctx, agentruntime.Input{Prompt: userMessage.Body, Context: runtimeContext}); err != nil {
+	prompt := opts.Prompt
+	if prompt == "" {
+		prompt = userMessage.Body
+	}
+	if err := session.Send(ctx, agentruntime.Input{Prompt: prompt, Context: runtimeContext}); err != nil {
 		a.setFailedAgentSession(ctx, agent.ID, userMessage, session.CurrentSessionID())
 		a.publishAgentRunFailed(userMessage, runID, err)
 		return
@@ -146,6 +168,11 @@ func (a *App) runAgentForMessage(ctx context.Context, userMessage domain.Message
 				}
 				processBuf = append(processBuf, runtimeProcessItems(evt)...)
 				a.completeAgentRun(ctx, userMessage, agent, runID, session.CurrentSessionID(), evt.Text, thinkingBuf.String(), processBuf)
+				if opts.OnCompleted != nil {
+					if err := opts.OnCompleted(ctx); err != nil {
+						a.publishAgentRunFailed(userMessage, runID, err)
+					}
+				}
 				return
 			case agentruntime.EventFailed:
 				a.setFailedAgentSession(ctx, agent.ID, userMessage, session.CurrentSessionID())
@@ -156,7 +183,17 @@ func (a *App) runAgentForMessage(ctx context.Context, userMessage domain.Message
 	}
 }
 
-func (a *App) runtimeContextForMessage(ctx context.Context, userMessage domain.Message) (string, error) {
+func (a *App) runtimeContextForMessage(ctx context.Context, agentID string, userMessage domain.Message) (string, error) {
+	var contextStartedAt *time.Time
+	session, err := a.store.Sessions().ByConversation(ctx, agentID, userMessage.ConversationType, userMessage.ConversationID)
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", err
+		}
+	} else {
+		contextStartedAt = session.ContextStartedAt
+	}
+
 	messages, err := a.store.Messages().ListRecent(ctx, userMessage.ConversationType, userMessage.ConversationID, runtimeContextMessageLimit)
 	if err != nil {
 		return "", err
@@ -165,6 +202,9 @@ func (a *App) runtimeContextForMessage(ctx context.Context, userMessage domain.M
 	var b strings.Builder
 	for _, message := range messages {
 		if message.ID == userMessage.ID {
+			continue
+		}
+		if contextStartedAt != nil && message.CreatedAt.Before(*contextStartedAt) {
 			continue
 		}
 		if b.Len() == 0 {

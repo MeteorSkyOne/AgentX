@@ -33,9 +33,9 @@ export function LoginView({ onAuthenticated }: LoginViewProps) {
   }
 
   return (
-    <main className="flex h-screen w-screen items-center justify-center bg-background">
+    <main className="flex min-h-dvh w-screen items-center justify-center bg-background p-4">
       <form
-        className="flex w-full max-w-sm flex-col gap-6 rounded-xl border border-border bg-card p-8"
+        className="flex w-full max-w-sm flex-col gap-6 rounded-xl border border-border bg-card p-6 sm:p-8"
         onSubmit={handleSubmit}
       >
         <div className="flex items-center gap-3">

@@ -61,9 +61,9 @@ export function ChannelList({ channels, selectedChannelID, onSelect, onCreate, o
   }
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
+    <Collapsible open={open} onOpenChange={setOpen} className="min-w-0 max-w-full overflow-hidden">
       <CollapsibleTrigger asChild>
-        <button className="flex w-full items-center gap-1 px-1 py-1 text-xs font-semibold uppercase text-muted-foreground hover:text-foreground">
+        <button className="flex min-w-0 max-w-full w-full items-center gap-1 px-1 py-1 text-xs font-semibold uppercase text-muted-foreground hover:text-foreground">
           {open ? (
             <ChevronDown className="h-3 w-3" />
           ) : (
@@ -72,12 +72,12 @@ export function ChannelList({ channels, selectedChannelID, onSelect, onCreate, o
           Channels
         </button>
       </CollapsibleTrigger>
-      <CollapsibleContent className="space-y-0.5">
+      <CollapsibleContent className="min-w-0 max-w-full space-y-0.5 overflow-hidden">
         {channels.map((channel) => (
           <div
             key={channel.id}
             className={cn(
-              "group flex min-h-8 w-full items-center gap-1 rounded-md px-1 py-0.5 text-sm transition-colors",
+              "group flex min-h-10 min-w-0 max-w-full w-full items-center gap-1 overflow-hidden rounded-md px-1 py-0.5 text-sm transition-colors md:min-h-8",
               channel.id === selectedChannelID
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
@@ -93,13 +93,13 @@ export function ChannelList({ channels, selectedChannelID, onSelect, onCreate, o
                     if (e.key === "Escape") setEditingID(null);
                   }}
                   aria-label="Channel name"
-                  className="h-7 flex-1 px-2 text-sm"
+                  className="h-9 flex-1 px-2 text-sm md:h-7"
                   autoFocus
                 />
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7"
+                  className="h-9 w-9 md:h-7 md:w-7"
                   title="Save channel"
                   aria-label="Save channel"
                   disabled={pendingID === channel.id || !draftName.trim()}
@@ -110,7 +110,7 @@ export function ChannelList({ channels, selectedChannelID, onSelect, onCreate, o
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7"
+                  className="h-9 w-9 md:h-7 md:w-7"
                   title="Cancel"
                   aria-label="Cancel"
                   disabled={pendingID === channel.id}
@@ -130,12 +130,12 @@ export function ChannelList({ channels, selectedChannelID, onSelect, onCreate, o
                   ) : (
                     <Hash className="h-4 w-4 shrink-0" />
                   )}
-                  <span className="truncate">{channel.name}</span>
+                  <span className="block min-w-0 max-w-[calc(100svw-8.5rem)] truncate md:max-w-full">{channel.name}</span>
                 </button>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+                  className="h-9 w-9 opacity-100 transition-opacity md:h-7 md:w-7 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
                   title="Edit channel"
                   aria-label="Edit channel"
                   disabled={pendingID === channel.id}
@@ -146,7 +146,7 @@ export function ChannelList({ channels, selectedChannelID, onSelect, onCreate, o
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus:opacity-100"
+                  className="h-9 w-9 text-muted-foreground opacity-100 transition-opacity hover:text-destructive md:h-7 md:w-7 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
                   title="Delete channel"
                   aria-label="Delete channel"
                   disabled={pendingID === channel.id}
@@ -163,13 +163,13 @@ export function ChannelList({ channels, selectedChannelID, onSelect, onCreate, o
           <p className="px-2 py-1.5 text-sm text-muted-foreground">No channels</p>
         ) : null}
         <button
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          className="flex min-h-10 min-w-0 max-w-full w-full items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground md:min-h-0"
           title="Create channel"
           aria-label="Create channel"
           onClick={onCreate}
         >
-          <Plus className="h-4 w-4" />
-          <span>Create channel</span>
+          <Plus className="h-4 w-4 shrink-0" />
+          <span className="min-w-0 truncate">Create channel</span>
         </button>
       </CollapsibleContent>
     </Collapsible>

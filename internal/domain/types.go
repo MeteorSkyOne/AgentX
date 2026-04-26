@@ -106,6 +106,7 @@ type Agent struct {
 	Name               string            `json:"name"`
 	Handle             string            `json:"handle"`
 	Model              string            `json:"model"`
+	Effort             string            `json:"effort"`
 	ConfigWorkspaceID  string            `json:"config_workspace_id"`
 	DefaultWorkspaceID string            `json:"default_workspace_id,omitempty"`
 	Enabled            bool              `json:"enabled"`
@@ -121,6 +122,7 @@ type AgentSession struct {
 	ConversationID    string           `json:"conversation_id"`
 	ProviderSessionID string           `json:"provider_session_id"`
 	Status            string           `json:"status"`
+	ContextStartedAt  *time.Time       `json:"context_started_at,omitempty"`
 	UpdatedAt         time.Time        `json:"updated_at"`
 }
 

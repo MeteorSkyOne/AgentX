@@ -646,9 +646,9 @@ func (r agentRepo) Create(ctx context.Context, agent domain.Agent) error {
 		return err
 	}
 	_, err = r.q.ExecContext(ctx, `
-INSERT INTO agents (id, org_id, bot_user_id, kind, name, handle, model, default_workspace_id, config_workspace_id, enabled, yolo_mode, env_json, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		agent.ID, agent.OrganizationID, agent.BotUserID, agent.Kind, agent.Name, agent.Handle, agent.Model,
+INSERT INTO agents (id, org_id, bot_user_id, kind, name, handle, model, effort, default_workspace_id, config_workspace_id, enabled, yolo_mode, env_json, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		agent.ID, agent.OrganizationID, agent.BotUserID, agent.Kind, agent.Name, agent.Handle, agent.Model, agent.Effort,
 		agent.DefaultWorkspaceID, agent.ConfigWorkspaceID, boolToInt(agent.Enabled), boolToInt(agent.YoloMode), string(envJSON),
 		formatTime(agent.CreatedAt), formatTime(agent.UpdatedAt),
 	)
@@ -657,14 +657,14 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 
 func (r agentRepo) ByID(ctx context.Context, id string) (domain.Agent, error) {
 	return scanAgent(r.q.QueryRowContext(ctx, `
-SELECT id, org_id, bot_user_id, kind, name, handle, model, default_workspace_id, config_workspace_id, enabled, yolo_mode, env_json, created_at, updated_at
+SELECT id, org_id, bot_user_id, kind, name, handle, model, effort, default_workspace_id, config_workspace_id, enabled, yolo_mode, env_json, created_at, updated_at
 FROM agents
 WHERE id = ?`, id))
 }
 
 func (r agentRepo) DefaultForOrganization(ctx context.Context, orgID string) (domain.Agent, error) {
 	return scanAgent(r.q.QueryRowContext(ctx, `
-SELECT id, org_id, bot_user_id, kind, name, handle, model, default_workspace_id, config_workspace_id, enabled, yolo_mode, env_json, created_at, updated_at
+SELECT id, org_id, bot_user_id, kind, name, handle, model, effort, default_workspace_id, config_workspace_id, enabled, yolo_mode, env_json, created_at, updated_at
 FROM agents
 WHERE org_id = ?
 ORDER BY created_at ASC
@@ -673,7 +673,7 @@ LIMIT 1`, orgID))
 
 func (r agentRepo) ListByOrganization(ctx context.Context, orgID string) ([]domain.Agent, error) {
 	rows, err := r.q.QueryContext(ctx, `
-SELECT id, org_id, bot_user_id, kind, name, handle, model, default_workspace_id, config_workspace_id, enabled, yolo_mode, env_json, created_at, updated_at
+SELECT id, org_id, bot_user_id, kind, name, handle, model, effort, default_workspace_id, config_workspace_id, enabled, yolo_mode, env_json, created_at, updated_at
 FROM agents
 WHERE org_id = ?
 ORDER BY created_at ASC, id ASC`, orgID)
@@ -698,7 +698,7 @@ ORDER BY created_at ASC, id ASC`, orgID)
 
 func (r agentRepo) ByHandle(ctx context.Context, orgID string, handle string) (domain.Agent, error) {
 	return scanAgent(r.q.QueryRowContext(ctx, `
-SELECT id, org_id, bot_user_id, kind, name, handle, model, default_workspace_id, config_workspace_id, enabled, yolo_mode, env_json, created_at, updated_at
+SELECT id, org_id, bot_user_id, kind, name, handle, model, effort, default_workspace_id, config_workspace_id, enabled, yolo_mode, env_json, created_at, updated_at
 FROM agents
 WHERE org_id = ? AND handle = ?`, orgID, handle))
 }
@@ -711,9 +711,9 @@ func (r agentRepo) Update(ctx context.Context, agent domain.Agent) error {
 	}
 	_, err = r.q.ExecContext(ctx, `
 UPDATE agents
-SET kind = ?, name = ?, handle = ?, model = ?, default_workspace_id = ?, config_workspace_id = ?, enabled = ?, yolo_mode = ?, env_json = ?, updated_at = ?
+SET kind = ?, name = ?, handle = ?, model = ?, effort = ?, default_workspace_id = ?, config_workspace_id = ?, enabled = ?, yolo_mode = ?, env_json = ?, updated_at = ?
 WHERE id = ?`,
-		agent.Kind, agent.Name, agent.Handle, agent.Model, agent.DefaultWorkspaceID, agent.ConfigWorkspaceID,
+		agent.Kind, agent.Name, agent.Handle, agent.Model, agent.Effort, agent.DefaultWorkspaceID, agent.ConfigWorkspaceID,
 		boolToInt(agent.Enabled), boolToInt(agent.YoloMode), string(envJSON), formatTime(agent.UpdatedAt), agent.ID,
 	)
 	return err
@@ -825,9 +825,39 @@ ON CONFLICT(agent_id, conversation_type, conversation_id) DO UPDATE SET
 	return err
 }
 
+func (r sessionRepo) ResetAgentSessionContext(ctx context.Context, agentID string, conversationType domain.ConversationType, conversationID string, contextStartedAt time.Time) error {
+	id := agentID + ":" + string(conversationType) + ":" + conversationID
+	now := time.Now().UTC()
+	_, err := r.q.ExecContext(ctx, `
+INSERT INTO agent_sessions (id, agent_id, conversation_type, conversation_id, provider_session_id, status, context_started_at, updated_at)
+VALUES (?, ?, ?, ?, '', 'reset', ?, ?)
+ON CONFLICT(agent_id, conversation_type, conversation_id) DO UPDATE SET
+  provider_session_id = '',
+  status = 'reset',
+  context_started_at = excluded.context_started_at,
+  updated_at = excluded.updated_at`,
+		id, agentID, string(conversationType), conversationID, formatTime(contextStartedAt), formatTime(now),
+	)
+	return err
+}
+
+func (r sessionRepo) SetAgentSessionContextStartedAt(ctx context.Context, agentID string, conversationType domain.ConversationType, conversationID string, contextStartedAt time.Time) error {
+	id := agentID + ":" + string(conversationType) + ":" + conversationID
+	now := time.Now().UTC()
+	_, err := r.q.ExecContext(ctx, `
+INSERT INTO agent_sessions (id, agent_id, conversation_type, conversation_id, provider_session_id, status, context_started_at, updated_at)
+VALUES (?, ?, ?, ?, '', 'completed', ?, ?)
+ON CONFLICT(agent_id, conversation_type, conversation_id) DO UPDATE SET
+  context_started_at = excluded.context_started_at,
+  updated_at = excluded.updated_at`,
+		id, agentID, string(conversationType), conversationID, formatTime(contextStartedAt), formatTime(now),
+	)
+	return err
+}
+
 func (r sessionRepo) ByConversation(ctx context.Context, agentID string, conversationType domain.ConversationType, conversationID string) (domain.AgentSession, error) {
 	return scanAgentSession(r.q.QueryRowContext(ctx, `
-SELECT agent_id, conversation_type, conversation_id, provider_session_id, status, updated_at
+SELECT agent_id, conversation_type, conversation_id, provider_session_id, status, context_started_at, updated_at
 FROM agent_sessions
 WHERE agent_id = ? AND conversation_type = ? AND conversation_id = ?`,
 		agentID, string(conversationType), conversationID,
@@ -970,7 +1000,7 @@ func scanAgent(scanner interface {
 	var enabled, yoloMode int
 	if err := scanner.Scan(
 		&agent.ID, &agent.OrganizationID, &agent.BotUserID, &agent.Kind, &agent.Name, &agent.Handle,
-		&agent.Model, &agent.DefaultWorkspaceID, &agent.ConfigWorkspaceID, &enabled, &yoloMode, &envJSON, &createdAt, &updatedAt,
+		&agent.Model, &agent.Effort, &agent.DefaultWorkspaceID, &agent.ConfigWorkspaceID, &enabled, &yoloMode, &envJSON, &createdAt, &updatedAt,
 	); err != nil {
 		return domain.Agent{}, err
 	}
@@ -1002,14 +1032,19 @@ func scanAgentSession(scanner interface {
 }) (domain.AgentSession, error) {
 	var session domain.AgentSession
 	var conversationType, updatedAt string
+	var contextStartedAt sql.NullString
 	if err := scanner.Scan(
 		&session.AgentID, &conversationType, &session.ConversationID, &session.ProviderSessionID,
-		&session.Status, &updatedAt,
+		&session.Status, &contextStartedAt, &updatedAt,
 	); err != nil {
 		return domain.AgentSession{}, err
 	}
 	session.ConversationType = domain.ConversationType(conversationType)
 	var err error
+	session.ContextStartedAt, err = parseNullableTime(contextStartedAt)
+	if err != nil {
+		return domain.AgentSession{}, err
+	}
 	session.UpdatedAt, err = parseTime(updatedAt)
 	if err != nil {
 		return domain.AgentSession{}, err

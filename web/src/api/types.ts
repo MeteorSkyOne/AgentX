@@ -87,6 +87,7 @@ export interface Agent {
   name: string;
   handle: string;
   model: string;
+  effort: string;
   config_workspace_id: string;
   default_workspace_id: string;
   enabled: boolean;

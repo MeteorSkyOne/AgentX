@@ -102,7 +102,7 @@ function FencedCodeBlock({
         )}
         <button
           onClick={handleCopy}
-          className="rounded p-1 text-white/60 opacity-0 transition-opacity hover:text-white group-hover/code:opacity-100 dark:text-muted-foreground dark:hover:text-foreground"
+          className="rounded p-1 text-white/60 opacity-100 transition-opacity hover:text-white md:opacity-0 md:group-hover/code:opacity-100 dark:text-muted-foreground dark:hover:text-foreground"
           aria-label="Copy code"
           title="Copy code"
         >

@@ -66,6 +66,9 @@ func (r Runtime) buildArgs(req runtime.StartSessionRequest, input runtime.Input)
 	if model := strings.TrimSpace(req.Model); model != "" {
 		args = append(args, "--model", model)
 	}
+	if effort := strings.TrimSpace(req.Effort); effort != "" {
+		args = append(args, "-c", `model_reasoning_effort="`+effort+`"`)
+	}
 	if r.opts.BypassSandbox || req.YoloMode {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	} else if r.opts.FullAuto {

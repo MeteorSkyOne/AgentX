@@ -137,7 +137,7 @@ export function Composer({ conversation, typingAgents, mentionAgents = [], onSen
       : null;
 
   return (
-    <div className="border-t border-border bg-background/95 px-4 py-3">
+    <div className="shrink-0 border-t border-border bg-background/95 px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-4">
       {typingLabel && (
         <div className="flex items-center gap-2 px-1 py-1.5 text-xs text-muted-foreground">
           <span className="flex gap-0.5">
@@ -151,7 +151,7 @@ export function Composer({ conversation, typingAgents, mentionAgents = [], onSen
       <form onSubmit={handleSubmit}>
         <div className="relative">
           {mentionOpen && (
-            <div className="absolute bottom-full left-0 mb-2 w-72 overflow-hidden rounded-md border border-border bg-popover shadow-lg">
+            <div className="absolute bottom-full left-0 mb-2 w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-md border border-border bg-popover shadow-lg">
               {mentionMatches.map((agent, index) => (
                 <button
                   key={agent.id}

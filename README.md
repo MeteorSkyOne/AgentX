@@ -73,4 +73,13 @@ pnpm exec playwright install chromium
 pnpm run e2e
 ```
 
+The e2e suite includes desktop and mobile viewport coverage. Optional diagnostic screenshots for AI-assisted UI review are available when needed and are not part of the default test command:
+
+```sh
+cd web
+pnpm run e2e:screenshots
+```
+
+Screenshots are written under `.agentx-screenshot/`, which is ignored by git.
+
 On Linux, Playwright may also need system browser libraries. Install them once with `pnpm exec playwright install-deps chromium` when the environment allows it.

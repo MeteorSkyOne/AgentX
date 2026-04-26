@@ -142,7 +142,24 @@
     --tw-prose-quotes: var(--muted-foreground);
   }
   .prose :where(input[type="checkbox"]) {
+    appearance: none;
+    width: 1rem;
+    height: 1rem;
+    margin-right: 0.4rem;
+    vertical-align: -0.15rem;
+    border: 1px solid var(--input);
+    border-radius: 0.25rem;
+    background: var(--background);
     accent-color: var(--primary);
+    box-shadow: 0 1px 2px color-mix(in oklch, var(--foreground) 8%, transparent);
+  }
+  .prose :where(input[type="checkbox"]:checked) {
+    border-color: var(--primary);
+    background-color: var(--primary);
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3.5 8.5L6.5 11.5L12.5 4.5' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 0.85rem 0.85rem;
   }
   .prose :where(table) {
     border-collapse: collapse;

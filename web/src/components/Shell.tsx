@@ -14,6 +14,7 @@ import {
   Home,
   Key,
   LogOut,
+  Menu,
   MessageSquare,
   Moon,
   Pencil,
@@ -61,8 +62,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -104,6 +107,12 @@ interface StreamingMessage {
   thinking?: string;
   process?: ProcessItem[];
   error?: string;
+}
+
+interface ComposerConversation {
+  type: ConversationType;
+  id: string;
+  label: string;
 }
 
 interface ShellProps {
@@ -148,12 +157,13 @@ interface ShellProps {
     handle?: string;
     kind?: string;
     model?: string;
+    effort?: string;
     yolo_mode?: boolean;
     env?: Record<string, string>;
   }) => Promise<Agent>;
   onUpdateAgent: (
     agentID: string,
-    payload: Partial<Pick<Agent, "name" | "handle" | "kind" | "model" | "enabled" | "yolo_mode">> & {
+    payload: Partial<Pick<Agent, "name" | "handle" | "kind" | "model" | "effort" | "enabled" | "yolo_mode">> & {
       env?: Record<string, string>;
     }
   ) => Promise<void>;
@@ -216,6 +226,14 @@ export function Shell({
 }: ShellProps) {
   const [agentPanelOpen, setAgentPanelOpen] = useState(false);
   const [membersPanelOpen, setMembersPanelOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [mobileAgentPanelOpen, setMobileAgentPanelOpen] = useState(false);
+  const [mobileMembersPanelOpen, setMobileMembersPanelOpen] = useState(false);
+  const [isMobileLayout, setIsMobileLayout] = useState(() =>
+    typeof window !== "undefined"
+      ? window.matchMedia("(max-width: 767px)").matches
+      : false
+  );
   const [projectName, setProjectName] = useState("");
   const [projectDraftOpen, setProjectDraftOpen] = useState(false);
   const [projectEditOpen, setProjectEditOpen] = useState(false);
@@ -234,6 +252,7 @@ export function Shell({
   const [newAgentHandle, setNewAgentHandle] = useState("");
   const [newAgentKind, setNewAgentKind] = useState("fake");
   const [newAgentModel, setNewAgentModel] = useState("");
+  const [newAgentEffort, setNewAgentEffort] = useState("");
   const [newAgentYoloMode, setNewAgentYoloMode] = useState(false);
   const [newAgentEmoji, setNewAgentEmoji] = useState("");
   const [newAgentColor, setNewAgentColor] = useState("");
@@ -249,7 +268,32 @@ export function Shell({
   const activeThread = conversationContext?.thread;
 
   useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsMobileLayout(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    if (isMobileLayout) {
+      setAgentPanelOpen(false);
+      setMembersPanelOpen(false);
+    } else {
+      setMobileNavOpen(false);
+      setMobileAgentPanelOpen(false);
+      setMobileMembersPanelOpen(false);
+    }
+  }, [isMobileLayout]);
+
+  useEffect(() => {
     setAgentPanelOpen(false);
+  }, [selectedChannel?.id, activeConversation?.id]);
+
+  useEffect(() => {
+    setMobileNavOpen(false);
+    setMobileAgentPanelOpen(false);
+    setMobileMembersPanelOpen(false);
   }, [selectedChannel?.id, activeConversation?.id]);
 
   useEffect(() => {
@@ -343,6 +387,16 @@ export function Shell({
     setAccountSettingsOpen(true);
   }
 
+  function selectMobileProject(projectID: string) {
+    setMobileNavOpen(false);
+    onSelectProject(projectID);
+  }
+
+  function selectMobileChannel(channel: Channel) {
+    setMobileNavOpen(false);
+    onSelectChannel(channel);
+  }
+
   async function submitChannel() {
     const name = channelName.trim();
     if (!name) return;
@@ -369,6 +423,7 @@ export function Shell({
         handle: newAgentHandle || undefined,
         kind: newAgentKind,
         model: newAgentModel || undefined,
+        effort: newAgentEffort || undefined,
         yolo_mode: newAgentYoloMode,
       });
       if (newAgentEmoji) {
@@ -389,6 +444,7 @@ export function Shell({
       setNewAgentHandle("");
       setNewAgentKind("fake");
       setNewAgentModel("");
+      setNewAgentEffort("");
       setNewAgentYoloMode(false);
       setNewAgentEmoji("");
       setNewAgentColor("");
@@ -441,14 +497,330 @@ export function Shell({
         : undefined;
 
   return (
-    <div className="flex h-screen w-screen select-none">
+    <div className="flex h-dvh w-screen overflow-hidden select-none" data-testid="agentx-shell">
+      {isMobileLayout ? (
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background" data-testid="mobile-shell">
+        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-11 w-11"
+            title="Navigation"
+            aria-label="Navigation"
+            onClick={() => setMobileNavOpen(true)}
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
+          {selectedChannel?.type === "thread" && activeThread ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-11 w-11"
+              title="Back to posts"
+              aria-label="Back to posts"
+              onClick={() => onSelectChannel(selectedChannel)}
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+          ) : null}
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-sm font-semibold">{title}</h1>
+            <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-11 w-11"
+            title="Members"
+            aria-label="Members"
+            onClick={() => setMobileMembersPanelOpen(true)}
+          >
+            <UserRound className="h-5 w-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-11 w-11"
+            title="Agent settings"
+            aria-label="Agent settings"
+            onClick={() => setMobileAgentPanelOpen(true)}
+          >
+            <Settings className="h-5 w-5" />
+          </Button>
+        </div>
+
+        {activeThread && (
+          <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
+            {activeConversation && (
+              <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                <Activity className="h-3.5 w-3.5 shrink-0" />
+                {streaming.length > 0 ? "running" : "ready"}
+              </span>
+            )}
+            <div className="ml-auto flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
+                title="Edit post"
+                aria-label="Edit post"
+                onClick={() => {
+                  setThreadTitleDraft(activeThread.title);
+                  setThreadActionError(null);
+                  setThreadEditOpen(true);
+                }}
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 text-muted-foreground hover:text-destructive"
+                title="Delete post"
+                aria-label="Delete post"
+                disabled={threadActionPending}
+                onClick={deleteActiveThread}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <ConversationPanel
+          selectedChannel={selectedChannel}
+          activeThread={activeThread}
+          threads={threads}
+          messages={messages}
+          messagesLoading={messagesLoading}
+          olderMessagesLoading={olderMessagesLoading}
+          hasOlderMessages={hasOlderMessages}
+          streaming={streaming}
+          boundAgents={boundAgents}
+          composerConversation={composerConversation}
+          onSelectThread={onSelectThread}
+          onCreateThread={onCreateThread}
+          onUpdateThread={onUpdateThread}
+          onDeleteThread={onDeleteThread}
+          onUpdateMessage={onUpdateMessage}
+          onDeleteMessage={onDeleteMessage}
+          onLoadOlderMessages={onLoadOlderMessages}
+          onMessageSent={onMessageSent}
+        />
+
+        <Dialog open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+          <DialogContent
+            showCloseButton={false}
+            className="left-0 top-0 min-w-0 !h-svh !w-[100svw] !max-w-[100svw] !translate-x-0 !translate-y-0 gap-0 overflow-hidden rounded-none border-y-0 border-l-0 p-0 sm:!w-[24rem] sm:!max-w-sm"
+          >
+            <div className="flex h-full min-h-0 min-w-0 flex-col overflow-x-hidden bg-sidebar">
+              <div className="flex h-14 min-w-0 shrink-0 items-center justify-between gap-3 border-b border-border px-4">
+                <DialogHeader className="min-w-0 gap-0 text-left">
+                  <DialogTitle className="truncate">Navigation</DialogTitle>
+                  <DialogDescription className="truncate">{project?.name ?? "No project"}</DialogDescription>
+                </DialogHeader>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10"
+                  title="Close navigation"
+                  aria-label="Close navigation"
+                  onClick={() => setMobileNavOpen(false)}
+                >
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
+
+              <ScrollArea
+                className="min-h-0 min-w-0 flex-1"
+                viewportClassName="max-w-full overflow-x-hidden"
+                data-testid="mobile-nav-scroll"
+              >
+                <div className="min-w-0 max-w-full space-y-5 px-3 py-4">
+                  <section aria-label="Projects" className="min-w-0 max-w-full space-y-1">
+                    <div className="px-1 text-xs font-semibold uppercase text-muted-foreground">
+                      Projects
+                    </div>
+                    {projects.map((item) => {
+                      const avatar = getProjectAvatar(item.id);
+                      const isSelected = item.id === project?.id;
+                      return (
+                        <button
+                          key={item.id}
+                          className={cn(
+                            "flex min-h-11 min-w-0 max-w-full w-full items-center gap-3 overflow-hidden rounded-md px-2 text-left text-sm transition-colors",
+                            isSelected
+                              ? "bg-accent text-accent-foreground"
+                              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                          )}
+                          aria-label={item.name}
+                          onClick={() => selectMobileProject(item.id)}
+                        >
+                          <span
+                            className={cn(
+                              "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold",
+                              avatar?.emoji
+                                ? cn("text-white", avatar.color || "bg-primary")
+                                : "bg-secondary text-secondary-foreground"
+                            )}
+                          >
+                            {avatar?.emoji ? avatar.emoji : initials(item.name)}
+                          </span>
+                          <span className="block min-w-0 max-w-[calc(100svw-8rem)] flex-1 truncate">{item.name}</span>
+                        </button>
+                      );
+                    })}
+                    <button
+                      className="flex min-h-11 min-w-0 max-w-full w-full items-center gap-3 overflow-hidden rounded-md px-2 text-left text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                      title="Create project"
+                      aria-label="Create project"
+                      onClick={() => {
+                        setMobileNavOpen(false);
+                        openCreateProject();
+                      }}
+                    >
+                      <Plus className="h-4 w-4 shrink-0" />
+                      <span className="min-w-0 truncate">Create project</span>
+                    </button>
+                  </section>
+
+                  <ChannelList
+                    channels={channels}
+                    selectedChannelID={selectedChannel?.id}
+                    onSelect={selectMobileChannel}
+                    onCreate={() => {
+                      setMobileNavOpen(false);
+                      setChannelDraftOpen(true);
+                    }}
+                    onUpdate={onUpdateChannel}
+                    onDelete={onDeleteChannel}
+                  />
+
+                  <AgentsSidebar
+                    agents={activeAgents}
+                    boundAgents={boundAgents}
+                    contextLoading={contextLoading}
+                    onOpenPanel={() => {
+                      setMobileNavOpen(false);
+                      setMobileAgentPanelOpen(true);
+                    }}
+                    onCreateAgent={() => {
+                      setMobileNavOpen(false);
+                      setAgentDraftOpen(true);
+                    }}
+                  />
+                </div>
+              </ScrollArea>
+
+              <div
+                className="min-w-0 shrink-0 border-t border-border px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]"
+                data-testid="mobile-nav-footer"
+              >
+                <div className="mb-2 flex min-w-0 items-center gap-3">
+                  <Avatar className="h-9 w-9">
+                    <AvatarFallback className="bg-primary text-xs text-primary-foreground">
+                      {initials(user.display_name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{user.display_name}</p>
+                    <p className="truncate text-xs text-muted-foreground">{organization?.name ?? "online"}</p>
+                  </div>
+                </div>
+                <div className="grid min-w-0 grid-cols-3 gap-2">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-10 min-w-0 w-full"
+                    title="User settings"
+                    aria-label="User settings"
+                    onClick={() => {
+                      setMobileNavOpen(false);
+                      openAccountSettings();
+                    }}
+                  >
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-10 min-w-0 w-full"
+                    title={theme === "dark" ? "Light mode" : "Dark mode"}
+                    aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+                    onClick={onToggleTheme}
+                  >
+                    {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-10 min-w-0 w-full"
+                    title="Log out"
+                    aria-label="Log out"
+                    onClick={onLogout}
+                  >
+                    <LogOut className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={mobileMembersPanelOpen} onOpenChange={setMobileMembersPanelOpen}>
+          <DialogContent
+            showCloseButton={false}
+            className="left-auto right-0 top-0 !h-svh w-[92vw] max-w-sm !translate-x-0 !translate-y-0 gap-0 overflow-hidden rounded-none border-y-0 border-r-0 p-0 sm:max-w-sm"
+          >
+            <DialogTitle className="sr-only">Members</DialogTitle>
+            <DialogDescription className="sr-only">Manage channel members.</DialogDescription>
+            <MembersPanel
+              agents={activeAgents}
+              boundAgents={boundAgents}
+              projectWorkspace={projectWorkspace}
+              selectedChannel={selectedChannel}
+              onSaveChannelAgents={onSaveChannelAgents}
+              onClose={() => setMobileMembersPanelOpen(false)}
+            />
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={mobileAgentPanelOpen} onOpenChange={setMobileAgentPanelOpen}>
+          <DialogContent
+            showCloseButton={false}
+            className="left-auto right-0 top-0 !h-svh w-[96vw] max-w-md !translate-x-0 !translate-y-0 gap-0 overflow-hidden rounded-none border-y-0 border-r-0 p-0 sm:max-w-md"
+          >
+            <DialogTitle className="sr-only">Agent settings</DialogTitle>
+            <DialogDescription className="sr-only">Manage agent settings and workspace files.</DialogDescription>
+            <AgentDetailsPanel
+              selectedChannel={selectedChannel}
+              projectWorkspace={projectWorkspace}
+              agents={activeAgents}
+              boundAgents={boundAgents}
+              selectedAgent={selectedAgent}
+              onSaveChannelAgents={onSaveChannelAgents}
+              onUpdateAgent={onUpdateAgent}
+              onDeleteAgent={onDeleteAgent}
+              onLoadWorkspaceTree={onLoadWorkspaceTree}
+              onReadWorkspaceFile={onReadWorkspaceFile}
+              onWriteWorkspaceFile={onWriteWorkspaceFile}
+              onCreateAgentModal={() => setAgentDraftOpen(true)}
+              onClose={() => setMobileAgentPanelOpen(false)}
+            />
+          </DialogContent>
+        </Dialog>
+      </div>
+      ) : null}
+
+      {!isMobileLayout ? (
+      <div className="flex h-full min-h-0 min-w-0 flex-1" data-testid="desktop-shell">
       {/* Project Rail */}
       <TooltipProvider delayDuration={0}>
         <div className="flex h-full w-[72px] flex-col items-center gap-2 border-r border-sidebar-border/70 bg-sidebar py-3">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground font-bold text-lg"
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground font-bold text-lg"
               >
                 AX
               </button>
@@ -456,7 +828,7 @@ export function Shell({
             <TooltipContent side="right">AgentX</TooltipContent>
           </Tooltip>
 
-          <div className="mx-auto h-0.5 w-8 rounded-full bg-border" />
+          <div className="mx-auto h-0.5 w-8 shrink-0 rounded-full bg-border" />
 
           <ScrollArea className="min-h-0 w-full flex-1">
             <div className="flex flex-col items-center gap-2">
@@ -502,7 +874,7 @@ export function Shell({
             <TooltipTrigger asChild>
               <button
                 className={cn(
-                  "flex h-12 w-12 items-center justify-center rounded-2xl bg-secondary text-muted-foreground transition-all hover:rounded-xl hover:bg-green-600 hover:text-white",
+                  "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-secondary text-muted-foreground transition-all hover:rounded-xl hover:bg-green-600 hover:text-white",
                   projectDraftOpen && "rounded-xl bg-green-600 text-white"
                 )}
                 title="Create project"
@@ -518,7 +890,7 @@ export function Shell({
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                className="flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
                 title={theme === "dark" ? "Light mode" : "Dark mode"}
                 aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
                 onClick={onToggleTheme}
@@ -534,7 +906,7 @@ export function Shell({
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                className="flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
                 title="Log out"
                 aria-label="Log out"
                 onClick={onLogout}
@@ -551,9 +923,9 @@ export function Shell({
       <ResizablePanelGroup direction="horizontal" className="flex-1">
         {/* Channel Sidebar */}
         <ResizablePanel defaultSize={18} minSize={15} maxSize={25}>
-          <div className="flex h-full flex-col bg-sidebar">
+          <div className="flex h-full min-h-0 flex-col bg-sidebar">
             {/* Workspace Header */}
-            <div className="flex h-12 items-center justify-between border-b border-border px-4">
+            <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
               <h2 className="truncate text-base font-semibold">
                 {project?.name ?? "No project"}
               </h2>
@@ -594,7 +966,7 @@ export function Shell({
             </ScrollArea>
 
             {/* User Info */}
-            <div className="flex items-center gap-2 border-t border-border bg-sidebar p-2">
+            <div className="flex shrink-0 items-center gap-2 border-t border-border bg-sidebar p-2">
               <Avatar className="h-8 w-8">
                 <AvatarFallback className="bg-primary text-primary-foreground text-xs">
                   {initials(user.display_name)}
@@ -621,10 +993,10 @@ export function Shell({
         <ResizableHandle withHandle />
 
         {/* Message Area */}
-        <ResizablePanel defaultSize={(agentPanelOpen || membersPanelOpen) ? 55 : 82}>
-          <div className="flex h-full flex-1 flex-col bg-background">
+        <ResizablePanel defaultSize={agentPanelOpen ? 55 : membersPanelOpen ? 62 : 82}>
+          <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
             {/* Channel Header */}
-            <div className="flex h-12 items-center justify-between border-b border-border px-4">
+            <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
               <div className="flex items-center gap-2">
                 {selectedChannel?.type === "thread" && activeThread ? (
                   <Button
@@ -699,11 +1071,13 @@ export function Shell({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8"
-                  title="Project settings"
-                  aria-label="Project settings"
-                  disabled={!project}
-                  onClick={openProjectSettings}
+                  className={cn("h-8 w-8", agentPanelOpen && "bg-accent")}
+                  title="Agent settings"
+                  aria-label="Agent settings"
+                  onClick={() => {
+                    setMembersPanelOpen(false);
+                    setAgentPanelOpen((open) => !open);
+                  }}
                 >
                   <Settings className="h-4 w-4" />
                 </Button>
@@ -788,6 +1162,8 @@ export function Shell({
           </>
         )}
       </ResizablePanelGroup>
+      </div>
+      ) : null}
 
       {/* Edit Post Modal */}
       <Dialog open={threadEditOpen} onOpenChange={setThreadEditOpen}>
@@ -999,16 +1375,15 @@ export function Shell({
             </div>
             <div className="space-y-2">
               <Label htmlFor="channel-type">Channel type</Label>
-              <select
+              <Select
                 id="channel-type"
                 value={channelType}
                 onChange={(e) => setChannelType(e.target.value as Channel["type"])}
                 aria-label="Channel type"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
                 <option value="text">Text</option>
                 <option value="thread">Forum</option>
-              </select>
+              </Select>
             </div>
           </div>
           <DialogFooter>
@@ -1100,17 +1475,16 @@ export function Shell({
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="new-agent-runtime">Runtime</Label>
-                <select
+                <Select
                   id="new-agent-runtime"
                   value={newAgentKind}
                   onChange={(e) => setNewAgentKind(e.target.value)}
                   aria-label="New agent runtime"
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 >
                   <option value="fake">Fake</option>
                   <option value="codex">Codex</option>
                   <option value="claude">Claude</option>
-                </select>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="new-agent-model">Model</Label>
@@ -1122,13 +1496,25 @@ export function Shell({
                   aria-label="New agent model"
                 />
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="new-agent-effort">Effort</Label>
+                <Select
+                  id="new-agent-effort"
+                  value={newAgentEffort}
+                  onChange={(e) => setNewAgentEffort(e.target.value)}
+                  aria-label="New agent effort"
+                >
+                  <option value="">Default</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </Select>
+              </div>
             </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
+            <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
+              <Checkbox
                 checked={newAgentYoloMode}
                 onChange={(e) => setNewAgentYoloMode(e.target.checked)}
-                className="rounded border-border"
                 aria-label="New agent YOLO mode"
               />
               YOLO mode
@@ -1149,6 +1535,85 @@ export function Shell({
   );
 }
 
+function ConversationPanel({
+  selectedChannel,
+  activeThread,
+  threads,
+  messages,
+  messagesLoading,
+  olderMessagesLoading,
+  hasOlderMessages,
+  streaming,
+  boundAgents,
+  composerConversation,
+  onSelectThread,
+  onCreateThread,
+  onUpdateThread,
+  onDeleteThread,
+  onUpdateMessage,
+  onDeleteMessage,
+  onLoadOlderMessages,
+  onMessageSent,
+}: {
+  selectedChannel?: Channel;
+  activeThread?: Thread;
+  threads: Thread[];
+  messages: Message[];
+  messagesLoading: boolean;
+  olderMessagesLoading: boolean;
+  hasOlderMessages: boolean;
+  streaming: StreamingMessage[];
+  boundAgents: ConversationAgentContext[];
+  composerConversation?: ComposerConversation;
+  onSelectThread: ShellProps["onSelectThread"];
+  onCreateThread: ShellProps["onCreateThread"];
+  onUpdateThread: ShellProps["onUpdateThread"];
+  onDeleteThread: ShellProps["onDeleteThread"];
+  onUpdateMessage: ShellProps["onUpdateMessage"];
+  onDeleteMessage: ShellProps["onDeleteMessage"];
+  onLoadOlderMessages: ShellProps["onLoadOlderMessages"];
+  onMessageSent: ShellProps["onMessageSent"];
+}) {
+  if (selectedChannel?.type === "thread" && !activeThread) {
+    return (
+      <ThreadForum
+        threads={threads}
+        onSelectThread={onSelectThread}
+        onCreateThread={onCreateThread}
+        onUpdateThread={onUpdateThread}
+        onDeleteThread={onDeleteThread}
+      />
+    );
+  }
+
+  return (
+    <>
+      <MessagePane
+        messages={messages}
+        isLoading={messagesLoading}
+        isLoadingOlder={olderMessagesLoading}
+        hasOlderMessages={hasOlderMessages}
+        streaming={streaming}
+        agents={boundAgents}
+        onUpdateMessage={onUpdateMessage}
+        onDeleteMessage={onDeleteMessage}
+        onLoadOlder={onLoadOlderMessages}
+      />
+      <Composer
+        conversation={composerConversation}
+        mentionAgents={boundAgents.map((item) => item.agent)}
+        typingAgents={streaming
+          .filter((s) => !s.error)
+          .map((s) => {
+            const agent = boundAgents.find((b) => b.agent.id === s.agentID);
+            return { name: agent?.agent.name ?? "Agent" };
+          })}
+        onSent={onMessageSent}
+      />
+    </>
+  );
+}
+
 function AgentsSidebar({
   agents,
   boundAgents,
@@ -1165,20 +1630,20 @@ function AgentsSidebar({
   const [open, setOpen] = useState(true);
 
   return (
-    <section aria-label="Bound agent">
-      <Collapsible open={open} onOpenChange={setOpen} className="mt-4">
+    <section aria-label="Bound agent" className="min-w-0 max-w-full overflow-hidden">
+      <Collapsible open={open} onOpenChange={setOpen} className="mt-4 min-w-0 max-w-full overflow-hidden">
         <CollapsibleTrigger asChild>
-          <button className="flex w-full items-center gap-1 px-1 py-1 text-xs font-semibold uppercase text-muted-foreground hover:text-foreground">
+          <button className="flex min-w-0 max-w-full w-full items-center gap-1 px-1 py-1 text-xs font-semibold uppercase text-muted-foreground hover:text-foreground">
             {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
             Agents
             {contextLoading && <span className="ml-1 h-1.5 w-1.5 rounded-full bg-yellow-500 animate-pulse" />}
           </button>
         </CollapsibleTrigger>
-        <CollapsibleContent className="space-y-0.5">
+        <CollapsibleContent className="min-w-0 max-w-full space-y-0.5 overflow-hidden">
           {boundAgents.map((item) => (
             <button
               key={item.agent.id}
-              className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+              className="group flex min-h-10 min-w-0 max-w-full w-full items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent/50 hover:text-foreground md:min-h-0"
               aria-label={item.agent.name}
               onClick={onOpenPanel}
             >
@@ -1189,7 +1654,7 @@ function AgentsSidebar({
                   item.agent.enabled ? "bg-green-500" : "bg-gray-500"
                 )} />
               </div>
-              <span className="truncate">{item.agent.name}</span>
+              <span className="min-w-0 max-w-[calc(100svw-8rem)] truncate">{item.agent.name}</span>
               <Settings className="ml-auto h-3 w-3 opacity-0 group-hover:opacity-100" />
             </button>
           ))}
@@ -1197,18 +1662,18 @@ function AgentsSidebar({
             <p className="px-2 py-1.5 text-xs text-muted-foreground">Unbound</p>
           )}
           <button
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+              className="flex min-h-10 min-w-0 max-w-full w-full items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground md:min-h-0"
             onClick={onCreateAgent}
           >
-            <Plus className="h-4 w-4" />
-            <span>Create agent</span>
+            <Plus className="h-4 w-4 shrink-0" />
+            <span className="min-w-0 truncate">Create agent</span>
           </button>
           <button
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            className="flex min-h-10 min-w-0 max-w-full w-full items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground md:min-h-0"
             onClick={onOpenPanel}
           >
-            <Settings className="h-4 w-4" />
-            <span>Manage agents</span>
+            <Settings className="h-4 w-4 shrink-0" />
+            <span className="min-w-0 truncate">Manage agents</span>
           </button>
         </CollapsibleContent>
       </Collapsible>
@@ -1273,15 +1738,15 @@ function MembersPanel({
   const unbound = agents.filter((a) => !checked[a.id]);
 
   return (
-    <aside className="flex h-full flex-col border-l border-border bg-card" aria-label="Channel members">
-      <div className="flex h-12 items-center justify-between border-b border-border px-4">
+    <aside className="flex h-full min-h-0 min-w-0 flex-col border-l border-border bg-card" aria-label="Channel members">
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
         <span className="text-sm font-semibold">Members</span>
         <Button variant="ghost" size="icon" className="h-8 w-8" title="Close" aria-label="Close members" onClick={onClose}>
           <X className="h-4 w-4" />
         </Button>
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         <div className="p-3 space-y-4">
           {selectedChannel && (
             <p className="text-xs text-muted-foreground uppercase font-semibold px-1">
@@ -1300,11 +1765,9 @@ function MembersPanel({
                   className="picker-row rounded-md px-2 py-2 hover:bg-accent/50"
                 >
                   <div className="flex items-center gap-2.5">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked
                       onChange={() => toggle(a.id, false)}
-                      className="rounded border-border"
                     />
                     <div className="relative">
                       <AgentAvatar agentID={a.id} kind={a.kind} size="sm" />
@@ -1321,21 +1784,22 @@ function MembersPanel({
                       {agentKindLabel(a.kind)}
                     </Badge>
                   </div>
-                  <select
+                  <Select
+                    className="mt-2"
                     value={runWorkspaceIDs[a.id] ?? ""}
                     onChange={(e) => {
                       setRunWorkspaceIDs((current) => ({ ...current, [a.id]: e.target.value }));
                       setDirty(true);
                     }}
                     aria-label={`${a.name} run workspace`}
-                    className="mt-2 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+                    selectClassName="h-8 px-2 pr-8 text-xs"
                   >
                     {runWorkspaceOptions(a, boundAgents, projectWorkspace).map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               ))}
             </div>
@@ -1351,11 +1815,9 @@ function MembersPanel({
                   key={a.id}
                   className="picker-row flex items-center gap-2.5 rounded-md px-2 py-2 hover:bg-accent/50 cursor-pointer opacity-60 hover:opacity-100 transition-opacity"
                 >
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={false}
                     onChange={() => toggle(a.id, true)}
-                    className="rounded border-border"
                   />
                   <AgentAvatar agentID={a.id} kind={a.kind} size="sm" />
                   <div className="flex-1 min-w-0">
@@ -1374,7 +1836,7 @@ function MembersPanel({
       </ScrollArea>
 
       {dirty && (
-        <div className="border-t border-border p-3">
+        <div className="shrink-0 border-t border-border p-3">
           <Button size="sm" className="w-full gap-2" onClick={save} disabled={saving}>
             <Save className="h-4 w-4" />
             Save
@@ -1453,13 +1915,13 @@ function ThreadForum({
   }
 
   return (
-    <section className="flex flex-1 flex-col overflow-hidden p-4" aria-label="Threads">
-      <ScrollArea className="flex-1">
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden p-3 md:p-4" aria-label="Threads">
+      <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-1">
           {threads.map((thread) => (
             <div
               key={thread.id}
-              className="group flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-accent/50"
+              className="group flex min-h-10 w-full items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-accent/50 md:min-h-0"
             >
               {editingID === thread.id ? (
                 <>
@@ -1505,12 +1967,12 @@ function ThreadForum({
                   >
                     <MessageSquare className="h-4 w-4 text-primary shrink-0" />
                     <span className="flex-1 truncate font-medium">{thread.title}</span>
-                    <time className="shrink-0 text-xs text-muted-foreground">{formatDate(thread.updated_at)}</time>
+                    <time className="hidden shrink-0 text-xs text-muted-foreground sm:block">{formatDate(thread.updated_at)}</time>
                   </button>
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+                    className="h-9 w-9 opacity-100 transition-opacity md:h-8 md:w-8 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
                     title="Edit post"
                     aria-label="Edit post"
                     disabled={pendingID === thread.id}
@@ -1521,7 +1983,7 @@ function ThreadForum({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus:opacity-100"
+                    className="h-9 w-9 text-muted-foreground opacity-100 transition-opacity hover:text-destructive md:h-8 md:w-8 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
                     title="Delete post"
                     aria-label="Delete post"
                     disabled={pendingID === thread.id}
@@ -1542,7 +2004,7 @@ function ThreadForum({
         </div>
       </ScrollArea>
 
-      <div className="mt-4 space-y-2 rounded-lg border border-border p-3">
+      <div className="mt-4 shrink-0 space-y-2 rounded-lg border border-border p-3">
         <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" aria-label="Post title" />
         <Textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Body" aria-label="Post body" rows={3} />
         {error && <p className="text-sm text-destructive">{error}</p>}
@@ -1590,6 +2052,7 @@ function AgentDetailsPanel({
   const [handle, setHandle] = useState(selectedAgent?.handle ?? "");
   const [kind, setKind] = useState(selectedAgent?.kind ?? "fake");
   const [model, setModel] = useState(selectedAgent?.model ?? "");
+  const [effort, setEffort] = useState(selectedAgent?.effort ?? "");
   const [enabled, setEnabled] = useState(selectedAgent?.enabled ?? true);
   const [yoloMode, setYoloMode] = useState(selectedAgent?.yolo_mode ?? false);
   const [avatarEmoji, setAvatarEmoji] = useState("");
@@ -1627,6 +2090,7 @@ function AgentDetailsPanel({
     setHandle(selected.handle);
     setKind(selected.kind);
     setModel(selected.model);
+    setEffort(selected.effort ?? "");
     setEnabled(selected.enabled);
     setYoloMode(selected.yolo_mode);
     setEnvBody("{}");
@@ -1649,7 +2113,7 @@ function AgentDetailsPanel({
 
   async function saveAgent() {
     if (!selected) return;
-    await onUpdateAgent(selected.id, { name, handle, kind, model, enabled, yolo_mode: yoloMode });
+    await onUpdateAgent(selected.id, { name, handle, kind, model, effort, enabled, yolo_mode: yoloMode });
     setAgentAvatar(selected.id, avatarEmoji ? { emoji: avatarEmoji, color: avatarColor || agentKindColor(kind) } : null);
     setStatus("Saved");
   }
@@ -1711,9 +2175,9 @@ function AgentDetailsPanel({
 
   return (
     <>
-    <aside className="flex h-full flex-col border-l border-border bg-card" aria-label="Agent details">
+    <aside className="flex h-full min-h-0 min-w-0 flex-col border-l border-border bg-card" aria-label="Agent details">
       {/* Header */}
-      <div className="flex h-12 items-center justify-between border-b border-border px-4">
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
         <div className="flex items-center gap-2">
           <Bot className={cn("h-5 w-5", agentColor)} />
           <span className="font-semibold">Agent Config</span>
@@ -1724,7 +2188,7 @@ function AgentDetailsPanel({
       </div>
 
       {/* Agent Info */}
-      <div className="border-b border-border p-4">
+      <div className="shrink-0 border-b border-border p-4">
         <div className="flex items-center gap-3">
           {selected ? (
             <AgentAvatar agentID={selected.id} kind={selected.kind} size="lg" className="rounded-xl" />
@@ -1733,13 +2197,13 @@ function AgentDetailsPanel({
               <Bot className="h-6 w-6 text-white" />
             </div>
           )}
-          <div className="flex-1">
-            <h2 className="font-semibold">{selected?.name ?? "Agents"}</h2>
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate font-semibold">{selected?.name ?? "Agents"}</h2>
             <div className="flex items-center gap-2">
               <Badge variant="outline" className={cn("text-xs", agentColor)}>
                 {agentKindLabel(selected?.kind ?? "fake")}
               </Badge>
-              <span className="text-xs text-muted-foreground">
+              <span className="truncate text-xs text-muted-foreground">
                 {selected?.handle ?? ""}
               </span>
             </div>
@@ -1747,11 +2211,13 @@ function AgentDetailsPanel({
         </div>
         <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
           <span className="text-muted-foreground">Model</span>
-          <strong>{selected?.model || "default"}</strong>
+          <strong className="truncate">{selected?.model || "default"}</strong>
+          <span className="text-muted-foreground">Effort</span>
+          <strong className="truncate">{selected?.effort || "default"}</strong>
           <span className="text-muted-foreground">YOLO</span>
           <strong>{selected?.yolo_mode ? "on" : "off"}</strong>
           <span className="text-muted-foreground">Channel</span>
-          <strong>{selectedChannel ? `#${selectedChannel.name}` : "none"}</strong>
+          <strong className="truncate">{selectedChannel ? `#${selectedChannel.name}` : "none"}</strong>
         </div>
         <div className="workspace-path mt-2 flex items-center gap-1 text-xs text-muted-foreground">
           <Database className="h-3 w-3" />
@@ -1773,8 +2239,8 @@ function AgentDetailsPanel({
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="settings" className="flex flex-1 flex-col overflow-hidden">
-        <TabsList className="mx-4 mt-4 grid w-auto grid-cols-4">
+      <Tabs defaultValue="settings" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <TabsList className="mx-3 mt-4 grid w-auto grid-cols-4 md:mx-4">
           <TabsTrigger value="settings" className="gap-1 text-xs">
             <Settings className="h-3.5 w-3.5" />
             Settings
@@ -1794,22 +2260,21 @@ function AgentDetailsPanel({
         </TabsList>
 
         {/* Settings Tab */}
-        <TabsContent value="settings" className="flex-1 overflow-hidden px-4 pb-4">
+        <TabsContent value="settings" className="min-h-0 flex-1 overflow-hidden px-4 pb-4">
           <ScrollArea className="h-full">
             <div className="space-y-4 pr-2">
               {/* Agent Selector */}
               <div className="space-y-2">
                 <Label className="text-xs text-muted-foreground uppercase">Agent</Label>
-                <select
+                <Select
                   value={agentID}
                   onChange={(e) => setAgentID(e.target.value)}
                   aria-label="Agent"
-                  className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
                 >
                   {agents.map((a) => (
                     <option key={a.id} value={a.id}>{a.name} (@{a.handle})</option>
                   ))}
-                </select>
+                </Select>
               </div>
 
               {/* Edit Fields */}
@@ -1824,37 +2289,45 @@ function AgentDetailsPanel({
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-2">
                   <Label className="text-xs">Runtime</Label>
-                  <select
+                  <Select
                     value={kind}
                     onChange={(e) => setKind(e.target.value)}
                     aria-label="Agent runtime"
-                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
                   >
                     <option value="fake">Fake</option>
                     <option value="codex">Codex</option>
                     <option value="claude">Claude</option>
-                  </select>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label className="text-xs">Model</Label>
                   <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="Model" aria-label="Agent model" />
                 </div>
               </div>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
+              <div className="space-y-2">
+                <Label className="text-xs">Effort</Label>
+                <Select
+                  value={effort}
+                  onChange={(e) => setEffort(e.target.value)}
+                  aria-label="Agent effort"
+                >
+                  <option value="">Default</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </Select>
+              </div>
+              <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
+                <Checkbox
                   checked={enabled}
                   onChange={(e) => setEnabled(e.target.checked)}
-                  className="rounded border-border"
                 />
                 Enabled
               </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
+              <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
+                <Checkbox
                   checked={yoloMode}
                   onChange={(e) => setYoloMode(e.target.checked)}
-                  className="rounded border-border"
                   aria-label="Agent YOLO mode"
                 />
                 YOLO mode
@@ -1924,7 +2397,7 @@ function AgentDetailsPanel({
         </TabsContent>
 
         {/* Members Tab */}
-        <TabsContent value="members" className="flex-1 overflow-hidden px-4 pb-4">
+        <TabsContent value="members" className="min-h-0 flex-1 overflow-hidden px-4 pb-4">
           <ScrollArea className="h-full">
             <div className="space-y-3 pr-2">
               <p className="text-xs text-muted-foreground">
@@ -1933,28 +2406,27 @@ function AgentDetailsPanel({
               {agents.map((a) => (
                 <div key={a.id} className="picker-row rounded-lg border border-border p-3">
                   <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={Boolean(checkedAgents[a.id])}
                       onChange={(e) =>
                         setCheckedAgents((c) => ({ ...c, [a.id]: e.target.checked }))
                       }
-                      className="rounded border-border"
                     />
                     <span className="text-sm font-medium">{a.name}</span>
                   </label>
-                  <select
+                  <Select
+                    className="mt-2"
                     value={overrides[a.id] ?? ""}
                     onChange={(e) => setOverrides((c) => ({ ...c, [a.id]: e.target.value }))}
                     aria-label={`${a.name} run workspace`}
-                    className="mt-2 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+                    selectClassName="h-8 px-2 pr-8 text-xs"
                   >
                     {runWorkspaceOptions(a, boundAgents, projectWorkspace).map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               ))}
               <Button size="sm" className="w-full gap-2" onClick={saveBindings}>
@@ -1966,8 +2438,8 @@ function AgentDetailsPanel({
         </TabsContent>
 
         {/* Workspace Tab */}
-        <TabsContent value="workspace" className="flex flex-1 flex-col overflow-hidden px-4 pb-4">
-          <div className="flex flex-1 flex-col gap-3 overflow-hidden">
+        <TabsContent value="workspace" className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
               <Database className="h-3.5 w-3.5" />
               <span className="truncate">{selectedBinding?.config_workspace.path ?? selected?.config_workspace_id ?? ""}</span>
@@ -1993,7 +2465,7 @@ function AgentDetailsPanel({
         </TabsContent>
 
         {/* Env Tab */}
-        <TabsContent value="env" className="flex-1 overflow-hidden px-4 pb-4">
+        <TabsContent value="env" className="min-h-0 flex-1 overflow-hidden px-4 pb-4">
           <ScrollArea className="h-full">
             <div className="space-y-3 pr-2">
               <span className="text-xs font-medium text-muted-foreground uppercase">Current</span>

@@ -6,6 +6,8 @@ type StartSessionRequest struct {
 	AgentID           string
 	Workspace         string
 	Model             string
+	Effort            string
+	PermissionMode    string
 	YoloMode          bool
 	Env               map[string]string
 	SessionKey        string

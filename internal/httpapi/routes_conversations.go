@@ -167,6 +167,18 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "empty message")
 			return
 		}
+		if errors.Is(err, app.ErrUnknownCommand) {
+			writeError(w, http.StatusBadRequest, "unknown command")
+			return
+		}
+		if app.IsCommandInputError(err) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if errors.Is(err, app.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, "invalid input")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}

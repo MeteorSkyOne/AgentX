@@ -377,6 +377,220 @@ func TestDirectedMessageIsIncludedInLaterAgentContext(t *testing.T) {
 	}
 }
 
+func TestSlashCommandRequiresTargetWhenConversationHasMultipleAgents(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	second, err := app.CreateAgent(ctx, AgentCreateRequest{
+		UserID:         bootstrap.User.ID,
+		OrganizationID: bootstrap.Organization.ID,
+		Name:           "Agent Two",
+		Handle:         "agent_two",
+		Kind:           domain.AgentKindFake,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SetChannelAgents(ctx, bootstrap.Channel.ID, []domain.ChannelAgent{
+		{AgentID: bootstrap.Agent.ID},
+		{AgentID: second.ID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/new",
+	})
+	if !IsCommandInputError(err) {
+		t.Fatalf("error = %v, want command input error", err)
+	}
+}
+
+func TestSlashModelAndEffortPersistAgentConfig(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/model gpt-5.2",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/effort high",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	agent, err := app.Agent(ctx, bootstrap.Agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.Model != "gpt-5.2" || agent.Effort != "high" {
+		t.Fatalf("agent model/effort = %q/%q, want gpt-5.2/high", agent.Model, agent.Effort)
+	}
+}
+
+func TestSlashNewResetsProviderSessionAndFiltersOldContext(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	capture := &capturingRuntime{sends: make(chan capturedInput, 4)}
+	app := New(st, eventbus.New(), Options{
+		AdminToken:       "secret",
+		DataDir:          t.TempDir(),
+		DefaultAgentKind: "capture",
+		Runtimes: map[string]agentruntime.Runtime{
+			"capture": capture,
+		},
+	})
+	bootstrap, err := app.Bootstrap(ctx, BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "old context",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first := readCapturedInput(t, capture.sends)
+	requireEventuallyApp(t, time.Second, func() bool {
+		session, err := st.Sessions().ByConversation(ctx, bootstrap.Agent.ID, domain.ConversationChannel, bootstrap.Channel.ID)
+		if err != nil {
+			return false
+		}
+		return session.ProviderSessionID != ""
+	})
+	if first.previousSessionID != "" {
+		t.Fatalf("first previous session = %q, want empty", first.previousSessionID)
+	}
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/new",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	session, err := st.Sessions().ByConversation(ctx, bootstrap.Agent.ID, domain.ConversationChannel, bootstrap.Channel.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.ProviderSessionID != "" || session.ContextStartedAt == nil {
+		t.Fatalf("session after /new = %#v, want empty provider and boundary", session)
+	}
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "after reset",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	second := readCapturedInput(t, capture.sends)
+	if second.previousSessionID != "" {
+		t.Fatalf("second previous session = %q, want empty after /new", second.previousSessionID)
+	}
+	if strings.Contains(second.input.Context, "old context") {
+		t.Fatalf("context after /new = %q, want old context filtered", second.input.Context)
+	}
+}
+
+func TestSlashPlanUsesClaudePlanPermissionAndStripsTarget(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	capture := &capturingRuntime{sends: make(chan capturedInput, 4)}
+	app := New(st, eventbus.New(), Options{
+		AdminToken:       "secret",
+		DataDir:          t.TempDir(),
+		DefaultAgentKind: domain.AgentKindClaude,
+		Runtimes: map[string]agentruntime.Runtime{
+			domain.AgentKindClaude: capture,
+		},
+	})
+	bootstrap, err := app.Bootstrap(ctx, BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/plan @claude-default build the feature",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	input := readCapturedInput(t, capture.sends)
+	if input.permissionMode != "plan" {
+		t.Fatalf("permission mode = %q, want plan", input.permissionMode)
+	}
+	if strings.Contains(input.input.Prompt, "@claude-default") || !strings.Contains(input.input.Prompt, "build the feature") {
+		t.Fatalf("prompt = %q, want stripped target and task", input.input.Prompt)
+	}
+}
+
+func TestSlashCompactUnsupportedForCodexWritesSystemMessage(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	agent, err := app.UpdateAgent(ctx, bootstrap.Agent.ID, AgentUpdateRequest{Kind: stringPtr(domain.AgentKindCodex)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	message, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/compact",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.SenderType != domain.SenderSystem || !strings.Contains(message.Body, "not supported") || !strings.Contains(message.Body, agent.Handle) {
+		t.Fatalf("compact message = %#v", message)
+	}
+}
+
 func TestUpdateThreadTitlePreservesCatalogOrder(t *testing.T) {
 	ctx := context.Background()
 	application, _, bootstrap := newConversationTestApp(t, ctx)
@@ -594,6 +808,22 @@ func (s *recordingSessionStore) SetAgentSession(ctx context.Context, agentID str
 	return nil
 }
 
+func (s *recordingSessionStore) ResetAgentSessionContext(ctx context.Context, agentID string, conversationType domain.ConversationType, conversationID string, contextStartedAt time.Time) error {
+	s.agentID = agentID
+	s.conversationType = conversationType
+	s.conversationID = conversationID
+	s.providerID = ""
+	s.status = "reset"
+	return nil
+}
+
+func (s *recordingSessionStore) SetAgentSessionContextStartedAt(ctx context.Context, agentID string, conversationType domain.ConversationType, conversationID string, contextStartedAt time.Time) error {
+	s.agentID = agentID
+	s.conversationType = conversationType
+	s.conversationID = conversationID
+	return nil
+}
+
 func (s *recordingSessionStore) ByConversation(ctx context.Context, agentID string, conversationType domain.ConversationType, conversationID string) (domain.AgentSession, error) {
 	return domain.AgentSession{}, sql.ErrNoRows
 }
@@ -647,9 +877,12 @@ func (s *scriptedSession) Close(ctx context.Context) error {
 }
 
 type capturedInput struct {
-	agentID  string
-	yoloMode bool
-	input    agentruntime.Input
+	agentID           string
+	yoloMode          bool
+	effort            string
+	permissionMode    string
+	previousSessionID string
+	input             agentruntime.Input
 }
 
 type capturingRuntime struct {
@@ -661,33 +894,50 @@ func (r *capturingRuntime) StartSession(ctx context.Context, req agentruntime.St
 		return nil, err
 	}
 	return &capturingSession{
-		agentID:  req.AgentID,
-		yoloMode: req.YoloMode,
-		id:       "capture:" + req.SessionKey,
-		sends:    r.sends,
-		events:   make(chan agentruntime.Event, 1),
+		agentID:           req.AgentID,
+		yoloMode:          req.YoloMode,
+		effort:            req.Effort,
+		permissionMode:    req.PermissionMode,
+		previousSessionID: req.PreviousSessionID,
+		id:                "capture:" + req.SessionKey,
+		sends:             r.sends,
+		events:            make(chan agentruntime.Event, 1),
 	}, nil
 }
 
 type capturingSession struct {
-	agentID  string
-	yoloMode bool
-	id       string
-	sends    chan capturedInput
-	events   chan agentruntime.Event
+	agentID           string
+	yoloMode          bool
+	effort            string
+	permissionMode    string
+	previousSessionID string
+	id                string
+	sends             chan capturedInput
+	events            chan agentruntime.Event
 }
 
 func (s *capturingSession) Send(ctx context.Context, input agentruntime.Input) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	s.sends <- capturedInput{agentID: s.agentID, yoloMode: s.yoloMode, input: input}
+	s.sends <- capturedInput{
+		agentID:           s.agentID,
+		yoloMode:          s.yoloMode,
+		effort:            s.effort,
+		permissionMode:    s.permissionMode,
+		previousSessionID: s.previousSessionID,
+		input:             input,
+	}
 	s.events <- agentruntime.Event{Type: agentruntime.EventCompleted, Text: "capture ok"}
 	return nil
 }
 
 func (s *capturingSession) Events() <-chan agentruntime.Event {
 	return s.events
+}
+
+func stringPtr(value string) *string {
+	return &value
 }
 
 func (s *capturingSession) CurrentSessionID() string {
