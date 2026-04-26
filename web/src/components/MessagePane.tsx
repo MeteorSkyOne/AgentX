@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Brain,
   Braces,
@@ -21,6 +21,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { AgentAvatar, agentKindColor } from "./AgentAvatar";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 
 interface StreamingMessage {
   runID: string;
@@ -314,7 +315,7 @@ function MessageItem({
           <>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <div className="prose prose-sm prose-invert max-w-none">
-              <MessageContent text={message.body} />
+              <MarkdownRenderer text={message.body} />
             </div>
           </>
         )}
@@ -368,7 +369,7 @@ function StreamingItem({
         </div>
         {process.length > 0 && <ProcessBlock items={process} />}
         <div className="prose prose-sm prose-invert max-w-none">
-          <MessageContent text={item.error ?? item.text} />
+          <MarkdownRenderer text={item.error ?? item.text} />
         </div>
       </div>
     </div>
@@ -406,7 +407,7 @@ function ProcessRow({ item }: { item: ProcessItem }) {
         </div>
         {item.text && (
           <div className="rounded-md bg-muted/30 px-3 py-2 italic">
-            <MessageContent text={item.text} />
+            <MarkdownRenderer text={item.text} />
           </div>
         )}
       </div>
@@ -629,75 +630,6 @@ function formatJSON(value: unknown): string {
   } catch {
     return String(value);
   }
-}
-
-function MessageContent({ text }: { text: string }) {
-  const parts = text.split(/(```[\s\S]*?```)/g);
-  return (
-    <>
-      {parts.map((part, index) => {
-        if (part.startsWith("```") && part.endsWith("```")) {
-          const raw = part.slice(3, -3).replace(/^\n/, "");
-          const firstLineEnd = raw.indexOf("\n");
-          const language = firstLineEnd > 0 ? raw.slice(0, firstLineEnd).trim() : "";
-          const code = firstLineEnd > 0 ? raw.slice(firstLineEnd + 1) : raw;
-          return (
-            <ScrollArea
-              key={index}
-              orientation="horizontal"
-              className="my-2 rounded-md bg-sidebar"
-            >
-              <pre className="min-w-max p-3 text-sm">
-                {language && (
-                  <div className="mb-2 text-xs text-muted-foreground">{language}</div>
-                )}
-                <code>{code}</code>
-              </pre>
-            </ScrollArea>
-          );
-        }
-
-        const boldParts = part.split(/(\*\*.*?\*\*)/g);
-        return (
-          <span key={index}>
-            {boldParts.map((boldPart, boldIdx) => {
-              if (boldPart.startsWith("**") && boldPart.endsWith("**")) {
-                return <strong key={boldIdx}>{renderTextWithMentions(boldPart.slice(2, -2), `${boldIdx}-bold`)}</strong>;
-              }
-              return renderTextWithMentions(boldPart, `${boldIdx}`);
-            })}
-          </span>
-        );
-      })}
-    </>
-  );
-}
-
-function renderTextWithMentions(text: string, keyPrefix: string): ReactNode[] {
-  return text.split("\n").flatMap((line, lineIdx, lines) => {
-    const nodes = renderMentions(line, `${keyPrefix}-${lineIdx}`);
-    if (lineIdx < lines.length - 1) {
-      nodes.push(<br key={`${keyPrefix}-${lineIdx}-br`} />);
-    }
-    return nodes;
-  });
-}
-
-function renderMentions(text: string, keyPrefix: string): ReactNode[] {
-  return text.split(/(@[A-Za-z0-9][A-Za-z0-9_-]*)/g).map((part, index) => {
-    if (/^@[A-Za-z0-9][A-Za-z0-9_-]*$/.test(part)) {
-      return (
-        <span
-          key={`${keyPrefix}-${index}`}
-          data-mention={part.slice(1)}
-          className="rounded bg-primary/10 px-1 py-0.5 font-medium text-primary"
-        >
-          {part}
-        </span>
-      );
-    }
-    return part;
-  });
 }
 
 function formatTime(value: string): string {
