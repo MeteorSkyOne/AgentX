@@ -203,6 +203,7 @@ export function createAgent(
     kind?: string;
     model?: string;
     effort?: string;
+    fast_mode?: boolean;
     yolo_mode?: boolean;
     env?: Record<string, string>;
   }
@@ -215,7 +216,7 @@ export function createAgent(
 
 export function updateAgent(
   agentID: string,
-  payload: Partial<Pick<Agent, "name" | "handle" | "kind" | "model" | "effort" | "enabled" | "yolo_mode">> & {
+  payload: Partial<Pick<Agent, "name" | "handle" | "kind" | "model" | "effort" | "enabled" | "fast_mode" | "yolo_mode">> & {
     env?: Record<string, string>;
   }
 ): Promise<Agent> {

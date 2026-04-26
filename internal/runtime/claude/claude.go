@@ -61,11 +61,14 @@ func (r Runtime) StartSession(ctx context.Context, req runtime.StartSessionReque
 
 func (r Runtime) buildArgs(req runtime.StartSessionRequest, input runtime.Input) []string {
 	args := []string{"--print", "--verbose", "--output-format", "stream-json", "--input-format", "text"}
-	if model := strings.TrimSpace(req.Model); model != "" {
+	if model := strings.TrimSpace(req.Model); model != "" && !req.FastMode {
 		args = append(args, "--model", model)
 	}
 	if effort := strings.TrimSpace(req.Effort); effort != "" {
 		args = append(args, "--effort", effort)
+	}
+	if req.FastMode {
+		args = append(args, "--settings", `{"fastMode":true}`)
 	}
 	mode := strings.TrimSpace(r.opts.PermissionMode)
 	if override := strings.TrimSpace(req.PermissionMode); override != "" {

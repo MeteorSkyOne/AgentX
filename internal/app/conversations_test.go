@@ -321,6 +321,7 @@ func TestDirectedMessageIsIncludedInLaterAgentContext(t *testing.T) {
 		Name:           "Agent Two",
 		Handle:         "agent_two",
 		Kind:           "capture",
+		FastMode:       true,
 		YoloMode:       true,
 	})
 	if err != nil {
@@ -348,6 +349,9 @@ func TestDirectedMessageIsIncludedInLaterAgentContext(t *testing.T) {
 	}
 	if !directed.yoloMode {
 		t.Fatal("directed yoloMode = false, want true")
+	}
+	if !directed.fastMode {
+		t.Fatal("directed fastMode = false, want true")
 	}
 	select {
 	case extra := <-capture.sends:
@@ -878,6 +882,7 @@ func (s *scriptedSession) Close(ctx context.Context) error {
 
 type capturedInput struct {
 	agentID           string
+	fastMode          bool
 	yoloMode          bool
 	effort            string
 	permissionMode    string
@@ -895,6 +900,7 @@ func (r *capturingRuntime) StartSession(ctx context.Context, req agentruntime.St
 	}
 	return &capturingSession{
 		agentID:           req.AgentID,
+		fastMode:          req.FastMode,
 		yoloMode:          req.YoloMode,
 		effort:            req.Effort,
 		permissionMode:    req.PermissionMode,
@@ -907,6 +913,7 @@ func (r *capturingRuntime) StartSession(ctx context.Context, req agentruntime.St
 
 type capturingSession struct {
 	agentID           string
+	fastMode          bool
 	yoloMode          bool
 	effort            string
 	permissionMode    string
@@ -922,6 +929,7 @@ func (s *capturingSession) Send(ctx context.Context, input agentruntime.Input) e
 	}
 	s.sends <- capturedInput{
 		agentID:           s.agentID,
+		fastMode:          s.fastMode,
 		yoloMode:          s.yoloMode,
 		effort:            s.effort,
 		permissionMode:    s.permissionMode,

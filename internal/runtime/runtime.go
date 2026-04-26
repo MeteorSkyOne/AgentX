@@ -8,6 +8,7 @@ type StartSessionRequest struct {
 	Model             string
 	Effort            string
 	PermissionMode    string
+	FastMode          bool
 	YoloMode          bool
 	Env               map[string]string
 	SessionKey        string

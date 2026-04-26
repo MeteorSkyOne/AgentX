@@ -110,6 +110,7 @@ type Agent struct {
 	ConfigWorkspaceID  string            `json:"config_workspace_id"`
 	DefaultWorkspaceID string            `json:"default_workspace_id,omitempty"`
 	Enabled            bool              `json:"enabled"`
+	FastMode           bool              `json:"fast_mode"`
 	YoloMode           bool              `json:"yolo_mode"`
 	Env                map[string]string `json:"env,omitempty"`
 	CreatedAt          time.Time         `json:"created_at"`

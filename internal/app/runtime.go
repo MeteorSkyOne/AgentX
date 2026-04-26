@@ -99,6 +99,7 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 		Model:             agent.Model,
 		Effort:            agent.Effort,
 		PermissionMode:    opts.PermissionMode,
+		FastMode:          agent.FastMode,
 		YoloMode:          agent.YoloMode,
 		Env:               agent.Env,
 		SessionKey:        sessionKey,

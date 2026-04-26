@@ -85,21 +85,23 @@ func TestHTTPAgentCreateAndUpdateRoundTripsEffort(t *testing.T) {
 
 	var created domain.Agent
 	postJSON(t, ts.URL+"/api/organizations/"+bootstrap.Organization.ID+"/agents", bootstrap.SessionToken, map[string]any{
-		"name":   "Planner",
-		"handle": "planner",
-		"kind":   "codex",
-		"model":  "gpt-test",
-		"effort": "medium",
+		"name":      "Planner",
+		"handle":    "planner",
+		"kind":      "codex",
+		"model":     "gpt-test",
+		"effort":    "medium",
+		"fast_mode": true,
 	}, http.StatusOK, &created)
-	if created.Effort != "medium" {
-		t.Fatalf("created effort = %q, want medium", created.Effort)
+	if created.Effort != "medium" || !created.FastMode {
+		t.Fatalf("created agent = %#v", created)
 	}
 
 	var updated domain.Agent
 	patchJSON(t, ts.URL+"/api/agents/"+created.ID, bootstrap.SessionToken, map[string]any{
-		"effort": "high",
+		"effort":    "high",
+		"fast_mode": false,
 	}, http.StatusOK, &updated)
-	if updated.Effort != "high" || updated.Model != "gpt-test" {
+	if updated.Effort != "high" || updated.Model != "gpt-test" || updated.FastMode {
 		t.Fatalf("updated agent = %#v", updated)
 	}
 }

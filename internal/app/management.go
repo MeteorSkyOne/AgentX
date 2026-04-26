@@ -284,6 +284,7 @@ type AgentCreateRequest struct {
 	Kind           string
 	Model          string
 	Effort         string
+	FastMode       bool
 	YoloMode       bool
 	Env            map[string]string
 }
@@ -328,6 +329,7 @@ func (a *App) CreateAgent(ctx context.Context, req AgentCreateRequest) (domain.A
 		ConfigWorkspaceID:  workspace.ID,
 		DefaultWorkspaceID: workspace.ID,
 		Enabled:            true,
+		FastMode:           req.FastMode,
 		YoloMode:           req.YoloMode,
 		Env:                copyStringMap(req.Env),
 		CreatedAt:          now,
@@ -361,6 +363,7 @@ type AgentUpdateRequest struct {
 	Model    *string
 	Effort   *string
 	Enabled  *bool
+	FastMode *bool
 	YoloMode *bool
 	Env      map[string]string
 	EnvSet   bool
@@ -407,6 +410,9 @@ func (a *App) UpdateAgent(ctx context.Context, agentID string, req AgentUpdateRe
 	}
 	if req.Enabled != nil {
 		agent.Enabled = *req.Enabled
+	}
+	if req.FastMode != nil {
+		agent.FastMode = *req.FastMode
 	}
 	if req.YoloMode != nil {
 		agent.YoloMode = *req.YoloMode

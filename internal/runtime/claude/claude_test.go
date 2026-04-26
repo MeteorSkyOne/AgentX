@@ -57,6 +57,16 @@ func TestBuildArgsStartsAndResumesClaudePrint(t *testing.T) {
 		"--append-system-prompt", "be brief", "plan only",
 	}
 	assertArgs(t, args, want)
+
+	req = runtime.StartSessionRequest{Model: "sonnet", Effort: "high", FastMode: true}
+	args = rt.buildArgs(req, runtime.Input{Prompt: "quick"})
+	want = []string{
+		"--print", "--verbose", "--output-format", "stream-json", "--input-format", "text",
+		"--effort", "high", "--settings", `{"fastMode":true}`, "--permission-mode", "acceptEdits",
+		"--allowedTools", "Read,Bash", "--disallowedTools", "WebSearch",
+		"--append-system-prompt", "be brief", "quick",
+	}
+	assertArgs(t, args, want)
 }
 
 func TestLineHandlerParsesClaudeStreamJSON(t *testing.T) {

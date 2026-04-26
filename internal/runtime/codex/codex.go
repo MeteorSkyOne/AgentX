@@ -69,6 +69,9 @@ func (r Runtime) buildArgs(req runtime.StartSessionRequest, input runtime.Input)
 	if effort := strings.TrimSpace(req.Effort); effort != "" {
 		args = append(args, "-c", `model_reasoning_effort="`+effort+`"`)
 	}
+	if req.FastMode {
+		args = append(args, "-c", `service_tier="fast"`, "-c", "features.fast_mode=true")
+	}
 	if r.opts.BypassSandbox || req.YoloMode {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	} else if r.opts.FullAuto {

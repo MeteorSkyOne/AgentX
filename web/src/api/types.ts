@@ -91,6 +91,7 @@ export interface Agent {
   config_workspace_id: string;
   default_workspace_id: string;
   enabled: boolean;
+  fast_mode: boolean;
   yolo_mode: boolean;
   env?: Record<string, string>;
   created_at: string;

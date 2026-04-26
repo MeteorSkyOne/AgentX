@@ -159,12 +159,13 @@ interface ShellProps {
     kind?: string;
     model?: string;
     effort?: string;
+    fast_mode?: boolean;
     yolo_mode?: boolean;
     env?: Record<string, string>;
   }) => Promise<Agent>;
   onUpdateAgent: (
     agentID: string,
-    payload: Partial<Pick<Agent, "name" | "handle" | "kind" | "model" | "effort" | "enabled" | "yolo_mode">> & {
+    payload: Partial<Pick<Agent, "name" | "handle" | "kind" | "model" | "effort" | "enabled" | "fast_mode" | "yolo_mode">> & {
       env?: Record<string, string>;
     }
   ) => Promise<void>;
@@ -255,6 +256,7 @@ export function Shell({
   const [newAgentKind, setNewAgentKind] = useState("fake");
   const [newAgentModel, setNewAgentModel] = useState("");
   const [newAgentEffort, setNewAgentEffort] = useState("");
+  const [newAgentFastMode, setNewAgentFastMode] = useState(false);
   const [newAgentYoloMode, setNewAgentYoloMode] = useState(false);
   const [newAgentEmoji, setNewAgentEmoji] = useState("");
   const [newAgentColor, setNewAgentColor] = useState("");
@@ -441,6 +443,7 @@ export function Shell({
         kind: newAgentKind,
         model: newAgentModel || undefined,
         effort: newAgentEffort || undefined,
+        fast_mode: newAgentFastMode,
         yolo_mode: newAgentYoloMode,
       });
       if (newAgentEmoji) {
@@ -462,6 +465,7 @@ export function Shell({
       setNewAgentKind("fake");
       setNewAgentModel("");
       setNewAgentEffort("");
+      setNewAgentFastMode(false);
       setNewAgentYoloMode(false);
       setNewAgentEmoji("");
       setNewAgentColor("");
@@ -1540,6 +1544,14 @@ export function Shell({
             </div>
             <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
               <Checkbox
+                checked={newAgentFastMode}
+                onChange={(e) => setNewAgentFastMode(e.target.checked)}
+                aria-label="New agent fast mode"
+              />
+              Fast mode
+            </label>
+            <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
+              <Checkbox
                 checked={newAgentYoloMode}
                 onChange={(e) => setNewAgentYoloMode(e.target.checked)}
                 aria-label="New agent YOLO mode"
@@ -2081,6 +2093,7 @@ function AgentDetailsPanel({
   const [model, setModel] = useState(selectedAgent?.model ?? "");
   const [effort, setEffort] = useState(selectedAgent?.effort ?? "");
   const [enabled, setEnabled] = useState(selectedAgent?.enabled ?? true);
+  const [fastMode, setFastMode] = useState(selectedAgent?.fast_mode ?? false);
   const [yoloMode, setYoloMode] = useState(selectedAgent?.yolo_mode ?? false);
   const [avatarEmoji, setAvatarEmoji] = useState("");
   const [avatarColor, setAvatarColor] = useState("");
@@ -2119,6 +2132,7 @@ function AgentDetailsPanel({
     setModel(selected.model);
     setEffort(selected.effort ?? "");
     setEnabled(selected.enabled);
+    setFastMode(selected.fast_mode);
     setYoloMode(selected.yolo_mode);
     setEnvBody("{}");
     const av = getAgentAvatar(selected.id);
@@ -2133,6 +2147,7 @@ function AgentDetailsPanel({
     selected?.model,
     selected?.effort,
     selected?.enabled,
+    selected?.fast_mode,
     selected?.yolo_mode
   ]);
 
@@ -2149,7 +2164,7 @@ function AgentDetailsPanel({
 
   async function saveAgent() {
     if (!selected) return;
-    await onUpdateAgent(selected.id, { name, handle, kind, model, effort, enabled, yolo_mode: yoloMode });
+    await onUpdateAgent(selected.id, { name, handle, kind, model, effort, enabled, fast_mode: fastMode, yolo_mode: yoloMode });
     setAgentAvatar(selected.id, avatarEmoji ? { emoji: avatarEmoji, color: avatarColor || agentKindColor(kind) } : null);
     setStatus("Saved");
   }
@@ -2250,6 +2265,8 @@ function AgentDetailsPanel({
           <strong className="truncate">{selected?.model || "default"}</strong>
           <span className="text-muted-foreground">Effort</span>
           <strong className="truncate">{selected?.effort || "default"}</strong>
+          <span className="text-muted-foreground">Fast</span>
+          <strong>{selected?.fast_mode ? "on" : "off"}</strong>
           <span className="text-muted-foreground">YOLO</span>
           <strong>{selected?.yolo_mode ? "on" : "off"}</strong>
           <span className="text-muted-foreground">Channel</span>
@@ -2359,6 +2376,14 @@ function AgentDetailsPanel({
                   onChange={(e) => setEnabled(e.target.checked)}
                 />
                 Enabled
+              </label>
+              <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
+                <Checkbox
+                  checked={fastMode}
+                  onChange={(e) => setFastMode(e.target.checked)}
+                  aria-label="Agent fast mode"
+                />
+                Fast mode
               </label>
               <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
                 <Checkbox

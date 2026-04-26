@@ -47,6 +47,7 @@ type agentCreateRequest struct {
 	Kind     string            `json:"kind"`
 	Model    string            `json:"model"`
 	Effort   string            `json:"effort"`
+	FastMode bool              `json:"fast_mode"`
 	YoloMode bool              `json:"yolo_mode"`
 	Env      map[string]string `json:"env"`
 }
@@ -58,6 +59,7 @@ type agentUpdateRequest struct {
 	Model    *string           `json:"model"`
 	Effort   *string           `json:"effort"`
 	Enabled  *bool             `json:"enabled"`
+	FastMode *bool             `json:"fast_mode"`
 	YoloMode *bool             `json:"yolo_mode"`
 	Env      map[string]string `json:"env"`
 }
@@ -449,6 +451,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		Kind:           req.Kind,
 		Model:          req.Model,
 		Effort:         req.Effort,
+		FastMode:       req.FastMode,
 		YoloMode:       req.YoloMode,
 		Env:            req.Env,
 	})
@@ -488,6 +491,7 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		Model:    req.Model,
 		Effort:   req.Effort,
 		Enabled:  req.Enabled,
+		FastMode: req.FastMode,
 		YoloMode: req.YoloMode,
 		Env:      req.Env,
 		EnvSet:   req.Env != nil,
