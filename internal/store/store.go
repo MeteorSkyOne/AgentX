@@ -117,6 +117,7 @@ type WorkspaceStore interface {
 type ChannelAgentStore interface {
 	ReplaceForChannel(ctx context.Context, channelID string, agents []domain.ChannelAgent) error
 	ListByChannel(ctx context.Context, channelID string) ([]domain.ChannelAgent, error)
+	DeleteForAgent(ctx context.Context, agentID string) error
 }
 
 type BindingStore interface {

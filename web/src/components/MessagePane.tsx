@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Brain,
   Braces,
@@ -21,7 +21,10 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { AgentAvatar, agentKindColor } from "./AgentAvatar";
-import { MarkdownRenderer } from "./MarkdownRenderer";
+
+const MarkdownRenderer = lazy(() =>
+  import("./MarkdownRenderer").then((module) => ({ default: module.MarkdownRenderer }))
+);
 
 interface StreamingMessage {
   runID: string;
@@ -165,6 +168,18 @@ function cssEscape(value: string): string {
     return CSS.escape(value);
   }
   return value.replace(/"/g, '\\"');
+}
+
+function MessageMarkdown({ text }: { text: string }) {
+  return (
+    <Suspense fallback={<MarkdownFallback text={text} />}>
+      <MarkdownRenderer text={text} />
+    </Suspense>
+  );
+}
+
+function MarkdownFallback({ text }: { text: string }) {
+  return <p className="whitespace-pre-wrap">{text}</p>;
 }
 
 function MessageItem({
@@ -315,7 +330,7 @@ function MessageItem({
           <>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <div className="prose prose-sm max-w-none overflow-hidden break-words select-text dark:prose-invert">
-              <MarkdownRenderer text={message.body} />
+              <MessageMarkdown text={message.body} />
             </div>
           </>
         )}
@@ -369,7 +384,7 @@ function StreamingItem({
         </div>
         {process.length > 0 && <ProcessBlock items={process} />}
         <div className="prose prose-sm max-w-none overflow-hidden break-words select-text dark:prose-invert">
-          <MarkdownRenderer text={item.error ?? item.text} />
+          <MessageMarkdown text={item.error ?? item.text} />
         </div>
       </div>
     </div>
@@ -407,7 +422,7 @@ function ProcessRow({ item }: { item: ProcessItem }) {
         </div>
         {item.text && (
           <div className="rounded-md bg-muted/30 px-3 py-2 italic">
-            <MarkdownRenderer text={item.text} />
+            <MessageMarkdown text={item.text} />
           </div>
         )}
       </div>

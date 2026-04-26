@@ -15,6 +15,7 @@ import {
   deleteMessage,
   deleteProject,
   deleteThread,
+  deleteWorkspaceFile,
   getToken,
   me,
   notificationSettings,
@@ -637,6 +638,7 @@ export default function App() {
 
   async function handleCreateAgent(payload: {
     name: string;
+    description?: string;
     handle?: string;
     kind?: string;
     model?: string;
@@ -652,7 +654,7 @@ export default function App() {
 
   async function handleUpdateAgent(
     agentID: string,
-    payload: Partial<Pick<Agent, "name" | "handle" | "kind" | "model" | "effort" | "enabled" | "fast_mode" | "yolo_mode">> & {
+    payload: Partial<Pick<Agent, "name" | "description" | "handle" | "kind" | "model" | "effort" | "enabled" | "fast_mode" | "yolo_mode">> & {
       env?: Record<string, string>;
     }
   ) {
@@ -694,6 +696,10 @@ export default function App() {
 
   async function handleWriteWorkspaceFile(workspaceID: string, path: string, body: string) {
     await putWorkspaceFile(workspaceID, path, body);
+  }
+
+  async function handleDeleteWorkspaceFile(workspaceID: string, path: string) {
+    await deleteWorkspaceFile(workspaceID, path);
   }
 
   const handleToggleTheme = useCallback(() => {
@@ -768,6 +774,7 @@ export default function App() {
       onLoadWorkspaceTree={handleLoadWorkspaceTree}
       onReadWorkspaceFile={handleReadWorkspaceFile}
       onWriteWorkspaceFile={handleWriteWorkspaceFile}
+      onDeleteWorkspaceFile={handleDeleteWorkspaceFile}
       onUpdateMessage={handleUpdateMessage}
       onDeleteMessage={handleDeleteMessage}
       onLoadOlderMessages={handleLoadOlderMessages}

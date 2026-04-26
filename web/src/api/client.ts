@@ -232,6 +232,7 @@ export function createAgent(
   orgID: string,
   payload: {
     name: string;
+    description?: string;
     handle?: string;
     kind?: string;
     model?: string;
@@ -249,7 +250,7 @@ export function createAgent(
 
 export function updateAgent(
   agentID: string,
-  payload: Partial<Pick<Agent, "name" | "handle" | "kind" | "model" | "effort" | "enabled" | "fast_mode" | "yolo_mode">> & {
+  payload: Partial<Pick<Agent, "name" | "description" | "handle" | "kind" | "model" | "effort" | "enabled" | "fast_mode" | "yolo_mode">> & {
     env?: Record<string, string>;
   }
 ): Promise<Agent> {
@@ -306,6 +307,16 @@ export function putWorkspaceFile(
     {
       method: "PUT",
       body: JSON.stringify({ body })
+    }
+  );
+}
+
+export function deleteWorkspaceFile(workspaceID: string, path: string): Promise<void> {
+  const params = new URLSearchParams({ path });
+  return request<void>(
+    `/api/workspaces/${encodeURIComponent(workspaceID)}/files?${params.toString()}`,
+    {
+      method: "DELETE"
     }
   );
 }

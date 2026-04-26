@@ -95,6 +95,7 @@ export interface Agent {
   kind: string;
   name: string;
   handle: string;
+  description: string;
   model: string;
   effort: string;
   config_workspace_id: string;
