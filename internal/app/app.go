@@ -1,7 +1,9 @@
 package app
 
 import (
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/meteorsky/agentx/internal/domain"
 	"github.com/meteorsky/agentx/internal/eventbus"
@@ -17,6 +19,8 @@ type Options struct {
 	DefaultAgentName  string
 	DefaultAgentModel string
 	Runtimes          map[string]agentruntime.Runtime
+	WebhookHTTPClient *http.Client
+	WebhookTimeout    time.Duration
 }
 
 type App struct {

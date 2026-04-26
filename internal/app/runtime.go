@@ -311,6 +311,7 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 		ConversationID:   botMessage.ConversationID,
 		Payload:          domain.MessageCreatedPayload{Message: botMessage},
 	})
+	a.notifyAgentMessageCreated(context.WithoutCancel(ctx), agent.Name, botMessage)
 	if err := a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, providerSessionID, "completed"); err != nil {
 		a.publishAgentRunFailed(userMessage, runID, err)
 		return

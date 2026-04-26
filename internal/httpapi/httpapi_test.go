@@ -248,6 +248,62 @@ func TestHTTPChannelsRejectsOrganizationOutsideAuthenticatedMemberships(t *testi
 	getJSON(t, ts.URL+"/api/organizations/not-a-real-org/channels", bootstrap.SessionToken, http.StatusNotFound, nil)
 }
 
+func TestHTTPNotificationSettingsAuthorizeValidateAndRedactSecret(t *testing.T) {
+	ts := newTestServer(t)
+	webhookCalls := make(chan http.Header, 1)
+	webhookServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		webhookCalls <- r.Header.Clone()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer webhookServer.Close()
+
+	var bootstrap app.BootstrapResult
+	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	}, http.StatusOK, &bootstrap)
+
+	settingsURL := ts.URL + "/api/organizations/" + bootstrap.Organization.ID + "/notification-settings"
+	getJSON(t, settingsURL, "", http.StatusUnauthorized, nil)
+	getJSON(t, ts.URL+"/api/organizations/not-a-real-org/notification-settings", bootstrap.SessionToken, http.StatusNotFound, nil)
+
+	var settings map[string]any
+	getJSON(t, settingsURL, bootstrap.SessionToken, http.StatusOK, &settings)
+	if settings["webhook_enabled"] != false || settings["webhook_secret_configured"] != false {
+		t.Fatalf("default notification settings = %#v", settings)
+	}
+
+	putJSON(t, settingsURL, bootstrap.SessionToken, map[string]any{
+		"webhook_enabled": true,
+		"webhook_url":     "ftp://example.com/hook",
+	}, http.StatusBadRequest, nil)
+
+	putJSON(t, settingsURL, bootstrap.SessionToken, map[string]any{
+		"webhook_enabled": true,
+		"webhook_url":     webhookServer.URL,
+		"webhook_secret":  "secret-value",
+	}, http.StatusOK, &settings)
+	if settings["webhook_url"] != webhookServer.URL || settings["webhook_secret_configured"] != true {
+		t.Fatalf("saved notification settings = %#v", settings)
+	}
+	if _, ok := settings["webhook_secret"]; ok {
+		t.Fatalf("response leaked webhook_secret: %#v", settings)
+	}
+
+	postJSON(t, settingsURL+"/test", bootstrap.SessionToken, map[string]any{}, http.StatusOK, nil)
+	select {
+	case headers := <-webhookCalls:
+		if headers.Get("X-AgentX-Event") != app.AgentMessageCreatedWebhookEvent {
+			t.Fatalf("X-AgentX-Event = %q", headers.Get("X-AgentX-Event"))
+		}
+		if headers.Get("X-AgentX-Signature") == "" {
+			t.Fatal("X-AgentX-Signature is empty")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for webhook test call")
+	}
+}
+
 func TestHTTPWorkspaceFilesRejectTraversalAndRoundTripText(t *testing.T) {
 	ts := newTestServer(t)
 

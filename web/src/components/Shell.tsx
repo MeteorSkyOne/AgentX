@@ -42,6 +42,7 @@ import type {
   ConversationType,
   CreateThreadResponse,
   Message,
+  NotificationSettings,
   Organization,
   ProcessItem,
   Project,
@@ -92,6 +93,11 @@ import {
   setAgentAvatar,
 } from "./AgentAvatar";
 import type { ThemeMode } from "../theme";
+import {
+  browserNotificationPermission,
+  requestBrowserNotificationPermission,
+  type BrowserNotificationPermission,
+} from "../notifications/browser";
 
 interface ActiveConversation {
   type: ConversationType;
@@ -134,6 +140,8 @@ interface ShellProps {
   olderMessagesLoading: boolean;
   hasOlderMessages: boolean;
   streaming: StreamingMessage[];
+  notificationSettings?: NotificationSettings;
+  notificationSettingsLoading: boolean;
   theme: ThemeMode;
   onSelectProject: (projectID: string) => void;
   onCreateProject: (name: string) => Promise<Project>;
@@ -170,6 +178,12 @@ interface ShellProps {
     }
   ) => Promise<void>;
   onDeleteAgent: (agentID: string) => Promise<void>;
+  onUpdateNotificationSettings: (payload: {
+    webhook_enabled: boolean;
+    webhook_url: string;
+    webhook_secret?: string;
+  }) => Promise<NotificationSettings>;
+  onTestNotificationSettings: () => Promise<void>;
   onLoadWorkspaceTree: (workspaceID: string) => Promise<WorkspaceTreeEntry>;
   onReadWorkspaceFile: (workspaceID: string, path: string) => Promise<string>;
   onWriteWorkspaceFile: (workspaceID: string, path: string, body: string) => Promise<void>;
@@ -200,6 +214,8 @@ export function Shell({
   olderMessagesLoading,
   hasOlderMessages,
   streaming,
+  notificationSettings,
+  notificationSettingsLoading,
   theme,
   onSelectProject,
   onCreateProject,
@@ -217,6 +233,8 @@ export function Shell({
   onCreateAgent,
   onUpdateAgent,
   onDeleteAgent,
+  onUpdateNotificationSettings,
+  onTestNotificationSettings,
   onLoadWorkspaceTree,
   onReadWorkspaceFile,
   onWriteWorkspaceFile,
@@ -266,6 +284,16 @@ export function Shell({
   const [threadTitleDraft, setThreadTitleDraft] = useState("");
   const [threadActionError, setThreadActionError] = useState<string | null>(null);
   const [threadActionPending, setThreadActionPending] = useState(false);
+  const [browserPermission, setBrowserPermission] = useState<BrowserNotificationPermission>(() =>
+    browserNotificationPermission()
+  );
+  const [webhookEnabled, setWebhookEnabled] = useState(false);
+  const [webhookURL, setWebhookURL] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [notificationActionError, setNotificationActionError] = useState<string | null>(null);
+  const [notificationActionStatus, setNotificationActionStatus] = useState<string | null>(null);
+  const [notificationSavePending, setNotificationSavePending] = useState(false);
+  const [notificationTestPending, setNotificationTestPending] = useState(false);
   const boundAgents = conversationContext?.agents ?? channelAgents;
   const activeAgents = useMemo(() => agents.filter((agent) => agent.enabled), [agents]);
   const selectedAgent = boundAgents[0]?.agent ?? activeAgents[0];
@@ -324,6 +352,17 @@ export function Shell({
       setProjectEditWorkspacePath(projectWorkspace?.path ?? "");
     }
   }, [project?.name, projectWorkspace?.path, projectEditOpen]);
+
+  useEffect(() => {
+    if (!accountSettingsOpen) {
+      syncNotificationDraft();
+    }
+  }, [
+    accountSettingsOpen,
+    notificationSettings?.organization_id,
+    notificationSettings?.webhook_enabled,
+    notificationSettings?.webhook_url
+  ]);
 
   useEffect(() => {
     if (projectEditOpen && !projectEditWorkspacePath && projectWorkspace?.path) {
@@ -403,7 +442,66 @@ export function Shell({
 
   function openAccountSettings() {
     blurActiveElement();
+    setBrowserPermission(browserNotificationPermission());
+    syncNotificationDraft();
     setAccountSettingsOpen(true);
+  }
+
+  function syncNotificationDraft() {
+    setWebhookEnabled(notificationSettings?.webhook_enabled ?? false);
+    setWebhookURL(notificationSettings?.webhook_url ?? "");
+    setWebhookSecret("");
+    setNotificationActionError(null);
+    setNotificationActionStatus(null);
+  }
+
+  async function enableBrowserNotifications() {
+    const permission = await requestBrowserNotificationPermission();
+    setBrowserPermission(permission);
+  }
+
+  async function saveNotificationSettings() {
+    setNotificationActionError(null);
+    setNotificationActionStatus(null);
+    setNotificationSavePending(true);
+    try {
+      await onUpdateNotificationSettings(notificationSettingsPayload());
+      setWebhookSecret("");
+      setNotificationActionStatus("Saved");
+    } catch (err) {
+      setNotificationActionError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setNotificationSavePending(false);
+    }
+  }
+
+  async function sendTestWebhook() {
+    setNotificationActionError(null);
+    setNotificationActionStatus(null);
+    setNotificationTestPending(true);
+    try {
+      await onUpdateNotificationSettings(notificationSettingsPayload());
+      setWebhookSecret("");
+      await onTestNotificationSettings();
+      setNotificationActionStatus("Test delivered");
+    } catch (err) {
+      setNotificationActionError(err instanceof Error ? err.message : "Test failed");
+    } finally {
+      setNotificationTestPending(false);
+    }
+  }
+
+  function notificationSettingsPayload(): {
+    webhook_enabled: boolean;
+    webhook_url: string;
+    webhook_secret?: string;
+  } {
+    const secret = webhookSecret.trim();
+    return {
+      webhook_enabled: webhookEnabled,
+      webhook_url: webhookURL.trim(),
+      ...(secret ? { webhook_secret: secret } : {})
+    };
   }
 
   function selectMobileProject(projectID: string) {
@@ -1232,6 +1330,87 @@ export function Shell({
               <div className="flex items-center justify-between gap-4">
                 <span className="text-muted-foreground">Project</span>
                 <span className="truncate font-medium">{project?.name ?? "None"}</span>
+              </div>
+            </div>
+            <div className="grid gap-3 rounded-md border border-border p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-medium">Browser notifications</h3>
+                  <p className="text-xs text-muted-foreground">{browserPermissionLabel(browserPermission)}</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={enableBrowserNotifications}
+                  disabled={browserPermission === "granted" || browserPermission === "denied" || browserPermission === "unsupported"}
+                >
+                  Enable
+                </Button>
+              </div>
+            </div>
+            <div className="grid gap-3 rounded-md border border-border p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-medium">Webhook</h3>
+                  <p className="text-xs text-muted-foreground">
+                    {notificationSettings?.webhook_secret_configured ? "Secret configured" : "No secret configured"}
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={webhookEnabled}
+                    onChange={(event) => setWebhookEnabled(event.currentTarget.checked)}
+                    disabled={notificationSettingsLoading}
+                    aria-label="Enable webhook"
+                  />
+                  Enabled
+                </label>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="webhook-url">URL</Label>
+                <Input
+                  id="webhook-url"
+                  value={webhookURL}
+                  onChange={(event) => setWebhookURL(event.target.value)}
+                  placeholder="https://example.com/agentx/${title}/${body}"
+                  disabled={notificationSettingsLoading}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="webhook-secret">Secret</Label>
+                <Input
+                  id="webhook-secret"
+                  value={webhookSecret}
+                  onChange={(event) => setWebhookSecret(event.target.value)}
+                  placeholder={notificationSettings?.webhook_secret_configured ? "Leave blank to keep current secret" : "Optional signing secret"}
+                  disabled={notificationSettingsLoading}
+                  type="password"
+                />
+              </div>
+              {(notificationActionError || notificationActionStatus) && (
+                <p className={cn("text-sm", notificationActionError ? "text-destructive" : "text-muted-foreground")}>
+                  {notificationActionError ?? notificationActionStatus}
+                </p>
+              )}
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={sendTestWebhook}
+                  disabled={notificationSettingsLoading || notificationTestPending || !webhookURL.trim()}
+                >
+                  <Send className="h-4 w-4" />
+                  Test
+                </Button>
+                <Button
+                  type="button"
+                  onClick={saveNotificationSettings}
+                  disabled={notificationSettingsLoading || notificationSavePending || (webhookEnabled && !webhookURL.trim())}
+                >
+                  <Save className="h-4 w-4" />
+                  Save
+                </Button>
               </div>
             </div>
           </div>
@@ -2672,6 +2851,19 @@ function blurActiveElement() {
   const active = document.activeElement;
   if (active instanceof HTMLElement) {
     active.blur();
+  }
+}
+
+function browserPermissionLabel(permission: BrowserNotificationPermission): string {
+  switch (permission) {
+    case "granted":
+      return "Enabled";
+    case "denied":
+      return "Blocked";
+    case "unsupported":
+      return "Unsupported";
+    default:
+      return "Not enabled";
   }
 }
 

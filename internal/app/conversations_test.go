@@ -2,8 +2,15 @@ package app
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -203,6 +210,202 @@ func TestAgentRunStreamsAndPersistsProcessMetadata(t *testing.T) {
 	if !ok || toolCall["type"] != "tool_call" || toolCall["tool_name"] != "Read" {
 		t.Fatalf("tool process metadata = %#v", process[1])
 	}
+}
+
+func TestAgentMessageWebhookPostsSignedPayload(t *testing.T) {
+	ctx := context.Background()
+	requests := make(chan webhookRequest, 1)
+	webhookServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		requests <- webhookRequest{header: r.Header.Clone(), requestURI: r.RequestURI, body: body}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer webhookServer.Close()
+
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	bus := eventbus.New()
+	app := New(st, bus, Options{
+		AdminToken:     "secret",
+		DataDir:        t.TempDir(),
+		WebhookTimeout: time.Second,
+		Runtimes: map[string]agentruntime.Runtime{
+			domain.AgentKindFake: scriptedRuntime{events: []agentruntime.Event{
+				{Type: agentruntime.EventCompleted, Text: "signed reply"},
+			}},
+		},
+	})
+	bootstrap, err := app.Bootstrap(ctx, BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := "top-secret"
+	if _, err := app.UpdateNotificationSettings(ctx, bootstrap.Organization.ID, NotificationSettingsUpdateRequest{
+		WebhookEnabled: true,
+		WebhookURL:     webhookServer.URL + "/${title}/${body}",
+		WebhookSecret:  &secret,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "call webhook",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var got webhookRequest
+	select {
+	case got = <-requests:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for webhook request")
+	}
+	if got.header.Get("X-AgentX-Event") != AgentMessageCreatedWebhookEvent {
+		t.Fatalf("X-AgentX-Event = %q", got.header.Get("X-AgentX-Event"))
+	}
+	if got.header.Get("X-AgentX-Delivery") == "" {
+		t.Fatal("X-AgentX-Delivery is empty")
+	}
+	timestamp := got.header.Get("X-AgentX-Timestamp")
+	if timestamp == "" {
+		t.Fatal("X-AgentX-Timestamp is empty")
+	}
+	if got.header.Get("X-AgentX-Signature") != testWebhookSignature(secret, timestamp, got.body) {
+		t.Fatalf("X-AgentX-Signature = %q", got.header.Get("X-AgentX-Signature"))
+	}
+	if !strings.Contains(got.requestURI, "/Fake%20Agent/signed%20reply") {
+		t.Fatalf("requestURI = %q, want encoded title/body placeholders", got.requestURI)
+	}
+
+	var payload AgentMessageWebhookPayload
+	if err := json.Unmarshal(got.body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Event != AgentMessageCreatedWebhookEvent || payload.Delivery != got.header.Get("X-AgentX-Delivery") || payload.Title != "Fake Agent" {
+		t.Fatalf("payload event/delivery = %#v", payload)
+	}
+	if payload.Message.Body != "signed reply" || payload.Message.SenderType != domain.SenderBot {
+		t.Fatalf("payload message = %#v", payload.Message)
+	}
+}
+
+func TestRenderWebhookURLSubstitutesAndTruncatesPlaceholders(t *testing.T) {
+	longBody := strings.Repeat("x", webhookURLBodyLimit+10)
+	got, err := renderWebhookURL("https://example.com/${title}/${body}", AgentMessageWebhookPayload{
+		Title: "Agent One",
+		Message: domain.Message{
+			Body: longBody,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(got, "/Agent%20One/") {
+		t.Fatalf("rendered URL = %q, want encoded title", got)
+	}
+	if !strings.Contains(got, strings.Repeat("x", webhookURLBodyLimit-3)+"...") {
+		t.Fatalf("rendered URL = %q, want truncated body with ellipsis", got)
+	}
+	if strings.Contains(got, "${title}") || strings.Contains(got, "${body}") {
+		t.Fatalf("rendered URL still contains placeholders: %q", got)
+	}
+}
+
+func TestRenderWebhookURLSubstitutesEncodedPlaceholders(t *testing.T) {
+	got, err := renderWebhookURL("https://example.com/$%7Btitle%7D/$%7Bbody%7D", AgentMessageWebhookPayload{
+		Title: "Agent One",
+		Message: domain.Message{
+			Body: "reply text",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got != "https://example.com/Agent%20One/reply%20text" {
+		t.Fatalf("rendered URL = %q", got)
+	}
+}
+
+func TestWebhookTimeoutDoesNotBreakBotMessageCreation(t *testing.T) {
+	ctx := context.Background()
+	started := make(chan struct{}, 1)
+
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	bus := eventbus.New()
+	app := New(st, bus, Options{
+		AdminToken:        "secret",
+		DataDir:           t.TempDir(),
+		WebhookHTTPClient: &http.Client{Transport: blockingWebhookTransport{started: started}},
+		WebhookTimeout:    10 * time.Millisecond,
+		Runtimes: map[string]agentruntime.Runtime{
+			domain.AgentKindFake: scriptedRuntime{events: []agentruntime.Event{
+				{Type: agentruntime.EventCompleted, Text: "still delivered"},
+			}},
+		},
+	})
+	bootstrap, err := app.Bootstrap(ctx, BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.UpdateNotificationSettings(ctx, bootstrap.Organization.ID, NotificationSettingsUpdateRequest{
+		WebhookEnabled: true,
+		WebhookURL:     "https://example.test/agentx",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "timeout",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for webhook attempt")
+	}
+
+	requireEventuallyApp(t, time.Second, func() bool {
+		messages, err := app.ListMessages(ctx, domain.ConversationChannel, bootstrap.Channel.ID, 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, message := range messages {
+			if message.SenderType == domain.SenderBot && message.Body == "still delivered" {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 func TestSendMessageRejectsEmptyBody(t *testing.T) {
@@ -971,4 +1174,31 @@ func readCapturedInput(t *testing.T, sends <-chan capturedInput) capturedInput {
 		t.Fatal("timed out waiting for captured runtime input")
 		return capturedInput{}
 	}
+}
+
+type webhookRequest struct {
+	header     http.Header
+	requestURI string
+	body       []byte
+}
+
+type blockingWebhookTransport struct {
+	started chan<- struct{}
+}
+
+func (t blockingWebhookTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	select {
+	case t.started <- struct{}{}:
+	default:
+	}
+	<-req.Context().Done()
+	return nil, req.Context().Err()
+}
+
+func testWebhookSignature(secret string, timestamp string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(timestamp))
+	_, _ = mac.Write([]byte("."))
+	_, _ = mac.Write(body)
+	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }

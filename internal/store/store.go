@@ -11,6 +11,7 @@ type Store interface {
 	Tx(ctx context.Context, fn func(Tx) error) error
 	Users() UserStore
 	Organizations() OrganizationStore
+	NotificationSettings() NotificationSettingsStore
 	Projects() ProjectStore
 	Channels() ChannelStore
 	Threads() ThreadStore
@@ -26,6 +27,7 @@ type Store interface {
 type Tx interface {
 	Users() UserStore
 	Organizations() OrganizationStore
+	NotificationSettings() NotificationSettingsStore
 	Projects() ProjectStore
 	Channels() ChannelStore
 	Threads() ThreadStore
@@ -51,6 +53,11 @@ type OrganizationStore interface {
 	Create(ctx context.Context, org domain.Organization) error
 	ListForUser(ctx context.Context, userID string) ([]domain.Organization, error)
 	AddMember(ctx context.Context, orgID string, userID string, role domain.Role) error
+}
+
+type NotificationSettingsStore interface {
+	ByOrganization(ctx context.Context, orgID string) (domain.NotificationSettings, error)
+	Upsert(ctx context.Context, settings domain.NotificationSettings) error
 }
 
 type ProjectStore interface {

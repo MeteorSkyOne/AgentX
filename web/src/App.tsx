@@ -17,14 +17,17 @@ import {
   deleteThread,
   getToken,
   me,
+  notificationSettings,
   organizations,
   projectChannels,
   projects,
   putWorkspaceFile,
   setChannelAgents,
+  testNotificationSettings,
   updateAgent,
   updateChannel,
   updateMessage,
+  updateNotificationSettings,
   updateProject,
   updateThread,
   workspace,
@@ -39,6 +42,7 @@ import type {
   ConversationType,
   CreateThreadResponse,
   Message,
+  NotificationSettings,
   ProcessItem,
   Project,
   Thread,
@@ -56,6 +60,7 @@ import {
 import type { AgentXEvent } from "./ws/events";
 import { useConversationSocket } from "./ws/useConversationSocket";
 import { applyTheme, getInitialTheme, storeTheme, type ThemeMode } from "./theme";
+import { showAgentMessageNotification } from "./notifications/browser";
 
 interface ActiveConversation {
   type: ConversationType;
@@ -157,6 +162,12 @@ export default function App() {
   const agentsQuery = useQuery({
     queryKey: ["agents", selectedOrganizationID],
     queryFn: () => agents(selectedOrganizationID as string),
+    enabled: hasSession && Boolean(selectedOrganizationID)
+  });
+
+  const notificationSettingsQuery = useQuery({
+    queryKey: ["notification-settings", selectedOrganizationID],
+    queryFn: () => notificationSettings(selectedOrganizationID as string),
     enabled: hasSession && Boolean(selectedOrganizationID)
   });
 
@@ -313,6 +324,7 @@ export default function App() {
             invalidateAgentConfigQueries();
           }
           if (message.sender_type === "bot") {
+            showAgentMessageNotification(message);
             setStreamingByRunID((current) => {
               const next = { ...current };
               for (const [runID, item] of Object.entries(next)) {
@@ -655,6 +667,22 @@ export default function App() {
     await queryClient.invalidateQueries({ queryKey: ["conversation-context"] });
   }
 
+  async function handleUpdateNotificationSettings(payload: {
+    webhook_enabled: boolean;
+    webhook_url: string;
+    webhook_secret?: string;
+  }): Promise<NotificationSettings> {
+    const updated = await updateNotificationSettings(selectedOrganizationID as string, payload);
+    await queryClient.invalidateQueries({
+      queryKey: ["notification-settings", selectedOrganizationID]
+    });
+    return updated;
+  }
+
+  async function handleTestNotificationSettings(): Promise<void> {
+    await testNotificationSettings(selectedOrganizationID as string);
+  }
+
   async function handleReadWorkspaceFile(workspaceID: string, path: string): Promise<string> {
     const file = await workspaceFile(workspaceID, path);
     return file.body;
@@ -716,6 +744,8 @@ export default function App() {
       olderMessagesLoading={olderMessagesLoading}
       hasOlderMessages={messageHistoryHasMore}
       streaming={Object.values(streamingByRunID)}
+      notificationSettings={notificationSettingsQuery.data}
+      notificationSettingsLoading={notificationSettingsQuery.isLoading}
       theme={theme}
       onSelectProject={handleSelectProject}
       onCreateProject={handleCreateProject}
@@ -733,6 +763,8 @@ export default function App() {
       onCreateAgent={handleCreateAgent}
       onUpdateAgent={handleUpdateAgent}
       onDeleteAgent={handleDeleteAgent}
+      onUpdateNotificationSettings={handleUpdateNotificationSettings}
+      onTestNotificationSettings={handleTestNotificationSettings}
       onLoadWorkspaceTree={handleLoadWorkspaceTree}
       onReadWorkspaceFile={handleReadWorkspaceFile}
       onWriteWorkspaceFile={handleWriteWorkspaceFile}

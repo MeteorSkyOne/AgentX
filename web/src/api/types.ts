@@ -39,6 +39,15 @@ export interface Organization {
   created_at: string;
 }
 
+export interface NotificationSettings {
+  organization_id: string;
+  webhook_enabled: boolean;
+  webhook_url: string;
+  webhook_secret_configured: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Channel {
   id: string;
   organization_id: string;

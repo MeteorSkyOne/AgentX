@@ -30,6 +30,10 @@ type organizationRepo struct {
 	q queryer
 }
 
+type notificationSettingsRepo struct {
+	q queryer
+}
+
 type projectRepo struct {
 	q queryer
 }
@@ -99,6 +103,10 @@ func (s *Store) Organizations() store.OrganizationStore {
 	return organizationRepo{q: s.db}
 }
 
+func (s *Store) NotificationSettings() store.NotificationSettingsStore {
+	return notificationSettingsRepo{q: s.db}
+}
+
 func (s *Store) Projects() store.ProjectStore {
 	return projectRepo{q: s.db}
 }
@@ -145,6 +153,10 @@ func (t *txStore) Users() store.UserStore {
 
 func (t *txStore) Organizations() store.OrganizationStore {
 	return organizationRepo{q: t.tx}
+}
+
+func (t *txStore) NotificationSettings() store.NotificationSettingsStore {
+	return notificationSettingsRepo{q: t.tx}
 }
 
 func (t *txStore) Projects() store.ProjectStore {
@@ -291,6 +303,28 @@ func (r organizationRepo) AddMember(ctx context.Context, orgID string, userID st
 	_, err := r.q.ExecContext(ctx,
 		`INSERT INTO memberships (org_id, user_id, role, created_at) VALUES (?, ?, ?, ?)`,
 		orgID, userID, string(role), formatTime(time.Now().UTC()),
+	)
+	return err
+}
+
+func (r notificationSettingsRepo) ByOrganization(ctx context.Context, orgID string) (domain.NotificationSettings, error) {
+	return scanNotificationSettings(r.q.QueryRowContext(ctx, `
+SELECT org_id, webhook_enabled, webhook_url, webhook_secret, created_at, updated_at
+FROM notification_settings
+WHERE org_id = ?`, orgID))
+}
+
+func (r notificationSettingsRepo) Upsert(ctx context.Context, settings domain.NotificationSettings) error {
+	_, err := r.q.ExecContext(ctx, `
+INSERT INTO notification_settings (org_id, webhook_enabled, webhook_url, webhook_secret, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(org_id) DO UPDATE SET
+  webhook_enabled = excluded.webhook_enabled,
+  webhook_url = excluded.webhook_url,
+  webhook_secret = excluded.webhook_secret,
+  updated_at = excluded.updated_at`,
+		settings.OrganizationID, boolToInt(settings.WebhookEnabled), settings.WebhookURL, settings.WebhookSecret,
+		formatTime(settings.CreatedAt), formatTime(settings.UpdatedAt),
 	)
 	return err
 }
@@ -878,6 +912,32 @@ func scanOrganization(scanner interface {
 		return domain.Organization{}, err
 	}
 	return org, nil
+}
+
+func scanNotificationSettings(scanner interface {
+	Scan(dest ...any) error
+}) (domain.NotificationSettings, error) {
+	var settings domain.NotificationSettings
+	var createdAt, updatedAt string
+	var webhookEnabled int
+	if err := scanner.Scan(
+		&settings.OrganizationID, &webhookEnabled, &settings.WebhookURL, &settings.WebhookSecret,
+		&createdAt, &updatedAt,
+	); err != nil {
+		return domain.NotificationSettings{}, err
+	}
+	var err error
+	settings.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return domain.NotificationSettings{}, err
+	}
+	settings.UpdatedAt, err = parseTime(updatedAt)
+	if err != nil {
+		return domain.NotificationSettings{}, err
+	}
+	settings.WebhookEnabled = webhookEnabled != 0
+	settings.WebhookSecretConfigured = settings.WebhookSecret != ""
+	return settings, nil
 }
 
 func scanProject(scanner interface {

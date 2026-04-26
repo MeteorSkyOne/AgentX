@@ -58,6 +58,16 @@ type Organization struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type NotificationSettings struct {
+	OrganizationID          string    `json:"organization_id"`
+	WebhookEnabled          bool      `json:"webhook_enabled"`
+	WebhookURL              string    `json:"webhook_url"`
+	WebhookSecret           string    `json:"-"`
+	WebhookSecretConfigured bool      `json:"webhook_secret_configured"`
+	CreatedAt               time.Time `json:"created_at"`
+	UpdatedAt               time.Time `json:"updated_at"`
+}
+
 type Project struct {
 	ID             string    `json:"id"`
 	OrganizationID string    `json:"organization_id"`

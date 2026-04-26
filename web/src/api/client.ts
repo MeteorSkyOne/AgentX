@@ -8,6 +8,7 @@ import type {
   ConversationType,
   CreateThreadResponse,
   Message,
+  NotificationSettings,
   Organization,
   Project,
   Thread,
@@ -95,6 +96,38 @@ export function me(): Promise<User> {
 
 export function organizations(): Promise<Organization[]> {
   return request<Organization[]>("/api/organizations");
+}
+
+export function notificationSettings(orgID: string): Promise<NotificationSettings> {
+  return request<NotificationSettings>(
+    `/api/organizations/${encodeURIComponent(orgID)}/notification-settings`
+  );
+}
+
+export function updateNotificationSettings(
+  orgID: string,
+  payload: {
+    webhook_enabled: boolean;
+    webhook_url: string;
+    webhook_secret?: string;
+  }
+): Promise<NotificationSettings> {
+  return request<NotificationSettings>(
+    `/api/organizations/${encodeURIComponent(orgID)}/notification-settings`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    }
+  );
+}
+
+export function testNotificationSettings(orgID: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    `/api/organizations/${encodeURIComponent(orgID)}/notification-settings/test`,
+    {
+      method: "POST"
+    }
+  );
 }
 
 export function channels(orgID: string): Promise<Channel[]> {

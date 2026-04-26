@@ -304,6 +304,58 @@ func TestOrganizationsAnyReportsWhetherOrganizationExists(t *testing.T) {
 	}
 }
 
+func TestNotificationSettingsUpsertRoundTripsRawSecret(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	defer st.Close()
+
+	now := time.Date(2026, 4, 25, 10, 0, 0, 0, time.UTC)
+	org := domain.Organization{ID: "org_notify", Name: "Notify", CreatedAt: now}
+	if err := st.Organizations().Create(ctx, org); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := st.NotificationSettings().ByOrganization(ctx, org.ID)
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("ByOrganization error = %v, want sql.ErrNoRows", err)
+	}
+
+	first := domain.NotificationSettings{
+		OrganizationID: org.ID,
+		WebhookEnabled: true,
+		WebhookURL:     "https://example.com/webhook",
+		WebhookSecret:  "first-secret",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := st.NotificationSettings().Upsert(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+
+	second := first
+	second.WebhookURL = "https://example.com/next"
+	second.WebhookSecret = ""
+	second.WebhookEnabled = false
+	second.UpdatedAt = now.Add(time.Minute)
+	if err := st.NotificationSettings().Upsert(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := st.NotificationSettings().ByOrganization(ctx, org.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.WebhookEnabled || got.WebhookURL != second.WebhookURL || got.WebhookSecret != "" {
+		t.Fatalf("settings = %#v", got)
+	}
+	if got.WebhookSecretConfigured {
+		t.Fatalf("WebhookSecretConfigured = true, want false")
+	}
+	if !got.CreatedAt.Equal(first.CreatedAt) || !got.UpdatedAt.Equal(second.UpdatedAt) {
+		t.Fatalf("timestamps = %s/%s, want %s/%s", got.CreatedAt, got.UpdatedAt, first.CreatedAt, second.UpdatedAt)
+	}
+}
+
 func TestBindingUpsertReplacesAgentAndWorkspace(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
