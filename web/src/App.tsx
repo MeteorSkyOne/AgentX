@@ -13,6 +13,7 @@ import {
   deleteAgent,
   deleteChannel,
   deleteMessage,
+  deleteProject,
   deleteThread,
   getToken,
   me,
@@ -75,6 +76,10 @@ interface StreamingMessage {
 
 function conversationKey(conversation?: ActiveConversation): string {
   return conversation ? `${conversation.type}:${conversation.id}` : "";
+}
+
+function isSystemCommandMessage(message: Message): boolean {
+  return message.sender_type === "system" && message.metadata?.command === true;
 }
 
 export default function App() {
@@ -243,6 +248,11 @@ export default function App() {
     }
   }, [meQuery.isError]);
 
+  const invalidateAgentConfigQueries = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["agents", selectedOrganizationID] });
+    void queryClient.invalidateQueries({ queryKey: ["conversation-context"] });
+  }, [queryClient, selectedOrganizationID]);
+
   const handleSocketEvent = useCallback(
     (event: AgentXEvent) => {
       if (
@@ -299,6 +309,9 @@ export default function App() {
         case "MessageCreated": {
           const message = event.payload.message;
           setConversationMessages((current) => mergeMessages(current, [message]));
+          if (isSystemCommandMessage(message)) {
+            invalidateAgentConfigQueries();
+          }
           if (message.sender_type === "bot") {
             setStreamingByRunID((current) => {
               const next = { ...current };
@@ -377,7 +390,8 @@ export default function App() {
       selectedOrganizationID,
       activeConversation,
       conversationContextQuery.data,
-      channelAgentsQuery.data
+      channelAgentsQuery.data,
+      invalidateAgentConfigQueries
     ]
   );
 
@@ -505,6 +519,9 @@ export default function App() {
       return;
     }
     setConversationMessages((current) => mergeMessages(current, [message]));
+    if (isSystemCommandMessage(message)) {
+      invalidateAgentConfigQueries();
+    }
   }
 
   async function handleCreateProject(name: string): Promise<Project> {
@@ -523,6 +540,17 @@ export default function App() {
     await queryClient.invalidateQueries({ queryKey: ["channel-agents", selectedChannelID] });
     await queryClient.invalidateQueries({ queryKey: ["workspace", updated.workspace_id] });
     return updated;
+  }
+
+  async function handleDeleteProject(project: Project): Promise<void> {
+    await deleteProject(project.id);
+    await queryClient.invalidateQueries({ queryKey: ["projects", selectedOrganizationID] });
+    await queryClient.invalidateQueries({ queryKey: ["project-channels", project.id] });
+    if (project.id === selectedProjectID) {
+      const nextProject = projectsQuery.data?.find((item) => item.id !== project.id);
+      setSelectedProjectID(nextProject?.id);
+      clearConversation();
+    }
   }
 
   async function handleCreateChannel(name: string, type: Channel["type"]): Promise<Channel> {
@@ -691,6 +719,7 @@ export default function App() {
       onSelectProject={handleSelectProject}
       onCreateProject={handleCreateProject}
       onUpdateProject={handleUpdateProject}
+      onDeleteProject={handleDeleteProject}
       onSelectChannel={selectChannel}
       onCreateChannel={handleCreateChannel}
       onUpdateChannel={handleUpdateChannel}

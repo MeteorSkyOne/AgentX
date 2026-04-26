@@ -122,6 +122,12 @@ export function updateProject(
   });
 }
 
+export function deleteProject(projectID: string): Promise<void> {
+  return request<void>(`/api/projects/${encodeURIComponent(projectID)}`, {
+    method: "DELETE"
+  });
+}
+
 export function workspace(workspaceID: string): Promise<Workspace> {
   return request<Workspace>(`/api/workspaces/${encodeURIComponent(workspaceID)}`);
 }

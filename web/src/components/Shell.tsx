@@ -141,6 +141,7 @@ interface ShellProps {
     projectID: string,
     payload: { name?: string; workspace_path?: string }
   ) => Promise<Project>;
+  onDeleteProject: (project: Project) => Promise<void>;
   onSelectChannel: (channel: Channel) => void;
   onCreateChannel: (name: string, type: Channel["type"]) => Promise<Channel>;
   onUpdateChannel: (channelID: string, name: string) => Promise<Channel>;
@@ -202,6 +203,7 @@ export function Shell({
   onSelectProject,
   onCreateProject,
   onUpdateProject,
+  onDeleteProject,
   onSelectChannel,
   onCreateChannel,
   onUpdateChannel,
@@ -360,6 +362,21 @@ export function Shell({
       setProjectEditOpen(false);
     } catch (err) {
       setProjectEditError(err instanceof Error ? err.message : "Update project failed");
+    } finally {
+      setProjectEditPending(false);
+    }
+  }
+
+  async function deleteActiveProject() {
+    if (!project) return;
+    if (!window.confirm(`Delete project "${project.name}"?`)) return;
+    setProjectEditError(null);
+    setProjectEditPending(true);
+    try {
+      await onDeleteProject(project);
+      setProjectEditOpen(false);
+    } catch (err) {
+      setProjectEditError(err instanceof Error ? err.message : "Delete project failed");
     } finally {
       setProjectEditPending(false);
     }
@@ -1231,7 +1248,7 @@ export function Shell({
         <DialogContent onOpenAutoFocus={(event) => event.preventDefault()}>
           <DialogHeader>
             <DialogTitle>Project settings</DialogTitle>
-            <DialogDescription>Update this project.</DialogDescription>
+            <DialogDescription>Update or delete this project.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="flex items-center gap-4">
@@ -1308,7 +1325,16 @@ export function Shell({
             </div>
             {projectEditError && <p className="text-sm text-destructive">{projectEditError}</p>}
           </div>
-          <DialogFooter>
+          <DialogFooter className="sm:justify-between">
+            <Button
+              variant="destructive"
+              onClick={deleteActiveProject}
+              disabled={!project || projectEditPending}
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete
+            </Button>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button
               variant="outline"
               onClick={() => setProjectEditOpen(false)}
@@ -1322,6 +1348,7 @@ export function Shell({
             >
               Save
             </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2098,7 +2125,16 @@ function AgentDetailsPanel({
     setAvatarEmoji(av?.emoji ?? "");
     setAvatarColor(av?.color ?? "");
     setDeleteConfirmOpen(false);
-  }, [selected?.id]);
+  }, [
+    selected?.id,
+    selected?.name,
+    selected?.handle,
+    selected?.kind,
+    selected?.model,
+    selected?.effort,
+    selected?.enabled,
+    selected?.yolo_mode
+  ]);
 
   async function saveBindings() {
     const bindings = agents
