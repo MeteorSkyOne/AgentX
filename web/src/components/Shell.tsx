@@ -439,7 +439,7 @@ export function Shell({
       <ResizablePanelGroup direction="horizontal" className="flex-1">
         {/* Channel Sidebar */}
         <ResizablePanel defaultSize={18} minSize={15} maxSize={25}>
-          <div className="flex h-full flex-col bg-card">
+          <div className="flex h-full flex-col bg-sidebar">
             {/* Workspace Header */}
             <div className="flex h-12 items-center justify-between border-b border-border px-4">
               <h2 className="truncate text-base font-semibold">
