@@ -314,7 +314,7 @@ function MessageItem({
         ) : (
           <>
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <div className="prose prose-sm prose-invert max-w-none">
+            <div className="prose prose-sm max-w-none dark:prose-invert">
               <MarkdownRenderer text={message.body} />
             </div>
           </>
@@ -368,7 +368,7 @@ function StreamingItem({
           <span className="text-xs text-muted-foreground animate-pulse">streaming...</span>
         </div>
         {process.length > 0 && <ProcessBlock items={process} />}
-        <div className="prose prose-sm prose-invert max-w-none">
+        <div className="prose prose-sm max-w-none dark:prose-invert">
           <MarkdownRenderer text={item.error ?? item.text} />
         </div>
       </div>

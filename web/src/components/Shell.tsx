@@ -16,6 +16,7 @@ import {
   Key,
   LogOut,
   MessageSquare,
+  Moon,
   Pencil,
   Plus,
   Rows3,
@@ -24,6 +25,7 @@ import {
   Settings,
   Sliders,
   SlidersHorizontal,
+  Sun,
   Trash2,
   Eye,
   EyeOff,
@@ -89,6 +91,7 @@ import {
   setAgentAvatar,
   type AgentAvatarData,
 } from "./AgentAvatar";
+import type { ThemeMode } from "../theme";
 
 interface ActiveConversation {
   type: ConversationType;
@@ -124,6 +127,7 @@ interface ShellProps {
   olderMessagesLoading: boolean;
   hasOlderMessages: boolean;
   streaming: StreamingMessage[];
+  theme: ThemeMode;
   onSelectProject: (projectID: string) => void;
   onCreateProject: (name: string) => Promise<Project>;
   onSelectChannel: (channel: Channel) => void;
@@ -159,6 +163,7 @@ interface ShellProps {
   onDeleteMessage: (message: Message) => Promise<void>;
   onLoadOlderMessages: () => boolean;
   onMessageSent: (message: Message) => void;
+  onToggleTheme: () => void;
   onLogout: () => void;
 }
 
@@ -180,6 +185,7 @@ export function Shell({
   olderMessagesLoading,
   hasOlderMessages,
   streaming,
+  theme,
   onSelectProject,
   onCreateProject,
   onSelectChannel,
@@ -201,6 +207,7 @@ export function Shell({
   onDeleteMessage,
   onLoadOlderMessages,
   onMessageSent,
+  onToggleTheme,
   onLogout
 }: ShellProps) {
   const [agentPanelOpen, setAgentPanelOpen] = useState(false);
@@ -394,6 +401,22 @@ export function Shell({
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">Create project</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className="flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+                title={theme === "dark" ? "Light mode" : "Dark mode"}
+                aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+                onClick={onToggleTheme}
+              >
+                {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              {theme === "dark" ? "Light mode" : "Dark mode"}
+            </TooltipContent>
           </Tooltip>
 
           <Tooltip>

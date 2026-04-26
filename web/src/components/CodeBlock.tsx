@@ -95,14 +95,14 @@ function FencedCodeBlock({
   }, [code]);
 
   return (
-    <div className="group/code relative my-2 overflow-x-auto rounded-md bg-sidebar">
+    <div className="group/code relative my-2 overflow-x-auto rounded-md bg-[#282c34] dark:bg-sidebar">
       <div className="flex items-center justify-between px-3 pt-2">
         {language && (
-          <span className="text-xs text-muted-foreground">{language}</span>
+          <span className="text-xs text-white/60 dark:text-muted-foreground">{language}</span>
         )}
         <button
           onClick={handleCopy}
-          className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/code:opacity-100"
+          className="rounded p-1 text-white/60 opacity-0 transition-opacity hover:text-white group-hover/code:opacity-100 dark:text-muted-foreground dark:hover:text-foreground"
           aria-label="Copy code"
           title="Copy code"
         >

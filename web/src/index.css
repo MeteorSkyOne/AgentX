@@ -153,3 +153,13 @@
     background: color-mix(in oklch, var(--muted) 50%, transparent);
   }
 }
+
+.dark .prose {
+  --chat-emphasis-foreground: color-mix(in oklch, var(--foreground) 80%, var(--muted-foreground));
+  --tw-prose-bold: var(--chat-emphasis-foreground);
+  --tw-prose-quotes: var(--chat-emphasis-foreground);
+}
+
+.dark .prose :where(em, strong):not(:where(pre *, code *)) {
+  color: var(--chat-emphasis-foreground);
+}

@@ -52,6 +52,7 @@ import {
 } from "./messages/state";
 import type { AgentXEvent } from "./ws/events";
 import { useConversationSocket } from "./ws/useConversationSocket";
+import { applyTheme, getInitialTheme, storeTheme, type ThemeMode } from "./theme";
 
 interface ActiveConversation {
   type: ConversationType;
@@ -86,8 +87,14 @@ export default function App() {
   const [olderMessagesLoading, setOlderMessagesLoading] = useState(false);
   const [messageHistoryHasMore, setMessageHistoryHasMore] = useState(false);
   const [streamingByRunID, setStreamingByRunID] = useState<Record<string, StreamingMessage>>({});
+  const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
   const streamingCacheRef = useRef<Record<string, Record<string, StreamingMessage>>>({});
   const hasSession = Boolean(sessionToken);
+
+  useEffect(() => {
+    applyTheme(theme);
+    storeTheme(theme);
+  }, [theme]);
 
   const meQuery = useQuery({
     queryKey: ["me", sessionToken],
@@ -611,6 +618,10 @@ export default function App() {
     await putWorkspaceFile(workspaceID, path, body);
   }
 
+  const handleToggleTheme = useCallback(() => {
+    setTheme((current) => (current === "dark" ? "light" : "dark"));
+  }, []);
+
   if (!hasSession) {
     return <LoginView onAuthenticated={handleAuthenticated} />;
   }
@@ -654,6 +665,7 @@ export default function App() {
       olderMessagesLoading={olderMessagesLoading}
       hasOlderMessages={messageHistoryHasMore}
       streaming={Object.values(streamingByRunID)}
+      theme={theme}
       onSelectProject={handleSelectProject}
       onCreateProject={handleCreateProject}
       onSelectChannel={selectChannel}
@@ -675,6 +687,7 @@ export default function App() {
       onDeleteMessage={handleDeleteMessage}
       onLoadOlderMessages={handleLoadOlderMessages}
       onMessageSent={handleMessageSent}
+      onToggleTheme={handleToggleTheme}
       onLogout={clearSession}
     />
   );
