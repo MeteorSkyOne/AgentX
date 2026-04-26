@@ -56,6 +56,14 @@ func (a *App) ListMessages(ctx context.Context, conversationType domain.Conversa
 	return a.store.Messages().List(ctx, conversationType, conversationID, limit)
 }
 
+func (a *App) ListRecentMessages(ctx context.Context, conversationType domain.ConversationType, conversationID string, limit int) ([]domain.Message, error) {
+	return a.store.Messages().ListRecent(ctx, conversationType, conversationID, limit)
+}
+
+func (a *App) ListRecentMessagesBefore(ctx context.Context, conversationType domain.ConversationType, conversationID string, before time.Time, limit int) ([]domain.Message, error) {
+	return a.store.Messages().ListRecentBefore(ctx, conversationType, conversationID, before, limit)
+}
+
 func (a *App) Message(ctx context.Context, id string) (domain.Message, error) {
 	return a.store.Messages().ByID(ctx, id)
 }

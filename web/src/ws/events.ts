@@ -30,6 +30,28 @@ export interface MessageDeletedEvent extends BaseEvent {
   };
 }
 
+export interface MessageHistoryStartedEvent extends BaseEvent {
+  type: "MessageHistoryStarted";
+  payload: {
+    before?: string;
+  };
+}
+
+export interface MessageHistoryChunkEvent extends BaseEvent {
+  type: "MessageHistoryChunk";
+  payload: {
+    messages: Message[];
+  };
+}
+
+export interface MessageHistoryCompletedEvent extends BaseEvent {
+  type: "MessageHistoryCompleted";
+  payload: {
+    has_more: boolean;
+    before?: string;
+  };
+}
+
 export interface AgentRunStartedEvent extends BaseEvent {
   type: "AgentRunStarted";
   payload: {
@@ -73,6 +95,9 @@ export type AgentXEvent =
   | MessageCreatedEvent
   | MessageUpdatedEvent
   | MessageDeletedEvent
+  | MessageHistoryStartedEvent
+  | MessageHistoryChunkEvent
+  | MessageHistoryCompletedEvent
   | AgentRunStartedEvent
   | AgentOutputDeltaEvent
   | AgentRunCompletedEvent
@@ -85,6 +110,9 @@ export function isAgentXEvent(event: SocketEvent): event is AgentXEvent {
     event.type === "MessageCreated" ||
     event.type === "MessageUpdated" ||
     event.type === "MessageDeleted" ||
+    event.type === "MessageHistoryStarted" ||
+    event.type === "MessageHistoryChunk" ||
+    event.type === "MessageHistoryCompleted" ||
     event.type === "AgentRunStarted" ||
     event.type === "AgentOutputDelta" ||
     event.type === "AgentRunCompleted" ||

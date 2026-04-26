@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -294,6 +295,7 @@ func TestWebSocketReceivesMessageCreated(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireWebSocketSubscribed(t, ctx, conn)
+	requireWebSocketHistoryCompleted(t, ctx, conn, false)
 
 	_, err = env.app.SendMessage(ctx, app.SendMessageRequest{
 		UserID:           boot.User.ID,
@@ -314,6 +316,216 @@ func TestWebSocketReceivesMessageCreated(t *testing.T) {
 		if strings.Contains(string(payload), string(domain.EventMessageCreated)) {
 			return
 		}
+	}
+}
+
+func TestWebSocketStreamsMessageHistoryBeforeLiveEvents(t *testing.T) {
+	env := newTestEnv(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	boot, err := env.app.Bootstrap(ctx, app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for seq := 1; seq <= 60; seq++ {
+		createWebSocketHistoryMessage(t, env, boot.Organization.ID, domain.ConversationChannel, boot.Channel.ID, seq)
+	}
+
+	wsURL := "ws" + strings.TrimPrefix(env.server.URL, "http") + "/api/ws?token=" + boot.SessionToken
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	err = conn.Write(ctx, websocket.MessageText, []byte(`{"type":"subscribe","organization_id":"`+boot.Organization.ID+`","conversation_type":"channel","conversation_id":"`+boot.Channel.ID+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireWebSocketSubscribed(t, ctx, conn)
+
+	liveMessage := webSocketHistoryMessage(boot.Organization.ID, domain.ConversationChannel, boot.Channel.ID, 61)
+	env.bus.Publish(domain.Event{
+		ID:               id.New("evt"),
+		Type:             domain.EventMessageCreated,
+		OrganizationID:   boot.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   boot.Channel.ID,
+		Payload:          domain.MessageCreatedPayload{Message: liveMessage},
+		CreatedAt:        liveMessage.CreatedAt,
+	})
+
+	frame := requireWebSocketEventType(t, ctx, conn, domain.EventMessageHistoryStarted)
+	if frame.OrganizationID != boot.Organization.ID || frame.ConversationType != domain.ConversationChannel || frame.ConversationID != boot.Channel.ID {
+		t.Fatalf("history started frame scope = %#v", frame)
+	}
+
+	var allHistory []domain.Message
+	for _, wantSize := range []int{25, 25, 10} {
+		frame = requireWebSocketEventType(t, ctx, conn, domain.EventMessageHistoryChunk)
+		var payload domain.MessageHistoryChunkPayload
+		unmarshalWebSocketPayload(t, frame, &payload)
+		if len(payload.Messages) != wantSize {
+			t.Fatalf("history chunk size = %d, want %d", len(payload.Messages), wantSize)
+		}
+		allHistory = append(allHistory, payload.Messages...)
+	}
+	if len(allHistory) != 60 {
+		t.Fatalf("history message count = %d, want 60", len(allHistory))
+	}
+	if allHistory[0].ID != "msg_history_001" || allHistory[len(allHistory)-1].ID != "msg_history_060" {
+		t.Fatalf("history window = %s..%s, want msg_history_001..msg_history_060", allHistory[0].ID, allHistory[len(allHistory)-1].ID)
+	}
+
+	frame = requireWebSocketEventType(t, ctx, conn, domain.EventMessageHistoryCompleted)
+	var completed domain.MessageHistoryCompletedPayload
+	unmarshalWebSocketPayload(t, frame, &completed)
+	if completed.HasMore {
+		t.Fatal("history completed has_more = true, want false")
+	}
+
+	frame = requireWebSocketEventType(t, ctx, conn, domain.EventMessageCreated)
+	var created domain.MessageCreatedPayload
+	unmarshalWebSocketPayload(t, frame, &created)
+	if created.Message.ID != liveMessage.ID {
+		t.Fatalf("live message id = %q, want %q", created.Message.ID, liveMessage.ID)
+	}
+}
+
+func TestWebSocketHistoryUsesLatestRecentWindow(t *testing.T) {
+	env := newTestEnv(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	boot, err := env.app.Bootstrap(ctx, app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for seq := 1; seq <= 105; seq++ {
+		createWebSocketHistoryMessage(t, env, boot.Organization.ID, domain.ConversationChannel, boot.Channel.ID, seq)
+	}
+
+	wsURL := "ws" + strings.TrimPrefix(env.server.URL, "http") + "/api/ws?token=" + boot.SessionToken
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	err = conn.Write(ctx, websocket.MessageText, []byte(`{"type":"subscribe","organization_id":"`+boot.Organization.ID+`","conversation_type":"channel","conversation_id":"`+boot.Channel.ID+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireWebSocketSubscribed(t, ctx, conn)
+	requireWebSocketEventType(t, ctx, conn, domain.EventMessageHistoryStarted)
+
+	var allHistory []domain.Message
+	for len(allHistory) < 100 {
+		frame := requireWebSocketEventType(t, ctx, conn, domain.EventMessageHistoryChunk)
+		var payload domain.MessageHistoryChunkPayload
+		unmarshalWebSocketPayload(t, frame, &payload)
+		allHistory = append(allHistory, payload.Messages...)
+	}
+	if len(allHistory) != 100 {
+		t.Fatalf("history message count = %d, want 100", len(allHistory))
+	}
+	if allHistory[0].ID != "msg_history_006" || allHistory[len(allHistory)-1].ID != "msg_history_105" {
+		t.Fatalf("history window = %s..%s, want msg_history_006..msg_history_105", allHistory[0].ID, allHistory[len(allHistory)-1].ID)
+	}
+
+	frame := requireWebSocketEventType(t, ctx, conn, domain.EventMessageHistoryCompleted)
+	var completed domain.MessageHistoryCompletedPayload
+	unmarshalWebSocketPayload(t, frame, &completed)
+	if !completed.HasMore {
+		t.Fatal("history completed has_more = false, want true")
+	}
+
+	err = conn.Write(ctx, websocket.MessageText, []byte(`{"type":"load_history","organization_id":"`+boot.Organization.ID+`","conversation_type":"channel","conversation_id":"`+boot.Channel.ID+`","before":"`+allHistory[0].CreatedAt.Format(time.RFC3339Nano)+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame = requireWebSocketEventType(t, ctx, conn, domain.EventMessageHistoryStarted)
+	var started domain.MessageHistoryStartedPayload
+	unmarshalWebSocketPayload(t, frame, &started)
+	if started.Before != allHistory[0].CreatedAt.Format(time.RFC3339Nano) {
+		t.Fatalf("history started before = %q, want %q", started.Before, allHistory[0].CreatedAt.Format(time.RFC3339Nano))
+	}
+	frame = requireWebSocketEventType(t, ctx, conn, domain.EventMessageHistoryChunk)
+	var older domain.MessageHistoryChunkPayload
+	unmarshalWebSocketPayload(t, frame, &older)
+	if len(older.Messages) != 5 || older.Messages[0].ID != "msg_history_001" || older.Messages[4].ID != "msg_history_005" {
+		t.Fatalf("older history messages = %#v", older.Messages)
+	}
+	frame = requireWebSocketEventType(t, ctx, conn, domain.EventMessageHistoryCompleted)
+	unmarshalWebSocketPayload(t, frame, &completed)
+	if completed.HasMore || completed.Before != allHistory[0].CreatedAt.Format(time.RFC3339Nano) {
+		t.Fatalf("older history completion = %#v", completed)
+	}
+}
+
+func TestWebSocketStreamsHistoryForBoundNonChannelConversations(t *testing.T) {
+	env := newTestEnv(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	boot, err := env.app.Bootstrap(ctx, app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for index, conversationType := range []domain.ConversationType{domain.ConversationThread, domain.ConversationDM} {
+		t.Run(string(conversationType), func(t *testing.T) {
+			conversationID := string(conversationType) + "_ws_conversation"
+			now := time.Now().UTC()
+			if err := env.store.Bindings().Upsert(ctx, domain.ConversationBinding{
+				ID:               id.New("bnd"),
+				OrganizationID:   boot.Organization.ID,
+				ConversationType: conversationType,
+				ConversationID:   conversationID,
+				AgentID:          boot.Agent.ID,
+				WorkspaceID:      boot.Workspace.ID,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			message := createWebSocketHistoryMessage(t, env, boot.Organization.ID, conversationType, conversationID, index+1)
+
+			wsURL := "ws" + strings.TrimPrefix(env.server.URL, "http") + "/api/ws?token=" + boot.SessionToken
+			conn, _, err := websocket.Dial(ctx, wsURL, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close(websocket.StatusNormalClosure, "")
+
+			err = conn.Write(ctx, websocket.MessageText, []byte(`{"type":"subscribe","organization_id":"`+boot.Organization.ID+`","conversation_type":"`+string(conversationType)+`","conversation_id":"`+conversationID+`"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			requireWebSocketSubscribed(t, ctx, conn)
+			requireWebSocketEventType(t, ctx, conn, domain.EventMessageHistoryStarted)
+
+			frame := requireWebSocketEventType(t, ctx, conn, domain.EventMessageHistoryChunk)
+			var payload domain.MessageHistoryChunkPayload
+			unmarshalWebSocketPayload(t, frame, &payload)
+			if len(payload.Messages) != 1 || payload.Messages[0].ID != message.ID || payload.Messages[0].ConversationType != conversationType {
+				t.Fatalf("history messages = %#v, want %s message %q", payload.Messages, conversationType, message.ID)
+			}
+
+			requireWebSocketHistoryCompletionOnly(t, ctx, conn, false)
+		})
 	}
 }
 
@@ -445,6 +657,105 @@ func requireWebSocketSubscribed(t *testing.T, ctx context.Context, conn *websock
 	}
 	if ack.Type != "subscribed" {
 		t.Fatalf("ack type = %q, want subscribed", ack.Type)
+	}
+}
+
+type webSocketEventFrame struct {
+	Type             domain.EventType        `json:"type"`
+	OrganizationID   string                  `json:"organization_id"`
+	ConversationType domain.ConversationType `json:"conversation_type"`
+	ConversationID   string                  `json:"conversation_id"`
+	Payload          json.RawMessage         `json:"payload"`
+}
+
+func requireWebSocketEventType(t *testing.T, ctx context.Context, conn *websocket.Conn, eventType domain.EventType) webSocketEventFrame {
+	t.Helper()
+
+	_, payload, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var frame webSocketEventFrame
+	if err := json.Unmarshal(payload, &frame); err != nil {
+		t.Fatal(err)
+	}
+	if frame.Type != eventType {
+		t.Fatalf("event type = %q, want %q; payload = %s", frame.Type, eventType, string(payload))
+	}
+	return frame
+}
+
+func requireWebSocketHistoryCompleted(t *testing.T, ctx context.Context, conn *websocket.Conn, hasMore bool) {
+	t.Helper()
+
+	requireWebSocketEventType(t, ctx, conn, domain.EventMessageHistoryStarted)
+	requireWebSocketHistoryCompletionOnly(t, ctx, conn, hasMore)
+}
+
+func requireWebSocketHistoryCompletionOnly(t *testing.T, ctx context.Context, conn *websocket.Conn, hasMore bool) {
+	t.Helper()
+
+	for {
+		frame := requireWebSocketEventTypeAny(t, ctx, conn)
+		switch frame.Type {
+		case domain.EventMessageHistoryChunk:
+			continue
+		case domain.EventMessageHistoryCompleted:
+			var payload domain.MessageHistoryCompletedPayload
+			unmarshalWebSocketPayload(t, frame, &payload)
+			if payload.HasMore != hasMore {
+				t.Fatalf("history completed has_more = %v, want %v", payload.HasMore, hasMore)
+			}
+			return
+		default:
+			t.Fatalf("event type = %q, want history chunk or completion", frame.Type)
+		}
+	}
+}
+
+func requireWebSocketEventTypeAny(t *testing.T, ctx context.Context, conn *websocket.Conn) webSocketEventFrame {
+	t.Helper()
+
+	_, payload, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var frame webSocketEventFrame
+	if err := json.Unmarshal(payload, &frame); err != nil {
+		t.Fatal(err)
+	}
+	return frame
+}
+
+func unmarshalWebSocketPayload(t *testing.T, frame webSocketEventFrame, target any) {
+	t.Helper()
+
+	if err := json.Unmarshal(frame.Payload, target); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func createWebSocketHistoryMessage(t *testing.T, env testEnv, organizationID string, conversationType domain.ConversationType, conversationID string, seq int) domain.Message {
+	t.Helper()
+
+	message := webSocketHistoryMessage(organizationID, conversationType, conversationID, seq)
+	if err := env.store.Messages().Create(context.Background(), message); err != nil {
+		t.Fatal(err)
+	}
+	return message
+}
+
+func webSocketHistoryMessage(organizationID string, conversationType domain.ConversationType, conversationID string, seq int) domain.Message {
+	return domain.Message{
+		ID:               fmt.Sprintf("msg_history_%03d", seq),
+		OrganizationID:   organizationID,
+		ConversationType: conversationType,
+		ConversationID:   conversationID,
+		SenderType:       domain.SenderUser,
+		SenderID:         "usr_history",
+		Kind:             domain.MessageText,
+		Body:             fmt.Sprintf("history %03d", seq),
+		CreatedAt:        time.Date(2026, 4, 25, 10, 0, 0, 0, time.UTC).Add(time.Duration(seq) * time.Second),
 	}
 }
 

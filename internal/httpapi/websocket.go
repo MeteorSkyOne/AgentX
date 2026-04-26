@@ -11,7 +11,13 @@ import (
 	"github.com/meteorsky/agentx/internal/app"
 	"github.com/meteorsky/agentx/internal/domain"
 	"github.com/meteorsky/agentx/internal/eventbus"
+	"github.com/meteorsky/agentx/internal/id"
 	"nhooyr.io/websocket"
+)
+
+const (
+	webSocketHistoryLimit     = 100
+	webSocketHistoryChunkSize = 25
 )
 
 type subscribeMessage struct {
@@ -19,6 +25,11 @@ type subscribeMessage struct {
 	OrganizationID   string `json:"organization_id"`
 	ConversationType string `json:"conversation_type"`
 	ConversationID   string `json:"conversation_id"`
+	Before           string `json:"before"`
+}
+
+type historyLoadRequest struct {
+	before time.Time
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -108,13 +119,30 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if err := writeWebSocketJSON(ctx, conn, map[string]string{"type": "subscribed"}); err != nil {
 		return
 	}
+	if err := s.streamWebSocketMessageHistory(ctx, conn, resolvedOrganizationID, conversationType, msg.ConversationID, nil); err != nil {
+		_ = conn.Close(websocket.StatusInternalError, "failed to stream message history")
+		return
+	}
 
 	readDone := make(chan struct{})
+	historyRequests := make(chan historyLoadRequest, 4)
 	go func() {
 		defer close(readDone)
 		for {
-			if _, _, err := conn.Read(ctx); err != nil {
+			_, payload, err := conn.Read(ctx)
+			if err != nil {
 				cancel()
+				return
+			}
+			request, ok := parseHistoryLoadRequest(payload, msg, conversationType)
+			if !ok {
+				_ = conn.Close(websocket.StatusUnsupportedData, "invalid history request")
+				cancel()
+				return
+			}
+			select {
+			case historyRequests <- request:
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -137,8 +165,108 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				_ = conn.Close(websocket.StatusInternalError, "failed to marshal event")
 				return
 			}
+		case request := <-historyRequests:
+			if err := s.streamWebSocketMessageHistory(ctx, conn, resolvedOrganizationID, conversationType, msg.ConversationID, &request.before); err != nil {
+				_ = conn.Close(websocket.StatusInternalError, "failed to stream message history")
+				return
+			}
 		}
 	}
+}
+
+func parseHistoryLoadRequest(payload []byte, subscribed subscribeMessage, subscribedConversationType domain.ConversationType) (historyLoadRequest, bool) {
+	var msg subscribeMessage
+	if err := json.Unmarshal(payload, &msg); err != nil {
+		return historyLoadRequest{}, false
+	}
+	if msg.Type != "load_history" {
+		return historyLoadRequest{}, false
+	}
+	if msg.OrganizationID != subscribed.OrganizationID || msg.ConversationID != subscribed.ConversationID {
+		return historyLoadRequest{}, false
+	}
+	conversationType := domain.ConversationChannel
+	if msg.ConversationType != "" {
+		var ok bool
+		conversationType, ok = parseConversationType(msg.ConversationType)
+		if !ok {
+			return historyLoadRequest{}, false
+		}
+	}
+	if conversationType != subscribedConversationType {
+		return historyLoadRequest{}, false
+	}
+	before, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(msg.Before))
+	if err != nil || before.IsZero() {
+		return historyLoadRequest{}, false
+	}
+	return historyLoadRequest{before: before}, true
+}
+
+func (s *Server) streamWebSocketMessageHistory(ctx context.Context, conn *websocket.Conn, organizationID string, conversationType domain.ConversationType, conversationID string, before *time.Time) error {
+	beforeCursor := ""
+	if before != nil {
+		beforeCursor = before.UTC().Format(time.RFC3339Nano)
+	}
+	if err := writeWebSocketJSON(ctx, conn, domain.Event{
+		ID:               id.New("evt"),
+		Type:             domain.EventMessageHistoryStarted,
+		OrganizationID:   organizationID,
+		ConversationType: conversationType,
+		ConversationID:   conversationID,
+		Payload:          domain.MessageHistoryStartedPayload{Before: beforeCursor},
+		CreatedAt:        time.Now().UTC(),
+	}); err != nil {
+		return err
+	}
+
+	var messages []domain.Message
+	var err error
+	if before == nil {
+		messages, err = s.app.ListRecentMessages(ctx, conversationType, conversationID, webSocketHistoryLimit+1)
+	} else {
+		messages, err = s.app.ListRecentMessagesBefore(ctx, conversationType, conversationID, *before, webSocketHistoryLimit+1)
+	}
+	if err != nil {
+		return err
+	}
+	hasMore := len(messages) > webSocketHistoryLimit
+	if hasMore {
+		messages = messages[len(messages)-webSocketHistoryLimit:]
+	}
+
+	for start := 0; start < len(messages); start += webSocketHistoryChunkSize {
+		end := start + webSocketHistoryChunkSize
+		if end > len(messages) {
+			end = len(messages)
+		}
+		if err := writeWebSocketJSON(ctx, conn, domain.Event{
+			ID:               id.New("evt"),
+			Type:             domain.EventMessageHistoryChunk,
+			OrganizationID:   organizationID,
+			ConversationType: conversationType,
+			ConversationID:   conversationID,
+			Payload: domain.MessageHistoryChunkPayload{
+				Messages: messages[start:end],
+			},
+			CreatedAt: time.Now().UTC(),
+		}); err != nil {
+			return err
+		}
+	}
+
+	return writeWebSocketJSON(ctx, conn, domain.Event{
+		ID:               id.New("evt"),
+		Type:             domain.EventMessageHistoryCompleted,
+		OrganizationID:   organizationID,
+		ConversationType: conversationType,
+		ConversationID:   conversationID,
+		Payload: domain.MessageHistoryCompletedPayload{
+			HasMore: hasMore,
+			Before:  beforeCursor,
+		},
+		CreatedAt: time.Now().UTC(),
+	})
 }
 
 func writeWebSocketJSON(ctx context.Context, conn *websocket.Conn, value any) error {

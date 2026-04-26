@@ -85,6 +85,7 @@ type MessageStore interface {
 	Delete(ctx context.Context, id string) error
 	List(ctx context.Context, conversationType domain.ConversationType, conversationID string, limit int) ([]domain.Message, error)
 	ListRecent(ctx context.Context, conversationType domain.ConversationType, conversationID string, limit int) ([]domain.Message, error)
+	ListRecentBefore(ctx context.Context, conversationType domain.ConversationType, conversationID string, before time.Time, limit int) ([]domain.Message, error)
 }
 
 type BotUserStore interface {

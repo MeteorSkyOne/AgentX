@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { getToken } from "../api/client";
 import type { ConversationType } from "../api/types";
 import type { AgentXEvent, SocketEvent } from "./events";
@@ -13,8 +13,9 @@ export function useConversationSocket(
   conversationType: ConversationType | undefined,
   conversationID: string | undefined,
   onEvent: (event: AgentXEvent) => void
-): void {
+): (before: string) => boolean {
   const onEventRef = useRef(onEvent);
+  const socketRef = useRef<WebSocket | null>(null);
   const token = getToken();
 
   useEffect(() => {
@@ -30,7 +31,6 @@ export function useConversationSocket(
     const url = new URL("/api/ws", `${protocol}//${window.location.host}`);
     url.searchParams.set("token", token);
 
-    let socket: WebSocket | null = null;
     let stopped = false;
     let reconnectAttempts = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -41,7 +41,7 @@ export function useConversationSocket(
       }
 
       const activeSocket = new WebSocket(url);
-      socket = activeSocket;
+      socketRef.current = activeSocket;
 
       activeSocket.addEventListener("open", () => {
         activeSocket.send(
@@ -95,7 +95,31 @@ export function useConversationSocket(
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
       }
-      socket?.close();
+      socketRef.current?.close();
+      socketRef.current = null;
     };
   }, [organizationID, conversationType, conversationID, token]);
+
+  return useCallback(
+    (before: string): boolean => {
+      if (!organizationID || !conversationType || !conversationID) {
+        return false;
+      }
+      const socket = socketRef.current;
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        return false;
+      }
+      socket.send(
+        JSON.stringify({
+          type: "load_history",
+          organization_id: organizationID,
+          conversation_type: conversationType,
+          conversation_id: conversationID,
+          before
+        })
+      );
+      return true;
+    },
+    [organizationID, conversationType, conversationID]
+  );
 }

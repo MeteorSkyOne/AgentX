@@ -8,6 +8,9 @@ const (
 	EventMessageCreated             EventType = "MessageCreated"
 	EventMessageUpdated             EventType = "MessageUpdated"
 	EventMessageDeleted             EventType = "MessageDeleted"
+	EventMessageHistoryStarted      EventType = "MessageHistoryStarted"
+	EventMessageHistoryChunk        EventType = "MessageHistoryChunk"
+	EventMessageHistoryCompleted    EventType = "MessageHistoryCompleted"
 	EventConversationBindingUpdated EventType = "ConversationBindingUpdated"
 	EventAgentRunStarted            EventType = "AgentRunStarted"
 	EventAgentOutputDelta           EventType = "AgentOutputDelta"
@@ -35,6 +38,19 @@ type MessageUpdatedPayload struct {
 
 type MessageDeletedPayload struct {
 	MessageID string `json:"message_id"`
+}
+
+type MessageHistoryStartedPayload struct {
+	Before string `json:"before,omitempty"`
+}
+
+type MessageHistoryChunkPayload struct {
+	Messages []Message `json:"messages"`
+}
+
+type MessageHistoryCompletedPayload struct {
+	HasMore bool   `json:"has_more"`
+	Before  string `json:"before,omitempty"`
 }
 
 type AgentOutputDeltaPayload struct {

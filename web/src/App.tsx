@@ -16,7 +16,6 @@ import {
   deleteThread,
   getToken,
   me,
-  messages,
   organizations,
   projectChannels,
   projects,
@@ -47,6 +46,7 @@ import { Shell } from "./components/Shell";
 import {
   eventMatchesActiveConversation,
   mergeMessages,
+  messageHistoryLoadingForEvent,
   messageMatchesActiveConversation,
   streamingRunHasCompletedMessage
 } from "./messages/state";
@@ -82,6 +82,9 @@ export default function App() {
   const [selectedChannelID, setSelectedChannelID] = useState<string>();
   const [activeConversation, setActiveConversation] = useState<ActiveConversation>();
   const [conversationMessages, setConversationMessages] = useState<Message[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [olderMessagesLoading, setOlderMessagesLoading] = useState(false);
+  const [messageHistoryHasMore, setMessageHistoryHasMore] = useState(false);
   const [streamingByRunID, setStreamingByRunID] = useState<Record<string, StreamingMessage>>({});
   const streamingCacheRef = useRef<Record<string, Record<string, StreamingMessage>>>({});
   const hasSession = Boolean(sessionToken);
@@ -142,12 +145,6 @@ export default function App() {
     queryFn: () => channelAgents(selectedChannelID as string),
     enabled: hasSession && Boolean(selectedChannelID),
     retry: false
-  });
-
-  const messagesQuery = useQuery({
-    queryKey: ["messages", activeConversation?.type, activeConversation?.id],
-    queryFn: () => messages(activeConversation!.type, activeConversation!.id),
-    enabled: hasSession && Boolean(activeConversation)
   });
 
   const conversationContextQuery = useQuery({
@@ -214,6 +211,9 @@ export default function App() {
     }
     prevConversationKeyRef.current = nextKey;
     setConversationMessages([]);
+    setMessagesLoading(Boolean(activeConversation));
+    setOlderMessagesLoading(false);
+    setMessageHistoryHasMore(false);
     const cached = streamingCacheRef.current[nextKey];
     if (cached) {
       setStreamingByRunID(cached);
@@ -221,39 +221,6 @@ export default function App() {
       setStreamingByRunID({});
     }
   }, [conversationKey(activeConversation)]);
-
-  useEffect(() => {
-    if (!messagesQuery.data || !activeConversation) {
-      return;
-    }
-    const active = {
-      organizationID: selectedOrganizationID,
-      conversationType: activeConversation.type,
-      conversationID: activeConversation.id
-    };
-    const activeMessages = messagesQuery.data.filter((message) =>
-      messageMatchesActiveConversation(message, active)
-    );
-    setConversationMessages((current) => mergeMessages(current, activeMessages));
-    if (activeMessages.some((m) => m.sender_type === "bot")) {
-      const activeAgents = conversationContextQuery.data?.agents ?? channelAgentsQuery.data ?? [];
-      setStreamingByRunID((current) => {
-        const next = { ...current };
-        for (const [runID, item] of Object.entries(next)) {
-          if (streamingRunHasCompletedMessage(item, activeMessages, activeAgents)) {
-            delete next[runID];
-          }
-        }
-        return next;
-      });
-    }
-  }, [
-    messagesQuery.data,
-    selectedOrganizationID,
-    activeConversation,
-    conversationContextQuery.data,
-    channelAgentsQuery.data
-  ]);
 
   useEffect(() => {
     if (meQuery.isError) {
@@ -275,6 +242,45 @@ export default function App() {
       }
 
       switch (event.type) {
+        case "MessageHistoryStarted":
+          if (event.payload.before) {
+            setOlderMessagesLoading(true);
+          } else {
+            setMessagesLoading((current) => messageHistoryLoadingForEvent(current, event));
+          }
+          break;
+        case "MessageHistoryChunk": {
+          const activeMessages = event.payload.messages.filter((message) =>
+            messageMatchesActiveConversation(message, {
+              organizationID: selectedOrganizationID,
+              conversationType: activeConversation.type,
+              conversationID: activeConversation.id
+            })
+          );
+          setConversationMessages((current) => mergeMessages(current, activeMessages));
+          if (activeMessages.some((m) => m.sender_type === "bot")) {
+            const activeAgents =
+              conversationContextQuery.data?.agents ?? channelAgentsQuery.data ?? [];
+            setStreamingByRunID((current) => {
+              const next = { ...current };
+              for (const [runID, item] of Object.entries(next)) {
+                if (streamingRunHasCompletedMessage(item, activeMessages, activeAgents)) {
+                  delete next[runID];
+                }
+              }
+              return next;
+            });
+          }
+          break;
+        }
+        case "MessageHistoryCompleted":
+          setMessageHistoryHasMore(event.payload.has_more);
+          if (event.payload.before) {
+            setOlderMessagesLoading(false);
+          } else {
+            setMessagesLoading((current) => messageHistoryLoadingForEvent(current, event));
+          }
+          break;
         case "MessageCreated": {
           const message = event.payload.message;
           setConversationMessages((current) => mergeMessages(current, [message]));
@@ -352,15 +358,41 @@ export default function App() {
           break;
       }
     },
-    [selectedOrganizationID, activeConversation]
+    [
+      selectedOrganizationID,
+      activeConversation,
+      conversationContextQuery.data,
+      channelAgentsQuery.data
+    ]
   );
 
-  useConversationSocket(
+  const requestOlderMessages = useConversationSocket(
     selectedOrganizationID,
     activeConversation?.type,
     activeConversation?.id,
     handleSocketEvent
   );
+
+  const handleLoadOlderMessages = useCallback((): boolean => {
+    const oldestMessage = conversationMessages[0];
+    if (
+      !oldestMessage ||
+      !messageHistoryHasMore ||
+      messagesLoading ||
+      olderMessagesLoading ||
+      !requestOlderMessages(oldestMessage.created_at)
+    ) {
+      return false;
+    }
+    setOlderMessagesLoading(true);
+    return true;
+  }, [
+    conversationMessages,
+    messageHistoryHasMore,
+    messagesLoading,
+    olderMessagesLoading,
+    requestOlderMessages
+  ]);
 
   function handleAuthenticated(result: AuthResponse) {
     setSessionToken(result.session_token);
@@ -369,6 +401,9 @@ export default function App() {
     setSelectedChannelID(undefined);
     setActiveConversation(undefined);
     setConversationMessages([]);
+    setMessagesLoading(false);
+    setOlderMessagesLoading(false);
+    setMessageHistoryHasMore(false);
     setStreamingByRunID({});
     void queryClient.invalidateQueries();
   }
@@ -381,6 +416,9 @@ export default function App() {
     setSelectedChannelID(undefined);
     setActiveConversation(undefined);
     setConversationMessages([]);
+    setMessagesLoading(false);
+    setOlderMessagesLoading(false);
+    setMessageHistoryHasMore(false);
     setStreamingByRunID({});
     queryClient.clear();
   }
@@ -389,6 +427,9 @@ export default function App() {
     setSelectedChannelID(undefined);
     setActiveConversation(undefined);
     setConversationMessages([]);
+    setMessagesLoading(false);
+    setOlderMessagesLoading(false);
+    setMessageHistoryHasMore(false);
     setStreamingByRunID({});
   }
 
@@ -421,6 +462,9 @@ export default function App() {
       });
     } else {
       setActiveConversation(undefined);
+      setMessagesLoading(false);
+      setOlderMessagesLoading(false);
+      setMessageHistoryHasMore(false);
     }
   }
 
@@ -495,6 +539,9 @@ export default function App() {
       setSelectedChannelID(thread.channel_id);
       setActiveConversation(undefined);
       setConversationMessages([]);
+      setMessagesLoading(false);
+      setOlderMessagesLoading(false);
+      setMessageHistoryHasMore(false);
       setStreamingByRunID({});
     }
   }
@@ -502,18 +549,12 @@ export default function App() {
   async function handleUpdateMessage(messageID: string, body: string): Promise<Message> {
     const updated = await updateMessage(messageID, body);
     setConversationMessages((current) => mergeMessages(current, [updated]));
-    await queryClient.invalidateQueries({
-      queryKey: ["messages", activeConversation?.type, activeConversation?.id]
-    });
     return updated;
   }
 
   async function handleDeleteMessage(message: Message): Promise<void> {
     await deleteMessage(message.id);
     setConversationMessages((current) => current.filter((item) => item.id !== message.id));
-    await queryClient.invalidateQueries({
-      queryKey: ["messages", activeConversation?.type, activeConversation?.id]
-    });
   }
 
   async function handleSaveChannelAgents(
@@ -609,7 +650,9 @@ export default function App() {
       conversationContext={conversationContextQuery.data}
       contextLoading={conversationContextQuery.isLoading}
       messages={conversationMessages}
-      messagesLoading={messagesQuery.isLoading}
+      messagesLoading={messagesLoading}
+      olderMessagesLoading={olderMessagesLoading}
+      hasOlderMessages={messageHistoryHasMore}
       streaming={Object.values(streamingByRunID)}
       onSelectProject={handleSelectProject}
       onCreateProject={handleCreateProject}
@@ -630,6 +673,7 @@ export default function App() {
       onWriteWorkspaceFile={handleWriteWorkspaceFile}
       onUpdateMessage={handleUpdateMessage}
       onDeleteMessage={handleDeleteMessage}
+      onLoadOlderMessages={handleLoadOlderMessages}
       onMessageSent={handleMessageSent}
       onLogout={clearSession}
     />

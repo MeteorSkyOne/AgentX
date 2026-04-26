@@ -183,6 +183,14 @@ func TestMessagesListRecentReturnsLatestMessagesChronologically(t *testing.T) {
 	if len(messages) != 2 || messages[0].ID != "msg_recent_2" || messages[1].ID != "msg_recent_3" {
 		t.Fatalf("recent messages = %#v", messages)
 	}
+
+	messages, err = st.Messages().ListRecentBefore(ctx, domain.ConversationChannel, channel.ID, now.Add(3*time.Second), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || messages[0].ID != "msg_recent_1" || messages[1].ID != "msg_recent_2" {
+		t.Fatalf("recent messages before cursor = %#v", messages)
+	}
 }
 
 func TestTxCallbackErrorRollsBack(t *testing.T) {

@@ -59,6 +59,16 @@ export function messageMatchesActiveConversation(
   );
 }
 
+export function messageHistoryLoadingForEvent(current: boolean, event: AgentXEvent): boolean {
+  if (event.type === "MessageHistoryStarted") {
+    return event.payload.before ? current : true;
+  }
+  if (event.type === "MessageHistoryCompleted") {
+    return event.payload.before ? current : false;
+  }
+  return current;
+}
+
 interface StreamingRunState {
   agentID?: string;
   startedAt?: string;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   Brain,
   Braces,
@@ -34,27 +34,66 @@ interface StreamingMessage {
 interface MessagePaneProps {
   messages: Message[];
   isLoading: boolean;
+  isLoadingOlder: boolean;
+  hasOlderMessages: boolean;
   streaming: StreamingMessage[];
   agents: ConversationAgentContext[];
   onUpdateMessage: (messageID: string, body: string) => Promise<Message>;
   onDeleteMessage: (message: Message) => Promise<void>;
+  onLoadOlder: () => boolean;
 }
 
 export function MessagePane({
   messages,
   isLoading,
+  isLoadingOlder,
+  hasOlderMessages,
   streaming,
   agents,
   onUpdateMessage,
   onDeleteMessage,
+  onLoadOlder,
 }: MessagePaneProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const olderAnchorMessageIDRef = useRef<string | null>(null);
   const agentByBotID = new Map(agents.map((item) => [item.agent.bot_user_id, item.agent]));
   const agentByID = new Map(agents.map((item) => [item.agent.id, item.agent]));
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const anchorID = olderAnchorMessageIDRef.current;
+    if (anchorID) {
+      const viewport = viewportRef.current;
+      const anchor = viewport?.querySelector<HTMLElement>(
+        `[data-message-id="${cssEscape(anchorID)}"]`
+      );
+      anchor?.scrollIntoView({ block: "start" });
+      if (!isLoadingOlder) {
+        olderAnchorMessageIDRef.current = null;
+      }
+      return;
+    }
     bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [messages, streaming]);
+  }, [messages, streaming, isLoadingOlder]);
+
+  function handleScroll() {
+    const viewport = viewportRef.current;
+    if (
+      !viewport ||
+      viewport.scrollTop > 80 ||
+      isLoading ||
+      isLoadingOlder ||
+      !hasOlderMessages ||
+      messages.length === 0
+    ) {
+      return;
+    }
+
+    olderAnchorMessageIDRef.current = messages[0].id;
+    if (!onLoadOlder()) {
+      olderAnchorMessageIDRef.current = null;
+    }
+  }
 
   if (isLoading) {
     return (
@@ -74,9 +113,19 @@ export function MessagePane({
   }
 
   return (
-    <ScrollArea className="min-h-0 flex-1" aria-label="Messages">
+    <ScrollArea
+      className="min-h-0 flex-1"
+      aria-label="Messages"
+      viewportRef={viewportRef}
+      onViewportScroll={handleScroll}
+    >
       <section className="p-4">
         <div className="space-y-4">
+          {isLoadingOlder && (
+            <div className="py-2 text-center text-xs text-muted-foreground">
+              Loading older messages...
+            </div>
+          )}
           {messages.map((message) => {
             const agent = agentByBotID.get(message.sender_id);
             return (
@@ -108,6 +157,13 @@ export function MessagePane({
       </section>
     </ScrollArea>
   );
+}
+
+function cssEscape(value: string): string {
+  if (typeof CSS !== "undefined" && CSS.escape) {
+    return CSS.escape(value);
+  }
+  return value.replace(/"/g, '\\"');
 }
 
 function MessageItem({
@@ -170,7 +226,10 @@ function MessageItem({
   }
 
   return (
-    <div className="group flex gap-4 rounded-md px-2 py-1 hover:bg-accent/30">
+    <div
+      className="group flex gap-4 rounded-md px-2 py-1 hover:bg-accent/30"
+      data-message-id={message.id}
+    >
       {isBot && agentID ? (
         <AgentAvatar agentID={agentID} kind={agentKind ?? "fake"} size="md" className="shrink-0" />
       ) : (

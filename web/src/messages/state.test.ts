@@ -4,6 +4,7 @@ import type { Message } from "../api/types";
 import {
   eventMatchesActiveConversation,
   mergeMessages,
+  messageHistoryLoadingForEvent,
   messageMatchesActiveConversation,
   streamingRunHasCompletedMessage
 } from "./state";
@@ -23,6 +24,15 @@ describe("mergeMessages", () => {
     const user = message("msg_user", "chn_1", "user", "hello", "2026-04-25T10:00:01Z");
 
     expect(mergeMessages([user], [user])).toEqual([user]);
+  });
+
+  it("merges history chunks with live events without duplicates", () => {
+    const older = message("msg_old", "chn_1", "user", "older", "2026-04-25T10:00:01Z");
+    const live = message("msg_live", "chn_1", "user", "live", "2026-04-25T10:00:02Z");
+
+    const result = mergeMessages([live], [older, live]);
+
+    expect(result.map((item) => item.id)).toEqual(["msg_old", "msg_live"]);
   });
 });
 
@@ -109,6 +119,24 @@ describe("messageMatchesActiveConversation", () => {
         }
       )
     ).toBe(false);
+  });
+});
+
+describe("messageHistoryLoadingForEvent", () => {
+  it("ends loading when empty history completes", () => {
+    const event: AgentXEvent = {
+      id: "evt_history_done",
+      type: "MessageHistoryCompleted",
+      organization_id: "org_1",
+      conversation_type: "channel",
+      conversation_id: "chn_1",
+      created_at: "2026-04-25T10:00:03Z",
+      payload: {
+        has_more: false
+      }
+    };
+
+    expect(messageHistoryLoadingForEvent(true, event)).toBe(false);
   });
 });
 

@@ -588,6 +588,31 @@ LIMIT ?`, string(conversationType), conversationID, limit)
 	return messages, nil
 }
 
+func (r messageRepo) ListRecentBefore(ctx context.Context, conversationType domain.ConversationType, conversationID string, before time.Time, limit int) ([]domain.Message, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := r.q.QueryContext(ctx, `
+SELECT id, org_id, conversation_type, conversation_id, sender_type, sender_id, kind, body, metadata_json, created_at
+FROM messages
+WHERE conversation_type = ? AND conversation_id = ? AND created_at < ?
+ORDER BY created_at DESC
+LIMIT ?`, string(conversationType), conversationID, formatTime(before), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	messages, err := scanMessages(rows)
+	if err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
+	}
+	return messages, nil
+}
+
 func scanMessages(rows *sql.Rows) ([]domain.Message, error) {
 	var messages []domain.Message
 	for rows.Next() {

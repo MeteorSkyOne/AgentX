@@ -121,6 +121,8 @@ interface ShellProps {
   contextLoading: boolean;
   messages: Message[];
   messagesLoading: boolean;
+  olderMessagesLoading: boolean;
+  hasOlderMessages: boolean;
   streaming: StreamingMessage[];
   onSelectProject: (projectID: string) => void;
   onCreateProject: (name: string) => Promise<Project>;
@@ -155,6 +157,7 @@ interface ShellProps {
   onWriteWorkspaceFile: (workspaceID: string, path: string, body: string) => Promise<void>;
   onUpdateMessage: (messageID: string, body: string) => Promise<Message>;
   onDeleteMessage: (message: Message) => Promise<void>;
+  onLoadOlderMessages: () => boolean;
   onMessageSent: (message: Message) => void;
   onLogout: () => void;
 }
@@ -174,6 +177,8 @@ export function Shell({
   contextLoading,
   messages,
   messagesLoading,
+  olderMessagesLoading,
+  hasOlderMessages,
   streaming,
   onSelectProject,
   onCreateProject,
@@ -194,6 +199,7 @@ export function Shell({
   onWriteWorkspaceFile,
   onUpdateMessage,
   onDeleteMessage,
+  onLoadOlderMessages,
   onMessageSent,
   onLogout
 }: ShellProps) {
@@ -566,10 +572,13 @@ export function Shell({
                 <MessagePane
                   messages={messages}
                   isLoading={messagesLoading}
+                  isLoadingOlder={olderMessagesLoading}
+                  hasOlderMessages={hasOlderMessages}
                   streaming={streaming}
                   agents={boundAgents}
                   onUpdateMessage={onUpdateMessage}
                   onDeleteMessage={onDeleteMessage}
+                  onLoadOlder={onLoadOlderMessages}
                 />
                 <Composer
                   conversation={composerConversation}
