@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"github.com/meteorsky/agentx/internal/domain"
@@ -29,7 +30,15 @@ type organizationRepo struct {
 	q queryer
 }
 
+type projectRepo struct {
+	q queryer
+}
+
 type channelRepo struct {
+	q queryer
+}
+
+type threadRepo struct {
 	q queryer
 }
 
@@ -46,6 +55,10 @@ type agentRepo struct {
 }
 
 type workspaceRepo struct {
+	q queryer
+}
+
+type channelAgentRepo struct {
 	q queryer
 }
 
@@ -86,8 +99,16 @@ func (s *Store) Organizations() store.OrganizationStore {
 	return organizationRepo{q: s.db}
 }
 
+func (s *Store) Projects() store.ProjectStore {
+	return projectRepo{q: s.db}
+}
+
 func (s *Store) Channels() store.ChannelStore {
 	return channelRepo{q: s.db}
+}
+
+func (s *Store) Threads() store.ThreadStore {
+	return threadRepo{q: s.db}
 }
 
 func (s *Store) Messages() store.MessageStore {
@@ -106,6 +127,10 @@ func (s *Store) Workspaces() store.WorkspaceStore {
 	return workspaceRepo{q: s.db}
 }
 
+func (s *Store) ChannelAgents() store.ChannelAgentStore {
+	return channelAgentRepo{q: s.db}
+}
+
 func (s *Store) Bindings() store.BindingStore {
 	return bindingRepo{q: s.db}
 }
@@ -122,8 +147,16 @@ func (t *txStore) Organizations() store.OrganizationStore {
 	return organizationRepo{q: t.tx}
 }
 
+func (t *txStore) Projects() store.ProjectStore {
+	return projectRepo{q: t.tx}
+}
+
 func (t *txStore) Channels() store.ChannelStore {
 	return channelRepo{q: t.tx}
+}
+
+func (t *txStore) Threads() store.ThreadStore {
+	return threadRepo{q: t.tx}
 }
 
 func (t *txStore) Messages() store.MessageStore {
@@ -140,6 +173,10 @@ func (t *txStore) Agents() store.AgentStore {
 
 func (t *txStore) Workspaces() store.WorkspaceStore {
 	return workspaceRepo{q: t.tx}
+}
+
+func (t *txStore) ChannelAgents() store.ChannelAgentStore {
+	return channelAgentRepo{q: t.tx}
 }
 
 func (t *txStore) Bindings() store.BindingStore {
@@ -164,6 +201,22 @@ func (r userRepo) ByID(ctx context.Context, id string) (domain.User, error) {
 	err := r.q.QueryRowContext(ctx,
 		`SELECT id, display_name, created_at FROM users WHERE id = ?`,
 		id,
+	).Scan(&user.ID, &user.DisplayName, &createdAt)
+	if err != nil {
+		return domain.User{}, err
+	}
+	user.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return domain.User{}, err
+	}
+	return user, nil
+}
+
+func (r userRepo) First(ctx context.Context) (domain.User, error) {
+	var user domain.User
+	var createdAt string
+	err := r.q.QueryRowContext(ctx,
+		`SELECT id, display_name, created_at FROM users ORDER BY created_at ASC, id ASC LIMIT 1`,
 	).Scan(&user.ID, &user.DisplayName, &createdAt)
 	if err != nil {
 		return domain.User{}, err
@@ -242,17 +295,80 @@ func (r organizationRepo) AddMember(ctx context.Context, orgID string, userID st
 	return err
 }
 
+func (r projectRepo) Create(ctx context.Context, project domain.Project) error {
+	_, err := r.q.ExecContext(ctx, `
+INSERT INTO projects (id, org_id, name, workspace_id, created_by, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		project.ID, project.OrganizationID, project.Name, project.WorkspaceID, project.CreatedBy,
+		formatTime(project.CreatedAt), formatTime(project.UpdatedAt),
+	)
+	return err
+}
+
+func (r projectRepo) ListByOrganization(ctx context.Context, orgID string) ([]domain.Project, error) {
+	rows, err := r.q.QueryContext(ctx, `
+SELECT id, org_id, name, workspace_id, created_by, created_at, updated_at
+FROM projects
+WHERE org_id = ?
+ORDER BY created_at ASC, id ASC`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var projects []domain.Project
+	for rows.Next() {
+		project, err := scanProject(rows)
+		if err != nil {
+			return nil, err
+		}
+		projects = append(projects, project)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return projects, nil
+}
+
+func (r projectRepo) ByID(ctx context.Context, id string) (domain.Project, error) {
+	return scanProject(r.q.QueryRowContext(ctx, `
+SELECT id, org_id, name, workspace_id, created_by, created_at, updated_at
+FROM projects
+WHERE id = ?`, id))
+}
+
+func (r projectRepo) Update(ctx context.Context, project domain.Project) error {
+	_, err := r.q.ExecContext(ctx, `
+UPDATE projects
+SET name = ?, workspace_id = ?, updated_at = ?
+WHERE id = ?`,
+		project.Name, project.WorkspaceID, formatTime(project.UpdatedAt), project.ID,
+	)
+	return err
+}
+
+func (r projectRepo) Delete(ctx context.Context, id string) error {
+	_, err := r.q.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
+	return err
+}
+
 func (r channelRepo) Create(ctx context.Context, channel domain.Channel) error {
+	channel = normalizeChannel(channel)
 	_, err := r.q.ExecContext(ctx,
-		`INSERT INTO channels (id, org_id, name, created_at) VALUES (?, ?, ?, ?)`,
-		channel.ID, channel.OrganizationID, channel.Name, formatTime(channel.CreatedAt),
+		`INSERT INTO channels (id, org_id, project_id, type, name, created_at, updated_at, archived_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		channel.ID, channel.OrganizationID, channel.ProjectID, string(channel.Type), channel.Name,
+		formatTime(channel.CreatedAt), formatTime(channel.UpdatedAt), nullableTime(channel.ArchivedAt),
 	)
 	return err
 }
 
 func (r channelRepo) ListByOrganization(ctx context.Context, orgID string) ([]domain.Channel, error) {
 	rows, err := r.q.QueryContext(ctx,
-		`SELECT id, org_id, name, created_at FROM channels WHERE org_id = ? ORDER BY created_at ASC`,
+		`SELECT id, org_id, project_id, type, name, created_at, updated_at, archived_at
+FROM channels
+WHERE org_id = ? AND archived_at IS NULL
+ORDER BY created_at ASC`,
 		orgID,
 	)
 	if err != nil {
@@ -274,20 +390,158 @@ func (r channelRepo) ListByOrganization(ctx context.Context, orgID string) ([]do
 	return channels, nil
 }
 
+func (r channelRepo) ListByProject(ctx context.Context, projectID string) ([]domain.Channel, error) {
+	rows, err := r.q.QueryContext(ctx, `
+SELECT id, org_id, project_id, type, name, created_at, updated_at, archived_at
+FROM channels
+WHERE project_id = ? AND archived_at IS NULL
+ORDER BY created_at ASC`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var channels []domain.Channel
+	for rows.Next() {
+		channel, err := scanChannel(rows)
+		if err != nil {
+			return nil, err
+		}
+		channels = append(channels, channel)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return channels, nil
+}
+
 func (r channelRepo) ByID(ctx context.Context, id string) (domain.Channel, error) {
 	return scanChannel(r.q.QueryRowContext(ctx,
-		`SELECT id, org_id, name, created_at FROM channels WHERE id = ?`,
+		`SELECT id, org_id, project_id, type, name, created_at, updated_at, archived_at FROM channels WHERE id = ?`,
 		id,
 	))
 }
 
-func (r messageRepo) Create(ctx context.Context, message domain.Message) error {
+func (r channelRepo) Update(ctx context.Context, channel domain.Channel) error {
+	channel = normalizeChannel(channel)
 	_, err := r.q.ExecContext(ctx, `
-INSERT INTO messages (id, org_id, conversation_type, conversation_id, sender_type, sender_id, kind, body, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		message.ID, message.OrganizationID, string(message.ConversationType), message.ConversationID,
-		string(message.SenderType), message.SenderID, string(message.Kind), message.Body, formatTime(message.CreatedAt),
+UPDATE channels
+SET name = ?, type = ?, updated_at = ?
+WHERE id = ?`,
+		channel.Name, string(channel.Type), formatTime(channel.UpdatedAt), channel.ID,
 	)
+	return err
+}
+
+func (r channelRepo) Archive(ctx context.Context, id string, archivedAt time.Time) error {
+	_, err := r.q.ExecContext(ctx, `
+UPDATE channels
+SET archived_at = ?, updated_at = ?
+WHERE id = ?`,
+		formatTime(archivedAt), formatTime(archivedAt), id,
+	)
+	return err
+}
+
+func (r threadRepo) Create(ctx context.Context, thread domain.Thread) error {
+	_, err := r.q.ExecContext(ctx, `
+INSERT INTO threads (id, org_id, project_id, channel_id, title, created_by, created_at, updated_at, archived_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		thread.ID, thread.OrganizationID, thread.ProjectID, thread.ChannelID, thread.Title, thread.CreatedBy,
+		formatTime(thread.CreatedAt), formatTime(thread.UpdatedAt), nullableTime(thread.ArchivedAt),
+	)
+	return err
+}
+
+func (r threadRepo) ListByChannel(ctx context.Context, channelID string) ([]domain.Thread, error) {
+	rows, err := r.q.QueryContext(ctx, `
+SELECT id, org_id, project_id, channel_id, title, created_by, created_at, updated_at, archived_at
+FROM threads
+WHERE channel_id = ? AND archived_at IS NULL
+ORDER BY updated_at DESC, created_at DESC`, channelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var threads []domain.Thread
+	for rows.Next() {
+		thread, err := scanThread(rows)
+		if err != nil {
+			return nil, err
+		}
+		threads = append(threads, thread)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return threads, nil
+}
+
+func (r threadRepo) ByID(ctx context.Context, id string) (domain.Thread, error) {
+	return scanThread(r.q.QueryRowContext(ctx, `
+SELECT id, org_id, project_id, channel_id, title, created_by, created_at, updated_at, archived_at
+FROM threads
+WHERE id = ?`, id))
+}
+
+func (r threadRepo) Update(ctx context.Context, thread domain.Thread) error {
+	_, err := r.q.ExecContext(ctx, `
+UPDATE threads
+SET title = ?
+WHERE id = ?`,
+		thread.Title, thread.ID,
+	)
+	return err
+}
+
+func (r threadRepo) Archive(ctx context.Context, id string, archivedAt time.Time) error {
+	_, err := r.q.ExecContext(ctx, `
+UPDATE threads
+SET archived_at = ?, updated_at = ?
+WHERE id = ?`,
+		formatTime(archivedAt), formatTime(archivedAt), id,
+	)
+	return err
+}
+
+func (r messageRepo) Create(ctx context.Context, message domain.Message) error {
+	metadataJSON, err := json.Marshal(emptyMapIfNil(message.Metadata))
+	if err != nil {
+		return err
+	}
+	_, err = r.q.ExecContext(ctx, `
+INSERT INTO messages (id, org_id, conversation_type, conversation_id, sender_type, sender_id, kind, body, metadata_json, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		message.ID, message.OrganizationID, string(message.ConversationType), message.ConversationID,
+		string(message.SenderType), message.SenderID, string(message.Kind), message.Body, string(metadataJSON), formatTime(message.CreatedAt),
+	)
+	return err
+}
+
+func (r messageRepo) ByID(ctx context.Context, id string) (domain.Message, error) {
+	return scanMessage(r.q.QueryRowContext(ctx, `
+SELECT id, org_id, conversation_type, conversation_id, sender_type, sender_id, kind, body, metadata_json, created_at
+FROM messages
+WHERE id = ?`, id))
+}
+
+func (r messageRepo) Update(ctx context.Context, message domain.Message) error {
+	metadataJSON, err := json.Marshal(emptyMapIfNil(message.Metadata))
+	if err != nil {
+		return err
+	}
+	_, err = r.q.ExecContext(ctx, `
+UPDATE messages
+SET body = ?, metadata_json = ?
+WHERE id = ?`,
+		message.Body, string(metadataJSON), message.ID,
+	)
+	return err
+}
+
+func (r messageRepo) Delete(ctx context.Context, id string) error {
+	_, err := r.q.ExecContext(ctx, `DELETE FROM messages WHERE id = ?`, id)
 	return err
 }
 
@@ -296,7 +550,7 @@ func (r messageRepo) List(ctx context.Context, conversationType domain.Conversat
 		limit = 100
 	}
 	rows, err := r.q.QueryContext(ctx, `
-SELECT id, org_id, conversation_type, conversation_id, sender_type, sender_id, kind, body, created_at
+SELECT id, org_id, conversation_type, conversation_id, sender_type, sender_id, kind, body, metadata_json, created_at
 FROM messages
 WHERE conversation_type = ? AND conversation_id = ?
 ORDER BY created_at ASC
@@ -306,6 +560,35 @@ LIMIT ?`, string(conversationType), conversationID, limit)
 	}
 	defer rows.Close()
 
+	return scanMessages(rows)
+}
+
+func (r messageRepo) ListRecent(ctx context.Context, conversationType domain.ConversationType, conversationID string, limit int) ([]domain.Message, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := r.q.QueryContext(ctx, `
+SELECT id, org_id, conversation_type, conversation_id, sender_type, sender_id, kind, body, metadata_json, created_at
+FROM messages
+WHERE conversation_type = ? AND conversation_id = ?
+ORDER BY created_at DESC
+LIMIT ?`, string(conversationType), conversationID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	messages, err := scanMessages(rows)
+	if err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
+	}
+	return messages, nil
+}
+
+func scanMessages(rows *sql.Rows) ([]domain.Message, error) {
 	var messages []domain.Message
 	for rows.Next() {
 		message, err := scanMessage(rows)
@@ -329,29 +612,86 @@ func (r botUserRepo) Create(ctx context.Context, bot domain.BotUser) error {
 }
 
 func (r agentRepo) Create(ctx context.Context, agent domain.Agent) error {
-	_, err := r.q.ExecContext(ctx, `
-INSERT INTO agents (id, org_id, bot_user_id, kind, name, model, default_workspace_id, env_json, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)`,
-		agent.ID, agent.OrganizationID, agent.BotUserID, agent.Kind, agent.Name, agent.Model,
-		agent.DefaultWorkspaceID, formatTime(agent.CreatedAt), formatTime(agent.UpdatedAt),
+	if !agent.Enabled {
+		agent.Enabled = true
+	}
+	agent = normalizeAgent(agent)
+	envJSON, err := json.Marshal(emptyMapIfNil(agent.Env))
+	if err != nil {
+		return err
+	}
+	_, err = r.q.ExecContext(ctx, `
+INSERT INTO agents (id, org_id, bot_user_id, kind, name, handle, model, default_workspace_id, config_workspace_id, enabled, yolo_mode, env_json, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		agent.ID, agent.OrganizationID, agent.BotUserID, agent.Kind, agent.Name, agent.Handle, agent.Model,
+		agent.DefaultWorkspaceID, agent.ConfigWorkspaceID, boolToInt(agent.Enabled), boolToInt(agent.YoloMode), string(envJSON),
+		formatTime(agent.CreatedAt), formatTime(agent.UpdatedAt),
 	)
 	return err
 }
 
 func (r agentRepo) ByID(ctx context.Context, id string) (domain.Agent, error) {
 	return scanAgent(r.q.QueryRowContext(ctx, `
-SELECT id, org_id, bot_user_id, kind, name, model, default_workspace_id, created_at, updated_at
+SELECT id, org_id, bot_user_id, kind, name, handle, model, default_workspace_id, config_workspace_id, enabled, yolo_mode, env_json, created_at, updated_at
 FROM agents
 WHERE id = ?`, id))
 }
 
 func (r agentRepo) DefaultForOrganization(ctx context.Context, orgID string) (domain.Agent, error) {
 	return scanAgent(r.q.QueryRowContext(ctx, `
-SELECT id, org_id, bot_user_id, kind, name, model, default_workspace_id, created_at, updated_at
+SELECT id, org_id, bot_user_id, kind, name, handle, model, default_workspace_id, config_workspace_id, enabled, yolo_mode, env_json, created_at, updated_at
 FROM agents
 WHERE org_id = ?
 ORDER BY created_at ASC
 LIMIT 1`, orgID))
+}
+
+func (r agentRepo) ListByOrganization(ctx context.Context, orgID string) ([]domain.Agent, error) {
+	rows, err := r.q.QueryContext(ctx, `
+SELECT id, org_id, bot_user_id, kind, name, handle, model, default_workspace_id, config_workspace_id, enabled, yolo_mode, env_json, created_at, updated_at
+FROM agents
+WHERE org_id = ?
+ORDER BY created_at ASC, id ASC`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var agents []domain.Agent
+	for rows.Next() {
+		agent, err := scanAgent(rows)
+		if err != nil {
+			return nil, err
+		}
+		agents = append(agents, agent)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return agents, nil
+}
+
+func (r agentRepo) ByHandle(ctx context.Context, orgID string, handle string) (domain.Agent, error) {
+	return scanAgent(r.q.QueryRowContext(ctx, `
+SELECT id, org_id, bot_user_id, kind, name, handle, model, default_workspace_id, config_workspace_id, enabled, yolo_mode, env_json, created_at, updated_at
+FROM agents
+WHERE org_id = ? AND handle = ?`, orgID, handle))
+}
+
+func (r agentRepo) Update(ctx context.Context, agent domain.Agent) error {
+	agent = normalizeAgent(agent)
+	envJSON, err := json.Marshal(emptyMapIfNil(agent.Env))
+	if err != nil {
+		return err
+	}
+	_, err = r.q.ExecContext(ctx, `
+UPDATE agents
+SET kind = ?, name = ?, handle = ?, model = ?, default_workspace_id = ?, config_workspace_id = ?, enabled = ?, yolo_mode = ?, env_json = ?, updated_at = ?
+WHERE id = ?`,
+		agent.Kind, agent.Name, agent.Handle, agent.Model, agent.DefaultWorkspaceID, agent.ConfigWorkspaceID,
+		boolToInt(agent.Enabled), boolToInt(agent.YoloMode), string(envJSON), formatTime(agent.UpdatedAt), agent.ID,
+	)
+	return err
 }
 
 func (r workspaceRepo) Create(ctx context.Context, workspace domain.Workspace) error {
@@ -369,6 +709,59 @@ func (r workspaceRepo) ByID(ctx context.Context, id string) (domain.Workspace, e
 SELECT id, org_id, type, name, path, created_by, created_at, updated_at
 FROM workspaces
 WHERE id = ?`, id))
+}
+
+func (r workspaceRepo) Update(ctx context.Context, workspace domain.Workspace) error {
+	_, err := r.q.ExecContext(ctx, `
+UPDATE workspaces SET name = ?, path = ?, updated_at = ? WHERE id = ?`,
+		workspace.Name, workspace.Path, formatTime(workspace.UpdatedAt), workspace.ID,
+	)
+	return err
+}
+
+func (r channelAgentRepo) ReplaceForChannel(ctx context.Context, channelID string, agents []domain.ChannelAgent) error {
+	if _, err := r.q.ExecContext(ctx, `DELETE FROM channel_agents WHERE channel_id = ?`, channelID); err != nil {
+		return err
+	}
+	for _, agent := range agents {
+		if agent.ChannelID == "" {
+			agent.ChannelID = channelID
+		}
+		if _, err := r.q.ExecContext(ctx, `
+INSERT INTO channel_agents (channel_id, agent_id, run_workspace_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?)`,
+			agent.ChannelID, agent.AgentID, nullableString(agent.RunWorkspaceID),
+			formatTime(agent.CreatedAt), formatTime(agent.UpdatedAt),
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r channelAgentRepo) ListByChannel(ctx context.Context, channelID string) ([]domain.ChannelAgent, error) {
+	rows, err := r.q.QueryContext(ctx, `
+SELECT channel_id, agent_id, run_workspace_id, created_at, updated_at
+FROM channel_agents
+WHERE channel_id = ?
+ORDER BY created_at ASC, agent_id ASC`, channelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var agents []domain.ChannelAgent
+	for rows.Next() {
+		agent, err := scanChannelAgent(rows)
+		if err != nil {
+			return nil, err
+		}
+		agents = append(agents, agent)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return agents, nil
 }
 
 func (r bindingRepo) Upsert(ctx context.Context, binding domain.ConversationBinding) error {
@@ -407,6 +800,15 @@ ON CONFLICT(agent_id, conversation_type, conversation_id) DO UPDATE SET
 	return err
 }
 
+func (r sessionRepo) ByConversation(ctx context.Context, agentID string, conversationType domain.ConversationType, conversationID string) (domain.AgentSession, error) {
+	return scanAgentSession(r.q.QueryRowContext(ctx, `
+SELECT agent_id, conversation_type, conversation_id, provider_session_id, status, updated_at
+FROM agent_sessions
+WHERE agent_id = ? AND conversation_type = ? AND conversation_id = ?`,
+		agentID, string(conversationType), conversationID,
+	))
+}
+
 func scanOrganization(scanner interface {
 	Scan(dest ...any) error
 }) (domain.Organization, error) {
@@ -423,36 +825,110 @@ func scanOrganization(scanner interface {
 	return org, nil
 }
 
+func scanProject(scanner interface {
+	Scan(dest ...any) error
+}) (domain.Project, error) {
+	var project domain.Project
+	var createdAt, updatedAt string
+	if err := scanner.Scan(
+		&project.ID, &project.OrganizationID, &project.Name, &project.WorkspaceID,
+		&project.CreatedBy, &createdAt, &updatedAt,
+	); err != nil {
+		return domain.Project{}, err
+	}
+	var err error
+	project.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return domain.Project{}, err
+	}
+	project.UpdatedAt, err = parseTime(updatedAt)
+	if err != nil {
+		return domain.Project{}, err
+	}
+	return project, nil
+}
+
 func scanChannel(scanner interface {
 	Scan(dest ...any) error
 }) (domain.Channel, error) {
 	var channel domain.Channel
-	var createdAt string
-	if err := scanner.Scan(&channel.ID, &channel.OrganizationID, &channel.Name, &createdAt); err != nil {
+	var channelType, createdAt, updatedAt string
+	var archivedAt sql.NullString
+	if err := scanner.Scan(
+		&channel.ID, &channel.OrganizationID, &channel.ProjectID, &channelType, &channel.Name,
+		&createdAt, &updatedAt, &archivedAt,
+	); err != nil {
 		return domain.Channel{}, err
 	}
+	channel.Type = domain.ChannelType(channelType)
 	var err error
 	channel.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return domain.Channel{}, err
+	}
+	if updatedAt == "" {
+		channel.UpdatedAt = channel.CreatedAt
+	} else {
+		channel.UpdatedAt, err = parseTime(updatedAt)
+		if err != nil {
+			return domain.Channel{}, err
+		}
+	}
+	channel.ArchivedAt, err = parseNullableTime(archivedAt)
 	if err != nil {
 		return domain.Channel{}, err
 	}
 	return channel, nil
 }
 
+func scanThread(scanner interface {
+	Scan(dest ...any) error
+}) (domain.Thread, error) {
+	var thread domain.Thread
+	var createdAt, updatedAt string
+	var archivedAt sql.NullString
+	if err := scanner.Scan(
+		&thread.ID, &thread.OrganizationID, &thread.ProjectID, &thread.ChannelID, &thread.Title,
+		&thread.CreatedBy, &createdAt, &updatedAt, &archivedAt,
+	); err != nil {
+		return domain.Thread{}, err
+	}
+	var err error
+	thread.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return domain.Thread{}, err
+	}
+	thread.UpdatedAt, err = parseTime(updatedAt)
+	if err != nil {
+		return domain.Thread{}, err
+	}
+	thread.ArchivedAt, err = parseNullableTime(archivedAt)
+	if err != nil {
+		return domain.Thread{}, err
+	}
+	return thread, nil
+}
+
 func scanMessage(scanner interface {
 	Scan(dest ...any) error
 }) (domain.Message, error) {
 	var message domain.Message
-	var conversationType, senderType, kind, createdAt string
+	var conversationType, senderType, kind, metadataJSON, createdAt string
 	if err := scanner.Scan(
 		&message.ID, &message.OrganizationID, &conversationType, &message.ConversationID,
-		&senderType, &message.SenderID, &kind, &message.Body, &createdAt,
+		&senderType, &message.SenderID, &kind, &message.Body, &metadataJSON, &createdAt,
 	); err != nil {
 		return domain.Message{}, err
 	}
 	message.ConversationType = domain.ConversationType(conversationType)
 	message.SenderType = domain.SenderType(senderType)
 	message.Kind = domain.MessageKind(kind)
+	if metadataJSON != "" && metadataJSON != "{}" {
+		var meta map[string]any
+		if err := json.Unmarshal([]byte(metadataJSON), &meta); err == nil && len(meta) > 0 {
+			message.Metadata = meta
+		}
+	}
 	var err error
 	message.CreatedAt, err = parseTime(createdAt)
 	if err != nil {
@@ -465,11 +941,15 @@ func scanAgent(scanner interface {
 	Scan(dest ...any) error
 }) (domain.Agent, error) {
 	var agent domain.Agent
-	var createdAt, updatedAt string
+	var envJSON, createdAt, updatedAt string
+	var enabled, yoloMode int
 	if err := scanner.Scan(
-		&agent.ID, &agent.OrganizationID, &agent.BotUserID, &agent.Kind, &agent.Name, &agent.Model,
-		&agent.DefaultWorkspaceID, &createdAt, &updatedAt,
+		&agent.ID, &agent.OrganizationID, &agent.BotUserID, &agent.Kind, &agent.Name, &agent.Handle,
+		&agent.Model, &agent.DefaultWorkspaceID, &agent.ConfigWorkspaceID, &enabled, &yoloMode, &envJSON, &createdAt, &updatedAt,
 	); err != nil {
+		return domain.Agent{}, err
+	}
+	if err := json.Unmarshal([]byte(envJSON), &agent.Env); err != nil {
 		return domain.Agent{}, err
 	}
 	var err error
@@ -481,7 +961,42 @@ func scanAgent(scanner interface {
 	if err != nil {
 		return domain.Agent{}, err
 	}
+	agent.Enabled = enabled != 0
+	agent.YoloMode = yoloMode != 0
+	if agent.ConfigWorkspaceID == "" {
+		agent.ConfigWorkspaceID = agent.DefaultWorkspaceID
+	}
+	if agent.DefaultWorkspaceID == "" {
+		agent.DefaultWorkspaceID = agent.ConfigWorkspaceID
+	}
 	return agent, nil
+}
+
+func scanAgentSession(scanner interface {
+	Scan(dest ...any) error
+}) (domain.AgentSession, error) {
+	var session domain.AgentSession
+	var conversationType, updatedAt string
+	if err := scanner.Scan(
+		&session.AgentID, &conversationType, &session.ConversationID, &session.ProviderSessionID,
+		&session.Status, &updatedAt,
+	); err != nil {
+		return domain.AgentSession{}, err
+	}
+	session.ConversationType = domain.ConversationType(conversationType)
+	var err error
+	session.UpdatedAt, err = parseTime(updatedAt)
+	if err != nil {
+		return domain.AgentSession{}, err
+	}
+	return session, nil
+}
+
+func emptyMapIfNil[T any](values map[string]T) map[string]T {
+	if values == nil {
+		return map[string]T{}
+	}
+	return values
 }
 
 func scanWorkspace(scanner interface {
@@ -505,6 +1020,32 @@ func scanWorkspace(scanner interface {
 		return domain.Workspace{}, err
 	}
 	return workspace, nil
+}
+
+func scanChannelAgent(scanner interface {
+	Scan(dest ...any) error
+}) (domain.ChannelAgent, error) {
+	var agent domain.ChannelAgent
+	var runWorkspaceID sql.NullString
+	var createdAt, updatedAt string
+	if err := scanner.Scan(
+		&agent.ChannelID, &agent.AgentID, &runWorkspaceID, &createdAt, &updatedAt,
+	); err != nil {
+		return domain.ChannelAgent{}, err
+	}
+	if runWorkspaceID.Valid {
+		agent.RunWorkspaceID = runWorkspaceID.String
+	}
+	var err error
+	agent.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return domain.ChannelAgent{}, err
+	}
+	agent.UpdatedAt, err = parseTime(updatedAt)
+	if err != nil {
+		return domain.ChannelAgent{}, err
+	}
+	return agent, nil
 }
 
 func scanBinding(scanner interface {
@@ -537,4 +1078,62 @@ func formatTime(t time.Time) string {
 
 func parseTime(value string) (time.Time, error) {
 	return time.Parse(time.RFC3339Nano, value)
+}
+
+func parseNullableTime(value sql.NullString) (*time.Time, error) {
+	if !value.Valid || value.String == "" {
+		return nil, nil
+	}
+	parsed, err := parseTime(value.String)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
+}
+
+func nullableTime(value *time.Time) any {
+	if value == nil {
+		return nil
+	}
+	return formatTime(*value)
+}
+
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func normalizeChannel(channel domain.Channel) domain.Channel {
+	if channel.Type == "" {
+		channel.Type = domain.ChannelTypeText
+	}
+	if channel.UpdatedAt.IsZero() {
+		channel.UpdatedAt = channel.CreatedAt
+	}
+	return channel
+}
+
+func normalizeAgent(agent domain.Agent) domain.Agent {
+	if agent.ConfigWorkspaceID == "" {
+		agent.ConfigWorkspaceID = agent.DefaultWorkspaceID
+	}
+	if agent.DefaultWorkspaceID == "" {
+		agent.DefaultWorkspaceID = agent.ConfigWorkspaceID
+	}
+	if agent.Handle == "" {
+		agent.Handle = agent.ID
+	}
+	if !agent.Enabled && agent.CreatedAt.IsZero() {
+		agent.Enabled = true
+	}
+	return agent
 }

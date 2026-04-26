@@ -54,6 +54,32 @@ func TestPublishSkipsDifferentConversation(t *testing.T) {
 	}
 }
 
+func TestPublishSkipsDifferentConversationType(t *testing.T) {
+	bus := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch, unsubscribe := bus.Subscribe(ctx, Filter{
+		OrganizationID:   "org_1",
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   "conv_1",
+	})
+	defer unsubscribe()
+
+	bus.Publish(domain.Event{
+		Type:             domain.EventMessageCreated,
+		OrganizationID:   "org_1",
+		ConversationType: domain.ConversationThread,
+		ConversationID:   "conv_1",
+	})
+
+	select {
+	case got := <-ch:
+		t.Fatalf("unexpected event: %#v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 func TestUnsubscribeStopsWatcherBeforeContextCancel(t *testing.T) {
 	bus := New()
 	before := runtime.NumGoroutine()

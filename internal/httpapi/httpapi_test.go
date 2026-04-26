@@ -42,6 +42,12 @@ func TestHTTPBootstrapAuthAndMessagesFlow(t *testing.T) {
 		t.Fatalf("me id = %q, want %q", me.ID, bootstrap.User.ID)
 	}
 
+	var conversationContext app.ConversationContext
+	getJSON(t, ts.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/context", bootstrap.SessionToken, http.StatusOK, &conversationContext)
+	if conversationContext.Agent.ID != bootstrap.Agent.ID || conversationContext.Workspace.ID != bootstrap.Workspace.ID {
+		t.Fatalf("conversation context = %#v", conversationContext)
+	}
+
 	var sent domain.Message
 	postJSON(t, ts.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages", bootstrap.SessionToken, map[string]string{
 		"body": "hello from http",
@@ -65,6 +71,80 @@ func TestHTTPBootstrapAuthAndMessagesFlow(t *testing.T) {
 		}
 		return sawUser && sawBot
 	})
+}
+
+func TestHTTPMessagesCanBeUpdatedAndDeleted(t *testing.T) {
+	ts := newTestServer(t)
+
+	var bootstrap app.BootstrapResult
+	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	}, http.StatusOK, &bootstrap)
+
+	var sent domain.Message
+	postJSON(t, ts.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages", bootstrap.SessionToken, map[string]string{
+		"body": "draft text",
+	}, http.StatusOK, &sent)
+
+	var updated domain.Message
+	patchJSON(t, ts.URL+"/api/messages/"+sent.ID, bootstrap.SessionToken, map[string]string{
+		"body": "edited text",
+	}, http.StatusOK, &updated)
+	if updated.ID != sent.ID || updated.Body != "edited text" {
+		t.Fatalf("updated message = %#v", updated)
+	}
+
+	var messages []domain.Message
+	getJSON(t, ts.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages", bootstrap.SessionToken, http.StatusOK, &messages)
+	var foundEdited bool
+	for _, message := range messages {
+		if message.ID == sent.ID {
+			foundEdited = message.Body == "edited text"
+		}
+	}
+	if !foundEdited {
+		t.Fatalf("messages after update = %#v", messages)
+	}
+
+	deleteJSON(t, ts.URL+"/api/messages/"+sent.ID, bootstrap.SessionToken, http.StatusNoContent)
+	getJSON(t, ts.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages", bootstrap.SessionToken, http.StatusOK, &messages)
+	for _, message := range messages {
+		if message.ID == sent.ID {
+			t.Fatalf("deleted message still listed: %#v", messages)
+		}
+	}
+}
+
+func TestHTTPLoginCanResumeAfterBootstrap(t *testing.T) {
+	ts := newTestServer(t)
+
+	var first app.AuthResult
+	postJSON(t, ts.URL+"/api/auth/login", "", app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	}, http.StatusOK, &first)
+	if first.SessionToken == "" {
+		t.Fatal("first session_token is empty")
+	}
+
+	var second app.AuthResult
+	postJSON(t, ts.URL+"/api/auth/login", "", app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Ignored",
+	}, http.StatusOK, &second)
+	if second.SessionToken == "" || second.SessionToken == first.SessionToken {
+		t.Fatalf("second session_token = %q, first = %q", second.SessionToken, first.SessionToken)
+	}
+	if second.User.ID != first.User.ID {
+		t.Fatalf("second user = %#v, want %#v", second.User, first.User)
+	}
+
+	var me domain.User
+	getJSON(t, ts.URL+"/api/me", second.SessionToken, http.StatusOK, &me)
+	if me.ID != first.User.ID {
+		t.Fatalf("me = %#v, want user id %q", me, first.User.ID)
+	}
 }
 
 func TestHTTPMeRequiresBearerToken(t *testing.T) {
@@ -111,6 +191,30 @@ func TestHTTPChannelsRejectsOrganizationOutsideAuthenticatedMemberships(t *testi
 	}, http.StatusOK, &bootstrap)
 
 	getJSON(t, ts.URL+"/api/organizations/not-a-real-org/channels", bootstrap.SessionToken, http.StatusNotFound, nil)
+}
+
+func TestHTTPWorkspaceFilesRejectTraversalAndRoundTripText(t *testing.T) {
+	ts := newTestServer(t)
+
+	var bootstrap app.BootstrapResult
+	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	}, http.StatusOK, &bootstrap)
+
+	fileURL := ts.URL + "/api/workspaces/" + bootstrap.Workspace.ID + "/files?path=memory.md"
+	putJSON(t, fileURL, bootstrap.SessionToken, map[string]string{"body": "remember this"}, http.StatusOK, nil)
+
+	var file struct {
+		Body string `json:"body"`
+	}
+	getJSON(t, fileURL, bootstrap.SessionToken, http.StatusOK, &file)
+	if file.Body != "remember this" {
+		t.Fatalf("file body = %q, want remembered text", file.Body)
+	}
+
+	getJSON(t, ts.URL+"/api/workspaces/"+bootstrap.Workspace.ID+"/files?path=../secret", bootstrap.SessionToken, http.StatusBadRequest, nil)
+	putJSON(t, ts.URL+"/api/workspaces/"+bootstrap.Workspace.ID+"/files?path=/tmp/secret", bootstrap.SessionToken, map[string]string{"body": "bad"}, http.StatusBadRequest, nil)
 }
 
 func TestHTTPBoundNonChannelConversationsCanSendAndListMessages(t *testing.T) {
@@ -392,6 +496,55 @@ func postJSON(t *testing.T, url string, token string, body any, wantStatus int, 
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	doJSON(t, req, wantStatus, dst)
+}
+
+func putJSON(t *testing.T, url string, token string, body any, wantStatus int, dst any) {
+	t.Helper()
+
+	payload, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	doJSON(t, req, wantStatus, dst)
+}
+
+func patchJSON(t *testing.T, url string, token string, body any, wantStatus int, dst any) {
+	t.Helper()
+
+	payload, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	doJSON(t, req, wantStatus, dst)
+}
+
+func deleteJSON(t *testing.T, url string, token string, wantStatus int) {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	doJSON(t, req, wantStatus, nil)
 }
 
 func getJSON(t *testing.T, url string, token string, wantStatus int, dst any) {

@@ -47,6 +47,35 @@ func TestBootstrapCreatesAdminOrgChannelAgentAndWorkspace(t *testing.T) {
 	}
 }
 
+func TestBootstrapUsesConfiguredDefaultAgent(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	app := New(st, eventbus.New(), Options{
+		AdminToken:        "secret",
+		DataDir:           t.TempDir(),
+		DefaultAgentKind:  "codex",
+		DefaultAgentModel: "gpt-test",
+	})
+	result, err := app.Bootstrap(ctx, BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Agent.Kind != "codex" || result.Agent.Name != "Codex" || result.Agent.Model != "gpt-test" {
+		t.Fatalf("agent = %#v", result.Agent)
+	}
+	if result.BotUser.DisplayName != "Codex" {
+		t.Fatalf("bot = %#v", result.BotUser)
+	}
+}
+
 func TestBootstrapRejectsWrongAdminToken(t *testing.T) {
 	ctx := context.Background()
 	st, err := sqlitestore.Open(ctx, ":memory:")
@@ -212,6 +241,76 @@ func TestBootstrapRejectsConcurrentBootstrapAttempts(t *testing.T) {
 	}
 	if len(orgs) != 1 {
 		t.Fatalf("organizations for successful user = %#v, want exactly one", orgs)
+	}
+}
+
+func TestLoginBootstrapsFirstRun(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	app := New(st, eventbus.New(), Options{AdminToken: "secret", DataDir: t.TempDir()})
+	result, err := app.Login(ctx, BootstrapRequest{AdminToken: "secret", DisplayName: "Meteorsky"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SessionToken == "" || result.User.DisplayName != "Meteorsky" {
+		t.Fatalf("login result = %#v", result)
+	}
+
+	orgs, err := app.ListOrganizations(ctx, result.User.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orgs) != 1 {
+		t.Fatalf("organizations = %#v, want one bootstrapped org", orgs)
+	}
+}
+
+func TestLoginCreatesSessionAfterBootstrap(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	app := New(st, eventbus.New(), Options{AdminToken: "secret", DataDir: t.TempDir()})
+	first, err := app.Bootstrap(ctx, BootstrapRequest{AdminToken: "secret", DisplayName: "Meteorsky"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := app.Login(ctx, BootstrapRequest{AdminToken: "secret", DisplayName: "Ignored"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.SessionToken == "" || second.SessionToken == first.SessionToken {
+		t.Fatalf("second session token = %q, first = %q", second.SessionToken, first.SessionToken)
+	}
+	if second.User.ID != first.User.ID {
+		t.Fatalf("second user = %#v, want %#v", second.User, first.User)
+	}
+	if _, err := app.UserForToken(ctx, second.SessionToken); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoginRejectsWrongAdminToken(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	app := New(st, eventbus.New(), Options{AdminToken: "secret", DataDir: t.TempDir()})
+	_, err = app.Login(ctx, BootstrapRequest{AdminToken: "wrong", DisplayName: "Bad"})
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("error = %v, want %v", err, ErrUnauthorized)
 	}
 }
 

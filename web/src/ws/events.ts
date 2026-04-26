@@ -1,4 +1,4 @@
-import type { ConversationType, Message } from "../api/types";
+import type { ConversationType, Message, ProcessItem } from "../api/types";
 
 interface BaseEvent {
   id: string;
@@ -16,6 +16,20 @@ export interface MessageCreatedEvent extends BaseEvent {
   };
 }
 
+export interface MessageUpdatedEvent extends BaseEvent {
+  type: "MessageUpdated";
+  payload: {
+    message: Message;
+  };
+}
+
+export interface MessageDeletedEvent extends BaseEvent {
+  type: "MessageDeleted";
+  payload: {
+    message_id: string;
+  };
+}
+
 export interface AgentRunStartedEvent extends BaseEvent {
   type: "AgentRunStarted";
   payload: {
@@ -28,7 +42,10 @@ export interface AgentOutputDeltaEvent extends BaseEvent {
   type: "AgentOutputDelta";
   payload: {
     run_id: string;
+    agent_id?: string;
     text: string;
+    thinking?: string;
+    process?: ProcessItem[];
   };
 }
 
@@ -54,6 +71,8 @@ export interface SubscribedEvent {
 
 export type AgentXEvent =
   | MessageCreatedEvent
+  | MessageUpdatedEvent
+  | MessageDeletedEvent
   | AgentRunStartedEvent
   | AgentOutputDeltaEvent
   | AgentRunCompletedEvent
@@ -64,6 +83,8 @@ export type SocketEvent = AgentXEvent | SubscribedEvent | { type?: unknown };
 export function isAgentXEvent(event: SocketEvent): event is AgentXEvent {
   return (
     event.type === "MessageCreated" ||
+    event.type === "MessageUpdated" ||
+    event.type === "MessageDeleted" ||
     event.type === "AgentRunStarted" ||
     event.type === "AgentOutputDelta" ||
     event.type === "AgentRunCompleted" ||

@@ -1,13 +1,16 @@
 import { FormEvent, useState } from "react";
 import { LogIn } from "lucide-react";
-import { bootstrap, setToken } from "../api/client";
-import type { BootstrapResponse } from "../api/types";
+import { login, setToken } from "../api/client";
+import type { AuthResponse } from "../api/types";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface LoginViewProps {
-  onBootstrap: (result: BootstrapResponse) => void;
+  onAuthenticated: (result: AuthResponse) => void;
 }
 
-export function LoginView({ onBootstrap }: LoginViewProps) {
+export function LoginView({ onAuthenticated }: LoginViewProps) {
   const [adminToken, setAdminToken] = useState("");
   const [displayName, setDisplayName] = useState("Admin");
   const [error, setError] = useState<string | null>(null);
@@ -19,53 +22,60 @@ export function LoginView({ onBootstrap }: LoginViewProps) {
     setSubmitting(true);
 
     try {
-      const result = await bootstrap(adminToken, displayName);
+      const result = await login(adminToken, displayName);
       setToken(result.session_token);
-      onBootstrap(result);
+      onAuthenticated(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Bootstrap failed");
+      setError(err instanceof Error ? err.message : "Login failed");
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <main className="login-screen">
-      <form className="login-panel" onSubmit={handleSubmit}>
-        <div className="login-heading">
-          <span className="product-mark">AX</span>
+    <main className="flex h-screen w-screen items-center justify-center bg-background">
+      <form
+        className="flex w-full max-w-sm flex-col gap-6 rounded-xl border border-border bg-card p-8"
+        onSubmit={handleSubmit}
+      >
+        <div className="flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-lg">
+            AX
+          </div>
           <div>
-            <h1>AgentX</h1>
-            <p>Foundation workspace</p>
+            <h1 className="text-xl font-bold">AgentX</h1>
+            <p className="text-sm text-muted-foreground">Foundation workspace</p>
           </div>
         </div>
 
-        <label className="field">
-          <span>Admin token</span>
-          <input
+        <div className="space-y-2">
+          <Label htmlFor="admin-token">Admin token</Label>
+          <Input
+            id="admin-token"
             autoFocus
             value={adminToken}
             onChange={(event) => setAdminToken(event.target.value)}
             type="password"
             autoComplete="current-password"
           />
-        </label>
+        </div>
 
-        <label className="field">
-          <span>Display name</span>
-          <input
+        <div className="space-y-2">
+          <Label htmlFor="display-name">Display name</Label>
+          <Input
+            id="display-name"
             value={displayName}
             onChange={(event) => setDisplayName(event.target.value)}
             autoComplete="name"
           />
-        </label>
+        </div>
 
-        {error ? <p className="form-error">{error}</p> : null}
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
-        <button className="primary-button" disabled={submitting || adminToken.trim() === ""}>
-          <LogIn size={18} />
-          <span>{submitting ? "Bootstrapping" : "Enter"}</span>
-        </button>
+        <Button disabled={submitting || adminToken.trim() === ""} className="w-full gap-2">
+          <LogIn className="h-4 w-4" />
+          <span>{submitting ? "Bootstrapping..." : "Enter"}</span>
+        </Button>
       </form>
     </main>
   );

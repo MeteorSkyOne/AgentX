@@ -1,0 +1,505 @@
+package app
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/meteorsky/agentx/internal/domain"
+	"github.com/meteorsky/agentx/internal/id"
+	"github.com/meteorsky/agentx/internal/store"
+)
+
+func (a *App) Project(ctx context.Context, id string) (domain.Project, error) {
+	return a.store.Projects().ByID(ctx, id)
+}
+
+func (a *App) ListProjects(ctx context.Context, orgID string) ([]domain.Project, error) {
+	return a.store.Projects().ListByOrganization(ctx, orgID)
+}
+
+func (a *App) CreateProject(ctx context.Context, userID string, orgID string, name string) (domain.Project, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return domain.Project{}, ErrInvalidInput
+	}
+
+	now := time.Now().UTC()
+	workspace := domain.Workspace{
+		ID:             id.New("wks"),
+		OrganizationID: orgID,
+		Type:           "project",
+		Name:           name + " Workspace",
+		Path:           filepath.Join(a.opts.DataDir, "projects", id.New("prjdir")),
+		CreatedBy:      userID,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	project := domain.Project{
+		ID:             id.New("prj"),
+		OrganizationID: orgID,
+		Name:           name,
+		WorkspaceID:    workspace.ID,
+		CreatedBy:      userID,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	workspace.Path = filepath.Join(a.opts.DataDir, "projects", project.ID)
+
+	err := a.store.Tx(ctx, func(tx store.Tx) error {
+		if err := tx.Workspaces().Create(ctx, workspace); err != nil {
+			return err
+		}
+		return tx.Projects().Create(ctx, project)
+	})
+	if err != nil {
+		return domain.Project{}, err
+	}
+	_ = os.MkdirAll(workspace.Path, 0o755)
+	return project, nil
+}
+
+type ProjectUpdateRequest struct {
+	Name          *string
+	WorkspacePath *string
+}
+
+func (a *App) UpdateProject(ctx context.Context, projectID string, req ProjectUpdateRequest) (domain.Project, error) {
+	project, err := a.store.Projects().ByID(ctx, projectID)
+	if err != nil {
+		return domain.Project{}, err
+	}
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			return domain.Project{}, ErrInvalidInput
+		}
+		project.Name = name
+	}
+	now := time.Now().UTC()
+	project.UpdatedAt = now
+	if req.WorkspacePath != nil {
+		wsPath := strings.TrimSpace(*req.WorkspacePath)
+		if wsPath == "" {
+			return domain.Project{}, ErrInvalidInput
+		}
+		workspace, err := a.store.Workspaces().ByID(ctx, project.WorkspaceID)
+		if err != nil {
+			return domain.Project{}, err
+		}
+		workspace.Path = wsPath
+		workspace.UpdatedAt = now
+		if err := a.store.Workspaces().Update(ctx, workspace); err != nil {
+			return domain.Project{}, err
+		}
+		_ = os.MkdirAll(wsPath, 0o755)
+	}
+	if err := a.store.Projects().Update(ctx, project); err != nil {
+		return domain.Project{}, err
+	}
+	return project, nil
+}
+
+func (a *App) DeleteProject(ctx context.Context, projectID string) error {
+	return a.store.Projects().Delete(ctx, projectID)
+}
+
+func (a *App) Channel(ctx context.Context, id string) (domain.Channel, error) {
+	return a.store.Channels().ByID(ctx, id)
+}
+
+func (a *App) CreateChannel(ctx context.Context, projectID string, name string, channelType domain.ChannelType) (domain.Channel, error) {
+	project, err := a.store.Projects().ByID(ctx, projectID)
+	if err != nil {
+		return domain.Channel{}, err
+	}
+	name = strings.TrimSpace(strings.TrimPrefix(name, "#"))
+	if name == "" {
+		return domain.Channel{}, ErrInvalidInput
+	}
+	if channelType == "" {
+		channelType = domain.ChannelTypeText
+	}
+	if channelType != domain.ChannelTypeText && channelType != domain.ChannelTypeThread {
+		return domain.Channel{}, ErrInvalidInput
+	}
+	now := time.Now().UTC()
+	channel := domain.Channel{
+		ID:             id.New("chn"),
+		OrganizationID: project.OrganizationID,
+		ProjectID:      project.ID,
+		Type:           channelType,
+		Name:           name,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := a.store.Channels().Create(ctx, channel); err != nil {
+		return domain.Channel{}, err
+	}
+	return channel, nil
+}
+
+func (a *App) UpdateChannel(ctx context.Context, channelID string, name string, channelType domain.ChannelType) (domain.Channel, error) {
+	channel, err := a.store.Channels().ByID(ctx, channelID)
+	if err != nil {
+		return domain.Channel{}, err
+	}
+	name = strings.TrimSpace(strings.TrimPrefix(name, "#"))
+	if name == "" {
+		return domain.Channel{}, ErrInvalidInput
+	}
+	if channelType == "" {
+		channelType = channel.Type
+	}
+	if channelType != domain.ChannelTypeText && channelType != domain.ChannelTypeThread {
+		return domain.Channel{}, ErrInvalidInput
+	}
+	channel.Name = name
+	channel.Type = channelType
+	channel.UpdatedAt = time.Now().UTC()
+	if err := a.store.Channels().Update(ctx, channel); err != nil {
+		return domain.Channel{}, err
+	}
+	return channel, nil
+}
+
+func (a *App) ArchiveChannel(ctx context.Context, channelID string) error {
+	return a.store.Channels().Archive(ctx, channelID, time.Now().UTC())
+}
+
+func (a *App) Thread(ctx context.Context, id string) (domain.Thread, error) {
+	return a.store.Threads().ByID(ctx, id)
+}
+
+func (a *App) ListThreads(ctx context.Context, channelID string) ([]domain.Thread, error) {
+	return a.store.Threads().ListByChannel(ctx, channelID)
+}
+
+func (a *App) CreateThread(ctx context.Context, userID string, channelID string, title string, body string) (domain.Thread, domain.Message, error) {
+	channel, err := a.store.Channels().ByID(ctx, channelID)
+	if err != nil {
+		return domain.Thread{}, domain.Message{}, err
+	}
+	if channel.Type != domain.ChannelTypeThread {
+		return domain.Thread{}, domain.Message{}, ErrInvalidInput
+	}
+	title = strings.TrimSpace(title)
+	body = strings.TrimSpace(body)
+	if title == "" || body == "" {
+		return domain.Thread{}, domain.Message{}, ErrInvalidInput
+	}
+	now := time.Now().UTC()
+	thread := domain.Thread{
+		ID:             id.New("thr"),
+		OrganizationID: channel.OrganizationID,
+		ProjectID:      channel.ProjectID,
+		ChannelID:      channel.ID,
+		Title:          title,
+		CreatedBy:      userID,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	message := domain.Message{
+		ID:               id.New("msg"),
+		OrganizationID:   channel.OrganizationID,
+		ConversationType: domain.ConversationThread,
+		ConversationID:   thread.ID,
+		SenderType:       domain.SenderUser,
+		SenderID:         userID,
+		Kind:             domain.MessageText,
+		Body:             body,
+		CreatedAt:        now,
+	}
+
+	if err := a.store.Tx(ctx, func(tx store.Tx) error {
+		if err := tx.Threads().Create(ctx, thread); err != nil {
+			return err
+		}
+		return tx.Messages().Create(ctx, message)
+	}); err != nil {
+		return domain.Thread{}, domain.Message{}, err
+	}
+
+	a.publishConversationEvent(domain.Event{
+		Type:             domain.EventMessageCreated,
+		OrganizationID:   message.OrganizationID,
+		ConversationType: message.ConversationType,
+		ConversationID:   message.ConversationID,
+		Payload:          domain.MessageCreatedPayload{Message: message},
+	})
+
+	scope, err := a.conversationScope(ctx, domain.ConversationThread, thread.ID)
+	if err == nil {
+		if agents, resolveErr := a.conversationAgents(ctx, scope); resolveErr == nil {
+			for _, agent := range targetAgentsForBody(agents, message.Body) {
+				go a.runAgentForMessage(context.WithoutCancel(ctx), message, agent)
+			}
+		}
+	}
+
+	return thread, message, nil
+}
+
+func (a *App) UpdateThread(ctx context.Context, threadID string, title string) (domain.Thread, error) {
+	thread, err := a.store.Threads().ByID(ctx, threadID)
+	if err != nil {
+		return domain.Thread{}, err
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return domain.Thread{}, ErrInvalidInput
+	}
+	thread.Title = title
+	if err := a.store.Threads().Update(ctx, thread); err != nil {
+		return domain.Thread{}, err
+	}
+	return thread, nil
+}
+
+func (a *App) ArchiveThread(ctx context.Context, threadID string) error {
+	return a.store.Threads().Archive(ctx, threadID, time.Now().UTC())
+}
+
+func (a *App) ListAgents(ctx context.Context, orgID string) ([]domain.Agent, error) {
+	return a.store.Agents().ListByOrganization(ctx, orgID)
+}
+
+func (a *App) Agent(ctx context.Context, id string) (domain.Agent, error) {
+	return a.store.Agents().ByID(ctx, id)
+}
+
+func (a *App) Workspace(ctx context.Context, id string) (domain.Workspace, error) {
+	return a.store.Workspaces().ByID(ctx, id)
+}
+
+type AgentCreateRequest struct {
+	UserID         string
+	OrganizationID string
+	Name           string
+	Handle         string
+	Kind           string
+	Model          string
+	YoloMode       bool
+	Env            map[string]string
+}
+
+func (a *App) CreateAgent(ctx context.Context, req AgentCreateRequest) (domain.Agent, error) {
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return domain.Agent{}, ErrInvalidInput
+	}
+	handle := normalizeHandle(req.Handle)
+	if handle == "" {
+		handle = normalizeHandle(name)
+	}
+	if handle == "" {
+		return domain.Agent{}, ErrInvalidInput
+	}
+	kind := strings.TrimSpace(req.Kind)
+	if kind == "" {
+		kind = domain.AgentKindFake
+	}
+	now := time.Now().UTC()
+	bot := domain.BotUser{ID: id.New("bot"), OrganizationID: req.OrganizationID, DisplayName: name, CreatedAt: now}
+	workspace := domain.Workspace{
+		ID:             id.New("wks"),
+		OrganizationID: req.OrganizationID,
+		Type:           "agent_default",
+		Name:           name + " Workspace",
+		Path:           filepath.Join(a.opts.DataDir, "agents", handle),
+		CreatedBy:      req.UserID,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	agent := domain.Agent{
+		ID:                 id.New("agt"),
+		OrganizationID:     req.OrganizationID,
+		BotUserID:          bot.ID,
+		Kind:               kind,
+		Name:               name,
+		Handle:             handle,
+		Model:              strings.TrimSpace(req.Model),
+		ConfigWorkspaceID:  workspace.ID,
+		DefaultWorkspaceID: workspace.ID,
+		Enabled:            true,
+		YoloMode:           req.YoloMode,
+		Env:                copyStringMap(req.Env),
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+	err := a.store.Tx(ctx, func(tx store.Tx) error {
+		if _, err := tx.Agents().ByHandle(ctx, req.OrganizationID, handle); err == nil {
+			return ErrInvalidInput
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err := tx.BotUsers().Create(ctx, bot); err != nil {
+			return err
+		}
+		if err := tx.Workspaces().Create(ctx, workspace); err != nil {
+			return err
+		}
+		return tx.Agents().Create(ctx, agent)
+	})
+	if err != nil {
+		return domain.Agent{}, err
+	}
+	_ = os.MkdirAll(workspace.Path, 0o755)
+	return agent, nil
+}
+
+type AgentUpdateRequest struct {
+	Name     *string
+	Handle   *string
+	Kind     *string
+	Model    *string
+	Enabled  *bool
+	YoloMode *bool
+	Env      map[string]string
+	EnvSet   bool
+}
+
+func (a *App) UpdateAgent(ctx context.Context, agentID string, req AgentUpdateRequest) (domain.Agent, error) {
+	agent, err := a.store.Agents().ByID(ctx, agentID)
+	if err != nil {
+		return domain.Agent{}, err
+	}
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			return domain.Agent{}, ErrInvalidInput
+		}
+		agent.Name = name
+	}
+	if req.Handle != nil {
+		handle := normalizeHandle(*req.Handle)
+		if handle == "" {
+			return domain.Agent{}, ErrInvalidInput
+		}
+		if handle != agent.Handle {
+			if _, err := a.store.Agents().ByHandle(ctx, agent.OrganizationID, handle); err == nil {
+				return domain.Agent{}, ErrInvalidInput
+			} else if !errors.Is(err, sql.ErrNoRows) {
+				return domain.Agent{}, err
+			}
+		}
+		agent.Handle = handle
+	}
+	if req.Kind != nil {
+		kind := strings.TrimSpace(*req.Kind)
+		if kind == "" {
+			return domain.Agent{}, ErrInvalidInput
+		}
+		agent.Kind = kind
+	}
+	if req.Model != nil {
+		agent.Model = strings.TrimSpace(*req.Model)
+	}
+	if req.Enabled != nil {
+		agent.Enabled = *req.Enabled
+	}
+	if req.YoloMode != nil {
+		agent.YoloMode = *req.YoloMode
+	}
+	if req.EnvSet {
+		agent.Env = copyStringMap(req.Env)
+	}
+	agent.UpdatedAt = time.Now().UTC()
+	if err := a.store.Agents().Update(ctx, agent); err != nil {
+		return domain.Agent{}, err
+	}
+	return agent, nil
+}
+
+func (a *App) ChannelAgents(ctx context.Context, channelID string) ([]ConversationAgentContext, error) {
+	channel, err := a.store.Channels().ByID(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+	project, err := a.store.Projects().ByID(ctx, channel.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	return a.conversationAgents(ctx, conversationScope{
+		organizationID: channel.OrganizationID,
+		project:        project,
+		channel:        channel,
+	})
+}
+
+func (a *App) SetChannelAgents(ctx context.Context, channelID string, bindings []domain.ChannelAgent) ([]ConversationAgentContext, error) {
+	channel, err := a.store.Channels().ByID(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	normalized := make([]domain.ChannelAgent, 0, len(bindings))
+	for _, binding := range bindings {
+		agent, err := a.store.Agents().ByID(ctx, binding.AgentID)
+		if err != nil {
+			return nil, err
+		}
+		if agent.OrganizationID != channel.OrganizationID {
+			return nil, ErrInvalidInput
+		}
+		if binding.RunWorkspaceID != "" {
+			workspace, err := a.store.Workspaces().ByID(ctx, binding.RunWorkspaceID)
+			if err != nil {
+				return nil, err
+			}
+			if workspace.OrganizationID != channel.OrganizationID {
+				return nil, ErrInvalidInput
+			}
+		}
+		normalized = append(normalized, domain.ChannelAgent{
+			ChannelID:      channel.ID,
+			AgentID:        agent.ID,
+			RunWorkspaceID: binding.RunWorkspaceID,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		})
+	}
+	if err := a.store.ChannelAgents().ReplaceForChannel(ctx, channel.ID, normalized); err != nil {
+		return nil, err
+	}
+	return a.ChannelAgents(ctx, channel.ID)
+}
+
+func copyStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return map[string]string{}
+	}
+	copied := make(map[string]string, len(values))
+	for key, value := range values {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		copied[key] = value
+	}
+	return copied
+}
+
+func normalizeHandle(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '_' || r == '-':
+			if b.Len() > 0 {
+				b.WriteByte('_')
+			}
+		case r == ' ' || r == '.':
+			if b.Len() > 0 {
+				b.WriteByte('_')
+			}
+		}
+	}
+	return strings.Trim(b.String(), "_")
+}

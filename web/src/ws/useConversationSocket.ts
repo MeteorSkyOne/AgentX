@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { getToken } from "../api/client";
+import type { ConversationType } from "../api/types";
 import type { AgentXEvent, SocketEvent } from "./events";
 import { isAgentXEvent } from "./events";
 
@@ -9,6 +10,7 @@ const maxReconnectDelayMS = 5000;
 
 export function useConversationSocket(
   organizationID: string | undefined,
+  conversationType: ConversationType | undefined,
   conversationID: string | undefined,
   onEvent: (event: AgentXEvent) => void
 ): void {
@@ -20,7 +22,7 @@ export function useConversationSocket(
   }, [onEvent]);
 
   useEffect(() => {
-    if (!organizationID || !conversationID || !token) {
+    if (!organizationID || !conversationType || !conversationID || !token) {
       return;
     }
 
@@ -46,7 +48,7 @@ export function useConversationSocket(
           JSON.stringify({
             type: "subscribe",
             organization_id: organizationID,
-            conversation_type: "channel",
+            conversation_type: conversationType,
             conversation_id: conversationID
           })
         );
@@ -95,5 +97,5 @@ export function useConversationSocket(
       }
       socket?.close();
     };
-  }, [organizationID, conversationID, token]);
+  }, [organizationID, conversationType, conversationID, token]);
 }

@@ -3,15 +3,25 @@ package runtime
 import "context"
 
 type StartSessionRequest struct {
-	AgentID    string
-	Workspace  string
-	Model      string
-	Env        map[string]string
-	SessionKey string
+	AgentID           string
+	Workspace         string
+	Model             string
+	YoloMode          bool
+	Env               map[string]string
+	SessionKey        string
+	PreviousSessionID string
 }
 
 type Input struct {
-	Prompt string
+	Prompt  string
+	Context string
+}
+
+func (i Input) RenderedPrompt() string {
+	if i.Context == "" {
+		return i.Prompt
+	}
+	return i.Context + "\n\nCurrent user message:\n" + i.Prompt
 }
 
 type EventType string
@@ -23,9 +33,23 @@ const (
 )
 
 type Event struct {
-	Type  EventType
-	Text  string
-	Error string
+	Type     EventType
+	Text     string
+	Thinking string
+	Process  []ProcessItem
+	Error    string
+}
+
+type ProcessItem struct {
+	Type       string `json:"type"`
+	Text       string `json:"text,omitempty"`
+	ToolName   string `json:"tool_name,omitempty"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	Status     string `json:"status,omitempty"`
+	Input      any    `json:"input,omitempty"`
+	Output     any    `json:"output,omitempty"`
+	Raw        any    `json:"raw,omitempty"`
+	CreatedAt  string `json:"created_at,omitempty"`
 }
 
 type Runtime interface {

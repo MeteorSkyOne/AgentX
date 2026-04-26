@@ -8,8 +8,9 @@ import (
 )
 
 type Filter struct {
-	OrganizationID string
-	ConversationID string
+	OrganizationID   string
+	ConversationType domain.ConversationType
+	ConversationID   string
 }
 
 type Bus struct {
@@ -81,6 +82,9 @@ func (b *Bus) Publish(evt domain.Event) {
 
 func matches(filter Filter, evt domain.Event) bool {
 	if filter.OrganizationID != "" && filter.OrganizationID != evt.OrganizationID {
+		return false
+	}
+	if filter.ConversationType != "" && filter.ConversationType != evt.ConversationType {
 		return false
 	}
 	if filter.ConversationID != "" && filter.ConversationID != evt.ConversationID {

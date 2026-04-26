@@ -12,6 +12,8 @@ AgentX is a self-hosted AI coding agent management service for coordinating orga
 - WebSocket event stream
 - React web client
 - Fake echo agent runtime
+- Codex CLI runtime adapter
+- Claude Code CLI runtime adapter
 
 ## Development
 
@@ -31,6 +33,19 @@ AGENTX_ADMIN_TOKEN=dev-token go run ./cmd/agentx
 
 The API listens on `127.0.0.1:8080`.
 
+Choose the default runtime before the first bootstrap:
+
+```sh
+AGENTX_ADMIN_TOKEN=dev-token AGENTX_DEFAULT_AGENT_KIND=codex go run ./cmd/agentx
+AGENTX_ADMIN_TOKEN=dev-token AGENTX_DEFAULT_AGENT_KIND=claude go run ./cmd/agentx
+```
+
+Codex uses `codex exec --json` and Claude Code uses `claude --print --output-format stream-json`. The CLI commands must already be installed and authenticated. Optional knobs:
+
+- `AGENTX_DEFAULT_AGENT_MODEL`
+- `AGENTX_CODEX_COMMAND`, `AGENTX_CODEX_FULL_AUTO`, `AGENTX_CODEX_BYPASS_SANDBOX`, `AGENTX_CODEX_SKIP_GIT_REPO_CHECK`
+- `AGENTX_CLAUDE_COMMAND`, `AGENTX_CLAUDE_PERMISSION_MODE`, `AGENTX_CLAUDE_ALLOWED_TOOLS`, `AGENTX_CLAUDE_DISALLOWED_TOOLS`, `AGENTX_CLAUDE_APPEND_SYSTEM_PROMPT`
+
 Run the web client:
 
 ```sh
@@ -44,5 +59,16 @@ Open `http://127.0.0.1:5173` and bootstrap with `dev-token`.
 ```sh
 go test ./...
 bash scripts/dev_test.sh
+cd web && npm test
 cd web && npm run build
 ```
+
+Run the browser e2e smoke test:
+
+```sh
+cd web
+npx playwright install chromium
+npm run e2e
+```
+
+On Linux, Playwright may also need system browser libraries. Install them once with `npx playwright install-deps chromium` when the environment allows it.

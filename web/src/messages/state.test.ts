@@ -4,7 +4,8 @@ import type { Message } from "../api/types";
 import {
   eventMatchesActiveConversation,
   mergeMessages,
-  messageMatchesActiveConversation
+  messageMatchesActiveConversation,
+  streamingRunHasCompletedMessage
 } from "./state";
 
 describe("mergeMessages", () => {
@@ -26,6 +27,30 @@ describe("mergeMessages", () => {
 });
 
 describe("eventMatchesActiveConversation", () => {
+  it("accepts events for the active conversation type and id", () => {
+    const event: AgentXEvent = {
+      id: "evt_match",
+      type: "AgentOutputDelta",
+      organization_id: "org_1",
+      conversation_type: "thread",
+      conversation_id: "thr_1",
+      created_at: "2026-04-25T10:00:03Z",
+      payload: {
+        run_id: "run_1",
+        agent_id: "agt_1",
+        text: "ok"
+      }
+    };
+
+    expect(
+      eventMatchesActiveConversation(event, {
+        organizationID: "org_1",
+        conversationType: "thread",
+        conversationID: "thr_1"
+      })
+    ).toBe(true);
+  });
+
   it("rejects late events from the previous channel", () => {
     const event: AgentXEvent = {
       id: "evt_1",
@@ -43,6 +68,7 @@ describe("eventMatchesActiveConversation", () => {
     expect(
       eventMatchesActiveConversation(event, {
         organizationID: "org_1",
+        conversationType: "channel",
         conversationID: "chn_new"
       })
     ).toBe(false);
@@ -64,6 +90,7 @@ describe("eventMatchesActiveConversation", () => {
     expect(
       eventMatchesActiveConversation(event, {
         organizationID: "org_1",
+        conversationType: "channel",
         conversationID: "chn_1"
       })
     ).toBe(false);
@@ -77,8 +104,41 @@ describe("messageMatchesActiveConversation", () => {
         message("msg_late", "chn_old", "user", "late response", "2026-04-25T10:00:04Z"),
         {
           organizationID: "org_1",
+          conversationType: "channel",
           conversationID: "chn_new"
         }
+      )
+    ).toBe(false);
+  });
+});
+
+describe("streamingRunHasCompletedMessage", () => {
+  it("does not treat older bot messages as completion for a running stream", () => {
+    expect(
+      streamingRunHasCompletedMessage(
+        { agentID: "agt_1", startedAt: "2026-04-25T10:00:05Z" },
+        [message("msg_old_bot", "chn_1", "bot", "old reply", "2026-04-25T10:00:02Z", "bot_1")],
+        [{ agent: { id: "agt_1", bot_user_id: "bot_1" } }]
+      )
+    ).toBe(false);
+  });
+
+  it("treats a newer bot message from the same agent as stream completion", () => {
+    expect(
+      streamingRunHasCompletedMessage(
+        { agentID: "agt_1", startedAt: "2026-04-25T10:00:05Z" },
+        [message("msg_bot", "chn_1", "bot", "done", "2026-04-25T10:00:06Z", "bot_1")],
+        [{ agent: { id: "agt_1", bot_user_id: "bot_1" } }]
+      )
+    ).toBe(true);
+  });
+
+  it("ignores newer bot messages from a different agent", () => {
+    expect(
+      streamingRunHasCompletedMessage(
+        { agentID: "agt_1", startedAt: "2026-04-25T10:00:05Z" },
+        [message("msg_bot", "chn_1", "bot", "done", "2026-04-25T10:00:06Z", "bot_2")],
+        [{ agent: { id: "agt_1", bot_user_id: "bot_1" } }]
       )
     ).toBe(false);
   });
@@ -89,7 +149,8 @@ function message(
   conversationID: string,
   senderType: Message["sender_type"],
   body: string,
-  createdAt: string
+  createdAt: string,
+  senderID: string = senderType
 ): Message {
   return {
     id,
@@ -97,7 +158,7 @@ function message(
     conversation_type: "channel",
     conversation_id: conversationID,
     sender_type: senderType,
-    sender_id: senderType,
+    sender_id: senderID,
     kind: "text",
     body,
     created_at: createdAt

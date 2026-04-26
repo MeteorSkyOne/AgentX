@@ -10,8 +10,13 @@ import (
 
 	"github.com/meteorsky/agentx/internal/app"
 	"github.com/meteorsky/agentx/internal/config"
+	"github.com/meteorsky/agentx/internal/domain"
 	"github.com/meteorsky/agentx/internal/eventbus"
 	"github.com/meteorsky/agentx/internal/httpapi"
+	"github.com/meteorsky/agentx/internal/runtime"
+	"github.com/meteorsky/agentx/internal/runtime/claude"
+	"github.com/meteorsky/agentx/internal/runtime/codex"
+	"github.com/meteorsky/agentx/internal/runtime/fake"
 	sqlitestore "github.com/meteorsky/agentx/internal/store/sqlite"
 )
 
@@ -38,8 +43,26 @@ func main() {
 
 	bus := eventbus.New()
 	a := app.New(st, bus, app.Options{
-		AdminToken: cfg.AdminToken,
-		DataDir:    cfg.DataDir,
+		AdminToken:        cfg.AdminToken,
+		DataDir:           cfg.DataDir,
+		DefaultAgentKind:  cfg.DefaultAgentKind,
+		DefaultAgentModel: cfg.DefaultAgentModel,
+		Runtimes: map[string]runtime.Runtime{
+			domain.AgentKindFake: fake.New(),
+			domain.AgentKindCodex: codex.New(codex.Options{
+				Command:          cfg.CodexCommand,
+				FullAuto:         cfg.CodexFullAuto,
+				BypassSandbox:    cfg.CodexBypassSandbox,
+				SkipGitRepoCheck: cfg.CodexSkipGitRepoCheck,
+			}),
+			domain.AgentKindClaude: claude.New(claude.Options{
+				Command:            cfg.ClaudeCommand,
+				PermissionMode:     cfg.ClaudePermissionMode,
+				AllowedTools:       cfg.ClaudeAllowedTools,
+				DisallowedTools:    cfg.ClaudeDisallowedTools,
+				AppendSystemPrompt: cfg.ClaudeAppendSystemText,
+			}),
+		},
 	})
 
 	server := &http.Server{

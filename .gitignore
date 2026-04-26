@@ -1,3 +1,10 @@
 .worktrees
 .worktrees/
 /agentx
+.agentx/
+.agentx-e2e/
+.playwright-libs/
+web/playwright-report/
+web/test-results/
+.agentx-screenshot/
+*:Zone.Identifier

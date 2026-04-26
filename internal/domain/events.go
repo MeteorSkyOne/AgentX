@@ -6,6 +6,8 @@ type EventType string
 
 const (
 	EventMessageCreated             EventType = "MessageCreated"
+	EventMessageUpdated             EventType = "MessageUpdated"
+	EventMessageDeleted             EventType = "MessageDeleted"
 	EventConversationBindingUpdated EventType = "ConversationBindingUpdated"
 	EventAgentRunStarted            EventType = "AgentRunStarted"
 	EventAgentOutputDelta           EventType = "AgentOutputDelta"
@@ -27,9 +29,20 @@ type MessageCreatedPayload struct {
 	Message Message `json:"message"`
 }
 
+type MessageUpdatedPayload struct {
+	Message Message `json:"message"`
+}
+
+type MessageDeletedPayload struct {
+	MessageID string `json:"message_id"`
+}
+
 type AgentOutputDeltaPayload struct {
-	RunID string `json:"run_id"`
-	Text  string `json:"text"`
+	RunID    string        `json:"run_id"`
+	AgentID  string        `json:"agent_id"`
+	Text     string        `json:"text"`
+	Thinking string        `json:"thinking,omitempty"`
+	Process  []ProcessItem `json:"process,omitempty"`
 }
 
 type AgentRunPayload struct {

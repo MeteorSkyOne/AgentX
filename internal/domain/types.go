@@ -33,6 +33,19 @@ const (
 	MessageEvent MessageKind = "event"
 )
 
+const (
+	AgentKindFake   = "fake"
+	AgentKindCodex  = "codex"
+	AgentKindClaude = "claude"
+)
+
+type ChannelType string
+
+const (
+	ChannelTypeText   ChannelType = "text"
+	ChannelTypeThread ChannelType = "thread"
+)
+
 type User struct {
 	ID          string    `json:"id"`
 	DisplayName string    `json:"display_name"`
@@ -45,11 +58,37 @@ type Organization struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-type Channel struct {
+type Project struct {
 	ID             string    `json:"id"`
 	OrganizationID string    `json:"organization_id"`
 	Name           string    `json:"name"`
+	WorkspaceID    string    `json:"workspace_id"`
+	CreatedBy      string    `json:"created_by"`
 	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type Channel struct {
+	ID             string      `json:"id"`
+	OrganizationID string      `json:"organization_id"`
+	ProjectID      string      `json:"project_id"`
+	Type           ChannelType `json:"type"`
+	Name           string      `json:"name"`
+	CreatedAt      time.Time   `json:"created_at"`
+	UpdatedAt      time.Time   `json:"updated_at"`
+	ArchivedAt     *time.Time  `json:"archived_at,omitempty"`
+}
+
+type Thread struct {
+	ID             string     `json:"id"`
+	OrganizationID string     `json:"organization_id"`
+	ProjectID      string     `json:"project_id"`
+	ChannelID      string     `json:"channel_id"`
+	Title          string     `json:"title"`
+	CreatedBy      string     `json:"created_by"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	ArchivedAt     *time.Time `json:"archived_at,omitempty"`
 }
 
 type BotUser struct {
@@ -60,15 +99,29 @@ type BotUser struct {
 }
 
 type Agent struct {
-	ID                 string    `json:"id"`
-	OrganizationID     string    `json:"organization_id"`
-	BotUserID          string    `json:"bot_user_id"`
-	Kind               string    `json:"kind"`
-	Name               string    `json:"name"`
-	Model              string    `json:"model"`
-	DefaultWorkspaceID string    `json:"default_workspace_id"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ID                 string            `json:"id"`
+	OrganizationID     string            `json:"organization_id"`
+	BotUserID          string            `json:"bot_user_id"`
+	Kind               string            `json:"kind"`
+	Name               string            `json:"name"`
+	Handle             string            `json:"handle"`
+	Model              string            `json:"model"`
+	ConfigWorkspaceID  string            `json:"config_workspace_id"`
+	DefaultWorkspaceID string            `json:"default_workspace_id,omitempty"`
+	Enabled            bool              `json:"enabled"`
+	YoloMode           bool              `json:"yolo_mode"`
+	Env                map[string]string `json:"env,omitempty"`
+	CreatedAt          time.Time         `json:"created_at"`
+	UpdatedAt          time.Time         `json:"updated_at"`
+}
+
+type AgentSession struct {
+	AgentID           string           `json:"agent_id"`
+	ConversationType  ConversationType `json:"conversation_type"`
+	ConversationID    string           `json:"conversation_id"`
+	ProviderSessionID string           `json:"provider_session_id"`
+	Status            string           `json:"status"`
+	UpdatedAt         time.Time        `json:"updated_at"`
 }
 
 type Workspace struct {
@@ -93,6 +146,14 @@ type ConversationBinding struct {
 	UpdatedAt        time.Time        `json:"updated_at"`
 }
 
+type ChannelAgent struct {
+	ChannelID      string    `json:"channel_id"`
+	AgentID        string    `json:"agent_id"`
+	RunWorkspaceID string    `json:"run_workspace_id,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
 type Message struct {
 	ID               string           `json:"id"`
 	OrganizationID   string           `json:"organization_id"`
@@ -102,5 +163,18 @@ type Message struct {
 	SenderID         string           `json:"sender_id"`
 	Kind             MessageKind      `json:"kind"`
 	Body             string           `json:"body"`
+	Metadata         map[string]any   `json:"metadata,omitempty"`
 	CreatedAt        time.Time        `json:"created_at"`
+}
+
+type ProcessItem struct {
+	Type       string `json:"type"`
+	Text       string `json:"text,omitempty"`
+	ToolName   string `json:"tool_name,omitempty"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	Status     string `json:"status,omitempty"`
+	Input      any    `json:"input,omitempty"`
+	Output     any    `json:"output,omitempty"`
+	Raw        any    `json:"raw,omitempty"`
+	CreatedAt  string `json:"created_at,omitempty"`
 }

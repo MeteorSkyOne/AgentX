@@ -30,6 +30,27 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var req app.BootstrapRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "malformed JSON")
+		return
+	}
+
+	result, err := s.app.Login(r.Context(), req)
+	if err != nil {
+		switch {
+		case errors.Is(err, app.ErrUnauthorized):
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal server error")
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	user, ok := userFromContext(r.Context())
 	if !ok {

@@ -65,6 +65,126 @@ func TestStoreCreatesOrganizationChannelAndMessage(t *testing.T) {
 	}
 }
 
+func TestMessageMetadataRoundTripsArbitraryJSON(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	defer st.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_meta", DisplayName: "Meta", CreatedAt: now}
+	org := domain.Organization{ID: "org_meta", Name: "Meta", CreatedAt: now}
+	channel := domain.Channel{ID: "chn_meta", OrganizationID: org.ID, Name: "meta", CreatedAt: now}
+	message := domain.Message{
+		ID: "msg_meta", OrganizationID: org.ID, ConversationType: domain.ConversationChannel,
+		ConversationID: channel.ID, SenderType: domain.SenderBot, SenderID: "bot_meta",
+		Kind: domain.MessageText, Body: "done", CreatedAt: now,
+		Metadata: map[string]any{
+			"thinking": "look up file",
+			"process": []domain.ProcessItem{{
+				Type:     "tool_call",
+				ToolName: "Read",
+				Input:    map[string]any{"path": "README.md"},
+				Raw:      map[string]any{"type": "tool_use"},
+			}},
+		},
+	}
+
+	err := st.Tx(ctx, func(tx store.Tx) error {
+		if err := tx.Users().Create(ctx, user); err != nil {
+			return err
+		}
+		if err := tx.Organizations().Create(ctx, org); err != nil {
+			return err
+		}
+		if err := tx.Organizations().AddMember(ctx, org.ID, user.ID, domain.RoleOwner); err != nil {
+			return err
+		}
+		if err := tx.Channels().Create(ctx, channel); err != nil {
+			return err
+		}
+		return tx.Messages().Create(ctx, message)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	messages, err := st.Messages().List(ctx, domain.ConversationChannel, channel.ID, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("messages = %#v", messages)
+	}
+	if messages[0].Metadata["thinking"] != "look up file" {
+		t.Fatalf("metadata = %#v", messages[0].Metadata)
+	}
+	process, ok := messages[0].Metadata["process"].([]any)
+	if !ok || len(process) != 1 {
+		t.Fatalf("process metadata = %#v", messages[0].Metadata["process"])
+	}
+	item, ok := process[0].(map[string]any)
+	if !ok || item["type"] != "tool_call" || item["tool_name"] != "Read" {
+		t.Fatalf("process item = %#v", process[0])
+	}
+	input, ok := item["input"].(map[string]any)
+	if !ok || input["path"] != "README.md" {
+		t.Fatalf("input = %#v", item["input"])
+	}
+}
+
+func TestMessagesListRecentReturnsLatestMessagesChronologically(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	defer st.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_recent", DisplayName: "Recent", CreatedAt: now}
+	org := domain.Organization{ID: "org_recent", Name: "Recent", CreatedAt: now}
+	channel := domain.Channel{ID: "chn_recent", OrganizationID: org.ID, Name: "recent", CreatedAt: now}
+
+	err := st.Tx(ctx, func(tx store.Tx) error {
+		if err := tx.Users().Create(ctx, user); err != nil {
+			return err
+		}
+		if err := tx.Organizations().Create(ctx, org); err != nil {
+			return err
+		}
+		if err := tx.Organizations().AddMember(ctx, org.ID, user.ID, domain.RoleOwner); err != nil {
+			return err
+		}
+		if err := tx.Channels().Create(ctx, channel); err != nil {
+			return err
+		}
+		for i := 1; i <= 3; i++ {
+			if err := tx.Messages().Create(ctx, domain.Message{
+				ID:               "msg_recent_" + strconv.Itoa(i),
+				OrganizationID:   org.ID,
+				ConversationType: domain.ConversationChannel,
+				ConversationID:   channel.ID,
+				SenderType:       domain.SenderUser,
+				SenderID:         user.ID,
+				Kind:             domain.MessageText,
+				Body:             "message " + strconv.Itoa(i),
+				CreatedAt:        now.Add(time.Duration(i) * time.Second),
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	messages, err := st.Messages().ListRecent(ctx, domain.ConversationChannel, channel.ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || messages[0].ID != "msg_recent_2" || messages[1].ID != "msg_recent_3" {
+		t.Fatalf("recent messages = %#v", messages)
+	}
+}
+
 func TestTxCallbackErrorRollsBack(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
@@ -227,6 +347,49 @@ func TestSessionUpsertAllowsRepeatedAgentConversation(t *testing.T) {
 	}
 	if err := st.Sessions().SetAgentSession(ctx, fixture.agent1.ID, domain.ConversationChannel, "chn_session", "provider_2", "done"); err != nil {
 		t.Fatal(err)
+	}
+	session, err := st.Sessions().ByConversation(ctx, fixture.agent1.ID, domain.ConversationChannel, "chn_session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.ProviderSessionID != "provider_2" || session.Status != "done" {
+		t.Fatalf("session = %#v", session)
+	}
+}
+
+func TestAgentEnvRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	defer st.Close()
+
+	fixture := seedBindingFixture(t, ctx, st)
+	fixture.agent1.Env = map[string]string{"CODEX_API_KEY": "secret", "CUSTOM": "value"}
+	fixture.agent1.YoloMode = true
+	fixture.agent1.ID = "agt_env"
+	if err := st.Agents().Create(ctx, fixture.agent1); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.Agents().ByID(ctx, fixture.agent1.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Env["CODEX_API_KEY"] != "secret" || got.Env["CUSTOM"] != "value" {
+		t.Fatalf("Env = %#v", got.Env)
+	}
+	if !got.YoloMode {
+		t.Fatalf("YoloMode = false, want true")
+	}
+	got.YoloMode = false
+	got.UpdatedAt = got.UpdatedAt.Add(time.Second)
+	if err := st.Agents().Update(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := st.Agents().ByID(ctx, fixture.agent1.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.YoloMode {
+		t.Fatalf("updated YoloMode = true, want false")
 	}
 }
 

@@ -99,8 +99,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	events, unsubscribe := s.bus.Subscribe(ctx, eventbus.Filter{
-		OrganizationID: resolvedOrganizationID,
-		ConversationID: msg.ConversationID,
+		OrganizationID:   resolvedOrganizationID,
+		ConversationType: conversationType,
+		ConversationID:   msg.ConversationID,
 	})
 	defer unsubscribe()
 
