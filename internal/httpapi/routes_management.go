@@ -42,26 +42,28 @@ type projectUpdateRequest struct {
 }
 
 type agentCreateRequest struct {
-	Name     string            `json:"name"`
-	Handle   string            `json:"handle"`
-	Kind     string            `json:"kind"`
-	Model    string            `json:"model"`
-	Effort   string            `json:"effort"`
-	FastMode bool              `json:"fast_mode"`
-	YoloMode bool              `json:"yolo_mode"`
-	Env      map[string]string `json:"env"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Handle      string            `json:"handle"`
+	Kind        string            `json:"kind"`
+	Model       string            `json:"model"`
+	Effort      string            `json:"effort"`
+	FastMode    bool              `json:"fast_mode"`
+	YoloMode    bool              `json:"yolo_mode"`
+	Env         map[string]string `json:"env"`
 }
 
 type agentUpdateRequest struct {
-	Name     *string           `json:"name"`
-	Handle   *string           `json:"handle"`
-	Kind     *string           `json:"kind"`
-	Model    *string           `json:"model"`
-	Effort   *string           `json:"effort"`
-	Enabled  *bool             `json:"enabled"`
-	FastMode *bool             `json:"fast_mode"`
-	YoloMode *bool             `json:"yolo_mode"`
-	Env      map[string]string `json:"env"`
+	Name        *string           `json:"name"`
+	Description *string           `json:"description"`
+	Handle      *string           `json:"handle"`
+	Kind        *string           `json:"kind"`
+	Model       *string           `json:"model"`
+	Effort      *string           `json:"effort"`
+	Enabled     *bool             `json:"enabled"`
+	FastMode    *bool             `json:"fast_mode"`
+	YoloMode    *bool             `json:"yolo_mode"`
+	Env         map[string]string `json:"env"`
 }
 
 type channelAgentsRequest struct {
@@ -447,6 +449,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		UserID:         userID,
 		OrganizationID: orgID,
 		Name:           req.Name,
+		Description:    req.Description,
 		Handle:         req.Handle,
 		Kind:           req.Kind,
 		Model:          req.Model,
@@ -485,16 +488,17 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updated, err := s.app.UpdateAgent(r.Context(), agent.ID, app.AgentUpdateRequest{
-		Name:     req.Name,
-		Handle:   req.Handle,
-		Kind:     req.Kind,
-		Model:    req.Model,
-		Effort:   req.Effort,
-		Enabled:  req.Enabled,
-		FastMode: req.FastMode,
-		YoloMode: req.YoloMode,
-		Env:      req.Env,
-		EnvSet:   req.Env != nil,
+		Name:        req.Name,
+		Description: req.Description,
+		Handle:      req.Handle,
+		Kind:        req.Kind,
+		Model:       req.Model,
+		Effort:      req.Effort,
+		Enabled:     req.Enabled,
+		FastMode:    req.FastMode,
+		YoloMode:    req.YoloMode,
+		Env:         req.Env,
+		EnvSet:      req.Env != nil,
 	})
 	if err != nil {
 		writeAppError(w, err)
@@ -503,7 +507,7 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, redactAgent(updated))
 }
 
-func (s *Server) handleDisableAgent(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	userID, ok := userIDFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
@@ -518,8 +522,7 @@ func (s *Server) handleDisableAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "agent not found")
 		return
 	}
-	enabled := false
-	if _, err := s.app.UpdateAgent(r.Context(), agent.ID, app.AgentUpdateRequest{Enabled: &enabled}); err != nil {
+	if err := s.app.DeleteAgent(r.Context(), agent.ID); err != nil {
 		writeAppError(w, err)
 		return
 	}
@@ -725,6 +728,47 @@ func (s *Server) handlePutWorkspaceFile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, workspaceFileResponse{Path: filepath.ToSlash(filepath.Clean(relPath)), Body: content, Content: content})
+}
+
+func (s *Server) handleDeleteWorkspaceFile(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	workspace, ok, err := s.authorizedWorkspace(r, userID, chi.URLParam(r, "workspaceID"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+	relPath := r.URL.Query().Get("path")
+	target, err := safeWorkspacePath(workspace.Path, relPath)
+	if err != nil || strings.TrimSpace(relPath) == "" {
+		writeError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, http.StatusNotFound, "file not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if info.IsDir() {
+		writeError(w, http.StatusBadRequest, "directories cannot be deleted here")
+		return
+	}
+	if err := os.Remove(target); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) authorizedProject(r *http.Request, userID string, projectID string) (domain.Project, bool, error) {

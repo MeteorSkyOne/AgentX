@@ -372,6 +372,7 @@ func TestAgentEnvRoundTrip(t *testing.T) {
 
 	fixture := seedBindingFixture(t, ctx, st)
 	fixture.agent1.Env = map[string]string{"CODEX_API_KEY": "secret", "CUSTOM": "value"}
+	fixture.agent1.Description = "Handles code changes"
 	fixture.agent1.FastMode = true
 	fixture.agent1.YoloMode = true
 	fixture.agent1.ID = "agt_env"
@@ -385,6 +386,9 @@ func TestAgentEnvRoundTrip(t *testing.T) {
 	if got.Env["CODEX_API_KEY"] != "secret" || got.Env["CUSTOM"] != "value" {
 		t.Fatalf("Env = %#v", got.Env)
 	}
+	if got.Description != "Handles code changes" {
+		t.Fatalf("Description = %q, want Handles code changes", got.Description)
+	}
 	if !got.YoloMode {
 		t.Fatalf("YoloMode = false, want true")
 	}
@@ -393,6 +397,7 @@ func TestAgentEnvRoundTrip(t *testing.T) {
 	}
 	got.FastMode = false
 	got.YoloMode = false
+	got.Description = "Updated description"
 	got.UpdatedAt = got.UpdatedAt.Add(time.Second)
 	if err := st.Agents().Update(ctx, got); err != nil {
 		t.Fatal(err)
@@ -406,6 +411,9 @@ func TestAgentEnvRoundTrip(t *testing.T) {
 	}
 	if updated.FastMode {
 		t.Fatalf("updated FastMode = true, want false")
+	}
+	if updated.Description != "Updated description" {
+		t.Fatalf("updated Description = %q, want Updated description", updated.Description)
 	}
 }
 

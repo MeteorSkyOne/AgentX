@@ -280,6 +280,7 @@ type AgentCreateRequest struct {
 	UserID         string
 	OrganizationID string
 	Name           string
+	Description    string
 	Handle         string
 	Kind           string
 	Model          string
@@ -301,6 +302,7 @@ func (a *App) CreateAgent(ctx context.Context, req AgentCreateRequest) (domain.A
 	if handle == "" {
 		return domain.Agent{}, ErrInvalidInput
 	}
+	description := strings.TrimSpace(req.Description)
 	kind := strings.TrimSpace(req.Kind)
 	if kind == "" {
 		kind = domain.AgentKindFake
@@ -324,6 +326,7 @@ func (a *App) CreateAgent(ctx context.Context, req AgentCreateRequest) (domain.A
 		Kind:               kind,
 		Name:               name,
 		Handle:             handle,
+		Description:        description,
 		Model:              strings.TrimSpace(req.Model),
 		Effort:             strings.TrimSpace(req.Effort),
 		ConfigWorkspaceID:  workspace.ID,
@@ -347,26 +350,29 @@ func (a *App) CreateAgent(ctx context.Context, req AgentCreateRequest) (domain.A
 		if err := tx.Workspaces().Create(ctx, workspace); err != nil {
 			return err
 		}
-		return tx.Agents().Create(ctx, agent)
+		if err := tx.Agents().Create(ctx, agent); err != nil {
+			return err
+		}
+		return seedAgentMemoryFile(workspace.Path, agent)
 	})
 	if err != nil {
 		return domain.Agent{}, err
 	}
-	_ = os.MkdirAll(workspace.Path, 0o755)
 	return agent, nil
 }
 
 type AgentUpdateRequest struct {
-	Name     *string
-	Handle   *string
-	Kind     *string
-	Model    *string
-	Effort   *string
-	Enabled  *bool
-	FastMode *bool
-	YoloMode *bool
-	Env      map[string]string
-	EnvSet   bool
+	Name        *string
+	Description *string
+	Handle      *string
+	Kind        *string
+	Model       *string
+	Effort      *string
+	Enabled     *bool
+	FastMode    *bool
+	YoloMode    *bool
+	Env         map[string]string
+	EnvSet      bool
 }
 
 func (a *App) UpdateAgent(ctx context.Context, agentID string, req AgentUpdateRequest) (domain.Agent, error) {
@@ -380,6 +386,9 @@ func (a *App) UpdateAgent(ctx context.Context, agentID string, req AgentUpdateRe
 			return domain.Agent{}, ErrInvalidInput
 		}
 		agent.Name = name
+	}
+	if req.Description != nil {
+		agent.Description = strings.TrimSpace(*req.Description)
 	}
 	if req.Handle != nil {
 		handle := normalizeHandle(*req.Handle)
@@ -425,6 +434,53 @@ func (a *App) UpdateAgent(ctx context.Context, agentID string, req AgentUpdateRe
 		return domain.Agent{}, err
 	}
 	return agent, nil
+}
+
+func (a *App) DeleteAgent(ctx context.Context, agentID string) error {
+	agent, err := a.store.Agents().ByID(ctx, agentID)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	agent.Enabled = false
+	agent.Handle = deletedAgentHandle(agent)
+	agent.UpdatedAt = now
+	return a.store.Tx(ctx, func(tx store.Tx) error {
+		if err := tx.ChannelAgents().DeleteForAgent(ctx, agent.ID); err != nil {
+			return err
+		}
+		return tx.Agents().Update(ctx, agent)
+	})
+}
+
+func deletedAgentHandle(agent domain.Agent) string {
+	handle := normalizeHandle(agent.Handle)
+	if handle == "" {
+		handle = normalizeHandle(agent.Name)
+	}
+	if handle == "" {
+		handle = "agent"
+	}
+	return normalizeHandle(handle + "_deleted_" + agent.ID)
+}
+
+func seedAgentMemoryFile(workspacePath string, agent domain.Agent) error {
+	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(workspacePath, "memory.md"), []byte(agentMemoryContent(agent)), 0o644)
+}
+
+func agentMemoryContent(agent domain.Agent) string {
+	var b strings.Builder
+	b.WriteString("# Agent Memory\n\n")
+	b.WriteString("Name: ")
+	b.WriteString(strings.TrimSpace(agent.Name))
+	b.WriteString("\n")
+	b.WriteString("Description: ")
+	b.WriteString(strings.TrimSpace(agent.Description))
+	b.WriteString("\n")
+	return b.String()
 }
 
 func (a *App) ChannelAgents(ctx context.Context, channelID string) ([]ConversationAgentContext, error) {

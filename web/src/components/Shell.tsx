@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Activity,
@@ -8,7 +8,6 @@ import {
   ChevronRight,
   Database,
   FileText,
-  Folder,
   FolderOpen,
   Hash,
   Home,
@@ -19,6 +18,7 @@ import {
   Moon,
   Pencil,
   Plus,
+  RefreshCw,
   Rows3,
   Save,
   Send,
@@ -33,6 +33,7 @@ import {
 import { cn } from "@/lib/utils";
 import { ChannelList } from "./ChannelList";
 import { Composer } from "./Composer";
+import { FileTree } from "./FileTree";
 import { MessagePane } from "./MessagePane";
 import type {
   Agent,
@@ -155,6 +156,7 @@ interface ShellProps {
   ) => Promise<void>;
   onCreateAgent: (payload: {
     name: string;
+    description?: string;
     handle?: string;
     kind?: string;
     model?: string;
@@ -165,7 +167,7 @@ interface ShellProps {
   }) => Promise<Agent>;
   onUpdateAgent: (
     agentID: string,
-    payload: Partial<Pick<Agent, "name" | "handle" | "kind" | "model" | "effort" | "enabled" | "fast_mode" | "yolo_mode">> & {
+    payload: Partial<Pick<Agent, "name" | "description" | "handle" | "kind" | "model" | "effort" | "enabled" | "fast_mode" | "yolo_mode">> & {
       env?: Record<string, string>;
     }
   ) => Promise<void>;
@@ -173,6 +175,7 @@ interface ShellProps {
   onLoadWorkspaceTree: (workspaceID: string) => Promise<WorkspaceTreeEntry>;
   onReadWorkspaceFile: (workspaceID: string, path: string) => Promise<string>;
   onWriteWorkspaceFile: (workspaceID: string, path: string, body: string) => Promise<void>;
+  onDeleteWorkspaceFile: (workspaceID: string, path: string) => Promise<void>;
   onUpdateMessage: (messageID: string, body: string) => Promise<Message>;
   onDeleteMessage: (message: Message) => Promise<void>;
   onLoadOlderMessages: () => boolean;
@@ -220,6 +223,7 @@ export function Shell({
   onLoadWorkspaceTree,
   onReadWorkspaceFile,
   onWriteWorkspaceFile,
+  onDeleteWorkspaceFile,
   onUpdateMessage,
   onDeleteMessage,
   onLoadOlderMessages,
@@ -228,6 +232,7 @@ export function Shell({
   onLogout
 }: ShellProps) {
   const [agentPanelOpen, setAgentPanelOpen] = useState(false);
+  const [focusedAgentID, setFocusedAgentID] = useState("");
   const [membersPanelOpen, setMembersPanelOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [mobileAgentPanelOpen, setMobileAgentPanelOpen] = useState(false);
@@ -252,6 +257,7 @@ export function Shell({
   const [channelType, setChannelType] = useState<Channel["type"]>("text");
   const [agentDraftOpen, setAgentDraftOpen] = useState(false);
   const [newAgentName, setNewAgentName] = useState("");
+  const [newAgentDescription, setNewAgentDescription] = useState("");
   const [newAgentHandle, setNewAgentHandle] = useState("");
   const [newAgentKind, setNewAgentKind] = useState("fake");
   const [newAgentModel, setNewAgentModel] = useState("");
@@ -268,7 +274,8 @@ export function Shell({
   const [threadActionPending, setThreadActionPending] = useState(false);
   const boundAgents = conversationContext?.agents ?? channelAgents;
   const activeAgents = useMemo(() => agents.filter((agent) => agent.enabled), [agents]);
-  const selectedAgent = boundAgents[0]?.agent ?? activeAgents[0];
+  const selectedAgent =
+    agents.find((agent) => agent.id === focusedAgentID) ?? boundAgents[0]?.agent ?? activeAgents[0];
   const activeThread = conversationContext?.thread;
 
   useEffect(() => {
@@ -292,12 +299,14 @@ export function Shell({
 
   useEffect(() => {
     setAgentPanelOpen(false);
+    setFocusedAgentID("");
   }, [selectedChannel?.id, activeConversation?.id]);
 
   useEffect(() => {
     setMobileNavOpen(false);
     setMobileAgentPanelOpen(false);
     setMobileMembersPanelOpen(false);
+    setFocusedAgentID("");
   }, [selectedChannel?.id, activeConversation?.id]);
 
   useEffect(() => {
@@ -439,6 +448,7 @@ export function Shell({
     try {
       const created = await onCreateAgent({
         name,
+        description: newAgentDescription.trim() || undefined,
         handle: newAgentHandle || undefined,
         kind: newAgentKind,
         model: newAgentModel || undefined,
@@ -461,6 +471,7 @@ export function Shell({
         ]);
       }
       setNewAgentName("");
+      setNewAgentDescription("");
       setNewAgentHandle("");
       setNewAgentKind("fake");
       setNewAgentModel("");
@@ -721,7 +732,8 @@ export function Shell({
                     agents={activeAgents}
                     boundAgents={boundAgents}
                     contextLoading={contextLoading}
-                    onOpenPanel={() => {
+                    onOpenPanel={(agentID) => {
+                      if (agentID) setFocusedAgentID(agentID);
                       setMobileNavOpen(false);
                       setMobileAgentPanelOpen(true);
                     }}
@@ -825,6 +837,7 @@ export function Shell({
               onLoadWorkspaceTree={onLoadWorkspaceTree}
               onReadWorkspaceFile={onReadWorkspaceFile}
               onWriteWorkspaceFile={onWriteWorkspaceFile}
+              onDeleteWorkspaceFile={onDeleteWorkspaceFile}
               onCreateAgentModal={() => setAgentDraftOpen(true)}
               onClose={() => setMobileAgentPanelOpen(false)}
             />
@@ -980,7 +993,11 @@ export function Shell({
                   agents={activeAgents}
                   boundAgents={boundAgents}
                   contextLoading={contextLoading}
-                  onOpenPanel={() => setAgentPanelOpen(true)}
+                  onOpenPanel={(agentID) => {
+                    if (agentID) setFocusedAgentID(agentID);
+                    setMembersPanelOpen(false);
+                    setAgentPanelOpen(true);
+                  }}
                   onCreateAgent={() => setAgentDraftOpen(true)}
                 />
               </div>
@@ -1176,6 +1193,7 @@ export function Shell({
                 onLoadWorkspaceTree={onLoadWorkspaceTree}
                 onReadWorkspaceFile={onReadWorkspaceFile}
                 onWriteWorkspaceFile={onWriteWorkspaceFile}
+                onDeleteWorkspaceFile={onDeleteWorkspaceFile}
                 onCreateAgentModal={() => setAgentDraftOpen(true)}
                 onClose={() => setAgentPanelOpen(false)}
               />
@@ -1491,6 +1509,17 @@ export function Shell({
               />
             </div>
             <div className="space-y-2">
+              <Label htmlFor="new-agent-description">Description</Label>
+              <Textarea
+                id="new-agent-description"
+                value={newAgentDescription}
+                onChange={(e) => setNewAgentDescription(e.target.value)}
+                placeholder="What this agent is responsible for"
+                aria-label="New agent description"
+                rows={3}
+              />
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="new-agent-handle">Handle</Label>
               <Input
                 id="new-agent-handle"
@@ -1663,7 +1692,7 @@ function AgentsSidebar({
   agents: Agent[];
   boundAgents: ConversationAgentContext[];
   contextLoading: boolean;
-  onOpenPanel: () => void;
+  onOpenPanel: (agentID?: string) => void;
   onCreateAgent: () => void;
 }) {
   const [open, setOpen] = useState(true);
@@ -1684,7 +1713,7 @@ function AgentsSidebar({
               key={item.agent.id}
               className="group flex min-h-10 min-w-0 max-w-full w-full items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent/50 hover:text-foreground md:min-h-0"
               aria-label={item.agent.name}
-              onClick={onOpenPanel}
+              onClick={() => onOpenPanel(item.agent.id)}
             >
               <div className="relative">
                 <AgentAvatar agentID={item.agent.id} kind={item.agent.kind} size="sm" className="h-5 w-5" />
@@ -1709,7 +1738,7 @@ function AgentsSidebar({
           </button>
           <button
             className="flex min-h-10 min-w-0 max-w-full w-full items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground md:min-h-0"
-            onClick={onOpenPanel}
+            onClick={() => onOpenPanel()}
           >
             <Settings className="h-4 w-4 shrink-0" />
             <span className="min-w-0 truncate">Manage agents</span>
@@ -2065,6 +2094,7 @@ function AgentDetailsPanel({
   onLoadWorkspaceTree,
   onReadWorkspaceFile,
   onWriteWorkspaceFile,
+  onDeleteWorkspaceFile,
   onCreateAgentModal,
   onClose
 }: {
@@ -2081,6 +2111,7 @@ function AgentDetailsPanel({
   onLoadWorkspaceTree: ShellProps["onLoadWorkspaceTree"];
   onReadWorkspaceFile: ShellProps["onReadWorkspaceFile"];
   onWriteWorkspaceFile: ShellProps["onWriteWorkspaceFile"];
+  onDeleteWorkspaceFile: ShellProps["onDeleteWorkspaceFile"];
   onCreateAgentModal: () => void;
   onClose: () => void;
 }) {
@@ -2088,6 +2119,7 @@ function AgentDetailsPanel({
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [agentID, setAgentID] = useState(selectedAgent?.id ?? "");
   const [name, setName] = useState(selectedAgent?.name ?? "");
+  const [description, setDescription] = useState(selectedAgent?.description ?? "");
   const [handle, setHandle] = useState(selectedAgent?.handle ?? "");
   const [kind, setKind] = useState(selectedAgent?.kind ?? "fake");
   const [model, setModel] = useState(selectedAgent?.model ?? "");
@@ -2097,20 +2129,37 @@ function AgentDetailsPanel({
   const [yoloMode, setYoloMode] = useState(selectedAgent?.yolo_mode ?? false);
   const [avatarEmoji, setAvatarEmoji] = useState("");
   const [avatarColor, setAvatarColor] = useState("");
+  const [activeTab, setActiveTab] = useState("settings");
   const [filePath, setFilePath] = useState("memory.md");
   const [fileBody, setFileBody] = useState("");
   const [tree, setTree] = useState<WorkspaceTreeEntry>();
+  const [workspaceTreeLoading, setWorkspaceTreeLoading] = useState(false);
+  const [workspaceTreeError, setWorkspaceTreeError] = useState<string | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [fileSaving, setFileSaving] = useState(false);
+  const [fileDeleteConfirmOpen, setFileDeleteConfirmOpen] = useState(false);
+  const [fileDeleting, setFileDeleting] = useState(false);
+  const [workspaceStatus, setWorkspaceStatus] = useState<string | null>(null);
   const [envBody, setEnvBody] = useState("{}");
   const [status, setStatus] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const workspaceTreeRequestRef = useRef(0);
+  const fileRequestRef = useRef(0);
 
   const selected = agents.find((a) => a.id === agentID) ?? selectedAgent;
   const selectedBinding = boundAgents.find((item) => item.agent.id === selected?.id);
+  const selectedConfigWorkspaceID = selected?.config_workspace_id ?? "";
   const envEntries = useMemo(
     () => Object.entries(selected?.env ?? {}).sort(([l], [r]) => l.localeCompare(r)),
     [selected?.env]
   );
+
+  useEffect(() => {
+    if (!selectedAgent?.id) return;
+    setAgentID(selectedAgent.id);
+    setActiveTab("settings");
+  }, [selectedAgent?.id]);
 
   useEffect(() => {
     const nextChecked: Record<string, boolean> = {};
@@ -2127,6 +2176,7 @@ function AgentDetailsPanel({
     if (!selected) return;
     setAgentID(selected.id);
     setName(selected.name);
+    setDescription(selected.description ?? "");
     setHandle(selected.handle);
     setKind(selected.kind);
     setModel(selected.model);
@@ -2142,6 +2192,7 @@ function AgentDetailsPanel({
   }, [
     selected?.id,
     selected?.name,
+    selected?.description,
     selected?.handle,
     selected?.kind,
     selected?.model,
@@ -2150,6 +2201,26 @@ function AgentDetailsPanel({
     selected?.fast_mode,
     selected?.yolo_mode
   ]);
+
+  useEffect(() => {
+    workspaceTreeRequestRef.current += 1;
+    fileRequestRef.current += 1;
+    setTree(undefined);
+    setFileBody("");
+    setWorkspaceTreeError(null);
+    setWorkspaceTreeLoading(false);
+    setFileLoading(false);
+    setFileSaving(false);
+    setFileDeleteConfirmOpen(false);
+    setFileDeleting(false);
+    setWorkspaceStatus(null);
+  }, [selectedConfigWorkspaceID]);
+
+  useEffect(() => {
+    if (activeTab === "workspace" && selectedConfigWorkspaceID) {
+      void loadTree({ quiet: true });
+    }
+  }, [activeTab, selectedConfigWorkspaceID]);
 
   async function saveBindings() {
     const bindings = agents
@@ -2164,29 +2235,85 @@ function AgentDetailsPanel({
 
   async function saveAgent() {
     if (!selected) return;
-    await onUpdateAgent(selected.id, { name, handle, kind, model, effort, enabled, fast_mode: fastMode, yolo_mode: yoloMode });
+    await onUpdateAgent(selected.id, { name, description, handle, kind, model, effort, enabled, fast_mode: fastMode, yolo_mode: yoloMode });
     setAgentAvatar(selected.id, avatarEmoji ? { emoji: avatarEmoji, color: avatarColor || agentKindColor(kind) } : null);
     setStatus("Saved");
   }
 
-  async function loadFile() {
-    if (!selected) return;
-    const body = await onReadWorkspaceFile(selected.config_workspace_id, filePath);
-    setFileBody(body);
-    setStatus("Loaded");
+  async function loadFile(path = filePath) {
+    const targetPath = path.trim();
+    if (!selectedConfigWorkspaceID || !targetPath) return;
+    const requestID = ++fileRequestRef.current;
+    setFileLoading(true);
+    setFilePath(targetPath);
+    try {
+      const body = await onReadWorkspaceFile(selectedConfigWorkspaceID, targetPath);
+      if (fileRequestRef.current !== requestID) return;
+      setFileBody(body);
+      setWorkspaceStatus("Loaded");
+    } catch (err) {
+      if (fileRequestRef.current !== requestID) return;
+      setWorkspaceStatus(err instanceof Error ? err.message : "Load failed");
+    } finally {
+      if (fileRequestRef.current === requestID) {
+        setFileLoading(false);
+      }
+    }
   }
 
-  async function loadTree() {
-    if (!selected) return;
-    const nextTree = await onLoadWorkspaceTree(selected.config_workspace_id);
-    setTree(nextTree);
-    setStatus("Loaded");
+  async function loadTree(options: { quiet?: boolean } = {}) {
+    if (!selectedConfigWorkspaceID) return;
+    const requestID = ++workspaceTreeRequestRef.current;
+    setWorkspaceTreeLoading(true);
+    setWorkspaceTreeError(null);
+    try {
+      const nextTree = await onLoadWorkspaceTree(selectedConfigWorkspaceID);
+      if (workspaceTreeRequestRef.current !== requestID) return;
+      setTree(nextTree);
+      if (!options.quiet) setWorkspaceStatus("Tree loaded");
+    } catch (err) {
+      if (workspaceTreeRequestRef.current !== requestID) return;
+      const message = err instanceof Error ? err.message : "Tree load failed";
+      setWorkspaceTreeError(message);
+      if (!options.quiet) setWorkspaceStatus(message);
+    } finally {
+      if (workspaceTreeRequestRef.current === requestID) {
+        setWorkspaceTreeLoading(false);
+      }
+    }
   }
 
   async function saveFile() {
-    if (!selected) return;
-    await onWriteWorkspaceFile(selected.config_workspace_id, filePath, fileBody);
-    setStatus("Saved");
+    const targetPath = filePath.trim();
+    if (!selectedConfigWorkspaceID || !targetPath) return;
+    setFileSaving(true);
+    try {
+      await onWriteWorkspaceFile(selectedConfigWorkspaceID, targetPath, fileBody);
+      setFilePath(targetPath);
+      setWorkspaceStatus("Saved");
+      await loadTree({ quiet: true });
+    } catch (err) {
+      setWorkspaceStatus(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setFileSaving(false);
+    }
+  }
+
+  async function confirmDeleteFile() {
+    const targetPath = filePath.trim();
+    if (!selectedConfigWorkspaceID || !targetPath) return;
+    setFileDeleting(true);
+    try {
+      await onDeleteWorkspaceFile(selectedConfigWorkspaceID, targetPath);
+      setFileBody("");
+      setWorkspaceStatus("Deleted");
+      setFileDeleteConfirmOpen(false);
+      await loadTree({ quiet: true });
+    } catch (err) {
+      setWorkspaceStatus(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setFileDeleting(false);
+    }
   }
 
   async function saveEnv() {
@@ -2254,12 +2381,15 @@ function AgentDetailsPanel({
               <Badge variant="outline" className={cn("text-xs", agentColor)}>
                 {agentKindLabel(selected?.kind ?? "fake")}
               </Badge>
-              <span className="truncate text-xs text-muted-foreground">
-                {selected?.handle ?? ""}
-              </span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {selected?.handle ?? ""}
+                </span>
+              </div>
+              {selected?.description && (
+                <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{selected.description}</p>
+              )}
             </div>
           </div>
-        </div>
         <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
           <span className="text-muted-foreground">Model</span>
           <strong className="truncate">{selected?.model || "default"}</strong>
@@ -2292,7 +2422,7 @@ function AgentDetailsPanel({
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="settings" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <TabsList className="mx-3 mt-4 grid w-auto grid-cols-4 md:mx-4">
           <TabsTrigger value="settings" className="gap-1 text-xs">
             <Settings className="h-3.5 w-3.5" />
@@ -2334,6 +2464,15 @@ function AgentDetailsPanel({
               <div className="space-y-2">
                 <Label className="text-xs">Name</Label>
                 <Input value={name} onChange={(e) => setName(e.target.value)} aria-label="Agent name" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs">Description</Label>
+                <Textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  aria-label="Agent description"
+                  rows={3}
+                />
               </div>
               <div className="space-y-2">
                 <Label className="text-xs">Handle</Label>
@@ -2507,23 +2646,67 @@ function AgentDetailsPanel({
             </div>
             <div className="flex gap-2">
               <Input value={filePath} onChange={(e) => setFilePath(e.target.value)} aria-label="File path" className="flex-1 text-xs" />
-              <Button size="sm" variant="outline" onClick={loadFile}>Open</Button>
-              <Button size="sm" variant="outline" onClick={loadTree}>Tree</Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                onClick={() => void loadFile()}
+                disabled={fileLoading || !selectedConfigWorkspaceID || !filePath.trim()}
+              >
+                <FileText className="h-3.5 w-3.5" />
+                Open
+              </Button>
+              <Button
+                size="icon-sm"
+                variant="outline"
+                onClick={() => void loadTree()}
+                disabled={workspaceTreeLoading || !selectedConfigWorkspaceID}
+                title="Refresh tree"
+                aria-label="Refresh tree"
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5", workspaceTreeLoading && "animate-spin")} />
+              </Button>
             </div>
-            {tree && <WorkspaceTreeView tree={tree} onSelectPath={setFilePath} />}
-            <Textarea
-              className="flex-1 resize-none font-mono text-xs"
-              value={fileBody}
-              onChange={(e) => setFileBody(e.target.value)}
-              placeholder="File content..."
-              aria-label="File content"
+            <FileTree
+              tree={tree}
+              selectedPath={filePath}
+              loading={workspaceTreeLoading}
+              error={workspaceTreeError}
+              className="h-44 shrink-0"
+              ariaLabel="Agent workspace files"
+              onSelectFile={(path) => void loadFile(path)}
             />
-            <Button size="sm" className="w-full gap-2" onClick={saveFile}>
-              <FileText className="h-4 w-4" />
-              Save file
-            </Button>
-          </div>
-        </TabsContent>
+              <Textarea
+                className="flex-1 resize-none font-mono text-xs"
+                value={fileBody}
+                onChange={(e) => setFileBody(e.target.value)}
+                placeholder="File content..."
+                aria-label="File content"
+              />
+              {workspaceStatus && <p className="text-xs text-muted-foreground">{workspaceStatus}</p>}
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  size="sm"
+                  className="gap-2"
+                  onClick={saveFile}
+                  disabled={fileSaving || !selectedConfigWorkspaceID || !filePath.trim()}
+                >
+                  <Save className="h-4 w-4" />
+                  Save file
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="gap-2"
+                  onClick={() => setFileDeleteConfirmOpen(true)}
+                  disabled={fileDeleting || !selectedConfigWorkspaceID || !filePath.trim()}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete file
+                </Button>
+              </div>
+            </div>
+          </TabsContent>
 
         {/* Env Tab */}
         <TabsContent value="env" className="min-h-0 flex-1 overflow-hidden px-4 pb-4">
@@ -2579,54 +2762,30 @@ function AgentDetailsPanel({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <Dialog open={fileDeleteConfirmOpen} onOpenChange={setFileDeleteConfirmOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete file?</DialogTitle>
+          <DialogDescription>
+            {filePath.trim() ? `${filePath.trim()} will be removed from this agent workspace.` : "This file will be removed from this agent workspace."}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setFileDeleteConfirmOpen(false)} disabled={fileDeleting}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={confirmDeleteFile}
+            disabled={fileDeleting || !selectedConfigWorkspaceID || !filePath.trim()}
+          >
+            Delete
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     </>
   );
-}
-
-function WorkspaceTreeView({
-  tree,
-  onSelectPath
-}: {
-  tree: WorkspaceTreeEntry;
-  onSelectPath: (path: string) => void;
-}) {
-  const entries = flattenTree(tree).filter((entry) => entry.path !== "");
-  if (entries.length === 0) {
-    return <p className="text-xs text-muted-foreground">empty</p>;
-  }
-  return (
-    <ScrollArea className="max-h-40 rounded-md border border-border bg-background/50">
-      <div className="p-2">
-        {entries.map((entry) => (
-          <button
-            key={entry.path}
-            className={cn(
-              "flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-xs transition-colors",
-              entry.type === "directory"
-                ? "text-muted-foreground"
-                : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-            )}
-            style={{ paddingLeft: `${entry.depth * 12 + 6}px` }}
-            disabled={entry.type === "directory"}
-            onClick={() => onSelectPath(entry.path)}
-          >
-            {entry.type === "directory" ? (
-              <Folder className="h-3.5 w-3.5 shrink-0 text-yellow-500" />
-            ) : (
-              <FileText className="h-3.5 w-3.5 shrink-0 text-blue-400" />
-            )}
-            <span className="truncate">{entry.name}</span>
-          </button>
-        ))}
-      </div>
-    </ScrollArea>
-  );
-}
-
-function flattenTree(tree: WorkspaceTreeEntry, depth = 0): Array<WorkspaceTreeEntry & { depth: number }> {
-  const current = { ...tree, depth };
-  const children = tree.children?.flatMap((child) => flattenTree(child, depth + 1)) ?? [];
-  return [current, ...children];
 }
 
 function runWorkspaceOptions(

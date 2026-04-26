@@ -105,6 +105,7 @@ type Agent struct {
 	Kind               string            `json:"kind"`
 	Name               string            `json:"name"`
 	Handle             string            `json:"handle"`
+	Description        string            `json:"description"`
 	Model              string            `json:"model"`
 	Effort             string            `json:"effort"`
 	ConfigWorkspaceID  string            `json:"config_workspace_id"`

@@ -85,24 +85,45 @@ func TestHTTPAgentCreateAndUpdateRoundTripsEffort(t *testing.T) {
 
 	var created domain.Agent
 	postJSON(t, ts.URL+"/api/organizations/"+bootstrap.Organization.ID+"/agents", bootstrap.SessionToken, map[string]any{
-		"name":      "Planner",
-		"handle":    "planner",
-		"kind":      "codex",
-		"model":     "gpt-test",
-		"effort":    "medium",
-		"fast_mode": true,
+		"name":        "Planner",
+		"description": "Plans implementation work",
+		"handle":      "planner",
+		"kind":        "codex",
+		"model":       "gpt-test",
+		"effort":      "medium",
+		"fast_mode":   true,
 	}, http.StatusOK, &created)
-	if created.Effort != "medium" || !created.FastMode {
+	if created.Effort != "medium" || !created.FastMode || created.Description != "Plans implementation work" {
 		t.Fatalf("created agent = %#v", created)
+	}
+	var memory struct {
+		Body string `json:"body"`
+	}
+	getJSON(t, ts.URL+"/api/workspaces/"+created.ConfigWorkspaceID+"/files?path=memory.md", bootstrap.SessionToken, http.StatusOK, &memory)
+	if !strings.Contains(memory.Body, "Name: Planner") || !strings.Contains(memory.Body, "Description: Plans implementation work") {
+		t.Fatalf("memory.md = %q", memory.Body)
 	}
 
 	var updated domain.Agent
 	patchJSON(t, ts.URL+"/api/agents/"+created.ID, bootstrap.SessionToken, map[string]any{
-		"effort":    "high",
-		"fast_mode": false,
+		"description": "Updated planner",
+		"effort":      "high",
+		"fast_mode":   false,
 	}, http.StatusOK, &updated)
-	if updated.Effort != "high" || updated.Model != "gpt-test" || updated.FastMode {
+	if updated.Effort != "high" || updated.Model != "gpt-test" || updated.FastMode || updated.Description != "Updated planner" {
 		t.Fatalf("updated agent = %#v", updated)
+	}
+
+	deleteJSON(t, ts.URL+"/api/agents/"+created.ID, bootstrap.SessionToken, http.StatusNoContent)
+
+	var recreated domain.Agent
+	postJSON(t, ts.URL+"/api/organizations/"+bootstrap.Organization.ID+"/agents", bootstrap.SessionToken, map[string]any{
+		"name":   "Planner",
+		"handle": "planner",
+		"kind":   "codex",
+	}, http.StatusOK, &recreated)
+	if recreated.ID == created.ID || recreated.Handle != "planner" {
+		t.Fatalf("recreated agent = %#v, deleted agent = %#v", recreated, created)
 	}
 }
 
@@ -270,6 +291,9 @@ func TestHTTPWorkspaceFilesRejectTraversalAndRoundTripText(t *testing.T) {
 
 	getJSON(t, ts.URL+"/api/workspaces/"+bootstrap.Workspace.ID+"/files?path=../secret", bootstrap.SessionToken, http.StatusBadRequest, nil)
 	putJSON(t, ts.URL+"/api/workspaces/"+bootstrap.Workspace.ID+"/files?path=/tmp/secret", bootstrap.SessionToken, map[string]string{"body": "bad"}, http.StatusBadRequest, nil)
+	deleteJSON(t, ts.URL+"/api/workspaces/"+bootstrap.Workspace.ID+"/files?path=/tmp/secret", bootstrap.SessionToken, http.StatusBadRequest)
+	deleteJSON(t, fileURL, bootstrap.SessionToken, http.StatusNoContent)
+	getJSON(t, fileURL, bootstrap.SessionToken, http.StatusNotFound, nil)
 }
 
 func TestHTTPWorkspaceMetadataAndProjectWorkspacePathUpdate(t *testing.T) {

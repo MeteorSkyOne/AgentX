@@ -85,6 +85,7 @@ func (a *App) Bootstrap(ctx context.Context, req BootstrapRequest) (BootstrapRes
 	agentName := a.defaultAgentName()
 	agentKind := a.defaultAgentKind()
 	agentHandle := strings.ToLower(strings.TrimSpace(agentKind)) + "-default"
+	agentDescription := "Default " + agentName + " coding agent"
 	if strings.TrimSpace(agentHandle) == "-default" {
 		agentHandle = defaultHandle(agentName, agentKind)
 	}
@@ -106,6 +107,7 @@ func (a *App) Bootstrap(ctx context.Context, req BootstrapRequest) (BootstrapRes
 		Kind:               agentKind,
 		Name:               agentName,
 		Handle:             agentHandle,
+		Description:        agentDescription,
 		Model:              a.defaultAgentModel(),
 		ConfigWorkspaceID:  workspace.ID,
 		DefaultWorkspaceID: workspace.ID,
@@ -167,6 +169,9 @@ func (a *App) Bootstrap(ctx context.Context, req BootstrapRequest) (BootstrapRes
 			return err
 		}
 		if err := tx.Agents().Create(ctx, agent); err != nil {
+			return err
+		}
+		if err := seedAgentMemoryFile(workspace.Path, agent); err != nil {
 			return err
 		}
 		if err := tx.ChannelAgents().ReplaceForChannel(ctx, channel.ID, []domain.ChannelAgent{channelAgent}); err != nil {
