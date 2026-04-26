@@ -1,7 +1,10 @@
-import { memo, type ReactNode } from "react";
+import { lazy, memo, Suspense, type ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { CodeBlock } from "./CodeBlock";
+
+const CodeBlock = lazy(() =>
+  import("./CodeBlock").then((module) => ({ default: module.CodeBlock }))
+);
 
 const MENTION_RE = /(@[A-Za-z0-9][A-Za-z0-9_-]*)/g;
 
@@ -27,7 +30,11 @@ function renderMentions(text: string): ReactNode[] {
 
 const components: Components = {
   pre: ({ children }) => <>{children}</>,
-  code: CodeBlock as Components["code"],
+  code: ({ node: _node, ...props }) => (
+    <Suspense fallback={<code className={props.className}>{props.children}</code>}>
+      <CodeBlock {...props} />
+    </Suspense>
+  ),
   a: ({ href, children, node: _node, ...props }) => {
     const isRealUrl =
       href &&
