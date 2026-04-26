@@ -345,7 +345,7 @@ export function Shell({
     <div className="flex h-screen w-screen">
       {/* Project Rail */}
       <TooltipProvider delayDuration={0}>
-        <div className="flex h-full w-[72px] flex-col items-center gap-2 bg-sidebar py-3">
+        <div className="flex h-full w-[72px] flex-col items-center gap-2 border-r border-sidebar-border/70 bg-sidebar py-3">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
