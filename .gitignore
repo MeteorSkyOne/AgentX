@@ -1,6 +1,7 @@
 .worktrees
 .worktrees/
 /agentx
+/bin/
 .agentx/
 .agentx-e2e/
 .playwright-libs/

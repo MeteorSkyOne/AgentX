@@ -56,6 +56,16 @@ cd web && pnpm install && pnpm run dev
 
 Open `http://127.0.0.1:5173` and bootstrap with `dev-token`.
 
+## Production
+
+Build the web client, compile the Go server, and serve both from one process:
+
+```sh
+make prod
+```
+
+The production server listens on `127.0.0.1:8080` by default. Set `AGENTX_ADDR` to change it. Set `AGENTX_ADMIN_TOKEN` to use a stable bootstrap token; otherwise the script generates and prints a token for the current run.
+
 ## Tests
 
 ```sh
