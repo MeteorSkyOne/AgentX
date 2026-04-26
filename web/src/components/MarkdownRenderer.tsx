@@ -28,11 +28,19 @@ function renderMentions(text: string): ReactNode[] {
 const components: Components = {
   pre: ({ children }) => <>{children}</>,
   code: CodeBlock as Components["code"],
-  a: ({ href, children, node: _node, ...props }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
-      {children}
-    </a>
-  ),
+  a: ({ href, children, node: _node, ...props }) => {
+    const isRealUrl =
+      href &&
+      /^https?:\/\/|^mailto:|^tel:/.test(href);
+    if (!isRealUrl) {
+      return <>{children}</>;
+    }
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+        {children}
+      </a>
+    );
+  },
   p: ({ children, node: _node, ...props }) => {
     if (typeof children === "string") {
       return <p {...props}>{renderMentions(children)}</p>;
