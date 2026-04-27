@@ -76,8 +76,10 @@ test("sends messages from the composer and receives agent output", async ({ page
   await page.keyboard.insertText("line two");
   await page.getByRole("button", { name: "Send" }).click();
 
-  await expect(page.getByText("line one")).toBeVisible();
-  await expect(page.getByText("line two")).toBeVisible();
+  const messages = page.getByLabel("Messages");
+  await expect(messages.getByText("line one line two", { exact: true })).toBeVisible();
+  await expect(messages.getByText("Echo: line one line two", { exact: true })).toBeVisible();
+  await expect(composer).toHaveValue("");
 });
 
 test("opens and closes the bound agent details panel", async ({ page }) => {
@@ -208,5 +210,12 @@ test("confirms before deleting an agent", async ({ page }) => {
   await page.getByRole("button", { name: "Create agent" }).click();
   await page.getByRole("dialog").getByLabel("New agent name").fill("Disposable");
   await page.getByRole("dialog").getByRole("button", { name: "Create", exact: true }).click();
-  await expect(page.getByText("Agent @disposable already exists. Choose a different handle.")).toBeVisible();
+  await expect(page.getByLabel("Bound agent").getByRole("button", { name: "Disposable" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Agent settings" }).click();
+  const cleanupPanel = page.getByLabel("Agent details");
+  await cleanupPanel.getByLabel("Agent", { exact: true }).selectOption({ label: "Disposable (@disposable)" });
+  await cleanupPanel.getByRole("button", { name: "Delete agent" }).click();
+  await page.getByRole("dialog", { name: "Delete agent?" }).getByRole("button", { name: "Delete" }).click();
+  await expect(cleanupPanel.getByText("Deleted")).toBeVisible();
 });

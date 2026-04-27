@@ -1,5 +1,25 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const localNoProxyEntries = ["127.0.0.1", "localhost", "::1"];
+
+function mergeNoProxy(...values: Array<string | undefined>): string {
+  const entries = new Set<string>();
+  for (const value of values) {
+    for (const entry of (value ?? "").split(",")) {
+      const trimmed = entry.trim();
+      if (trimmed) entries.add(trimmed);
+    }
+  }
+  for (const entry of localNoProxyEntries) {
+    entries.add(entry);
+  }
+  return Array.from(entries).join(",");
+}
+
+const noProxy = mergeNoProxy(process.env.NO_PROXY, process.env.no_proxy);
+process.env.NO_PROXY = noProxy;
+process.env.no_proxy = noProxy;
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
