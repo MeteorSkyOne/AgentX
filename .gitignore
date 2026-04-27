@@ -2,6 +2,7 @@
 .worktrees/
 /agentx
 /bin/
+node_modules/
 .agentx/
 .agentx-e2e/
 .playwright-libs/
