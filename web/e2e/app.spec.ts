@@ -102,7 +102,7 @@ test("sends messages from the composer and receives agent output", async ({ page
 test("opens and closes the bound agent details panel", async ({ page }) => {
   await signIn(page);
 
-  await page.getByLabel("Bound agent").getByRole("button", { name: /Fake Agent/ }).click();
+  await page.getByLabel("Agents").getByRole("button", { name: /Fake Agent/ }).click();
   await expect(page.getByLabel("Agent details")).toBeVisible();
   await page.getByLabel("Agent details").getByRole("button", { name: "Close" }).click();
   await expect(page.getByLabel("Agent details")).toHaveCount(0);
@@ -112,7 +112,7 @@ test("opens and closes the bound agent details panel", async ({ page }) => {
   await expect(agentPanel.getByRole("heading", { name: "Fake Agent" })).toBeVisible();
   await expect(agentPanel.getByText("Fake runtime")).toBeVisible();
   await expect(agentPanel.getByText("fake-echo")).toBeVisible();
-  await expect(agentPanel.getByText("channel")).toBeVisible();
+  await expect(agentPanel.getByText("Channel", { exact: true })).toBeVisible();
   await expect(agentPanel.locator(".workspace-path").getByText(/fake-default/)).toBeVisible();
   await expect(agentPanel.getByText("empty")).toBeVisible();
 
@@ -215,15 +215,18 @@ test("manages projects, channel agents, threads, and workspace files", async ({ 
   const panel = page.getByLabel("Agent details");
   await expect(panel.getByLabel("Agent", { exact: true })).toContainText(agentName);
 
-  // Switch to Members tab and manage channel bindings
-  await panel.getByRole("tab", { name: /Members/ }).click();
-  await panel.locator(".picker-row").filter({ hasText: "Fake Agent" }).getByRole("checkbox").check();
-  await panel.locator(".picker-row").filter({ hasText: agentName }).getByRole("checkbox").check();
-  await panel.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByLabel("Bound agent").getByRole("button", { name: agentName })).toBeVisible();
+  // Use the standalone Members panel to manage channel bindings.
+  await panel.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Members" }).click();
+  const members = page.getByLabel("Channel members");
+  await expect(members).toBeVisible();
+  await members.locator(".picker-row").filter({ hasText: "Fake Agent" }).getByRole("checkbox").check();
+  await members.locator(".picker-row").filter({ hasText: agentName }).getByRole("checkbox").check();
+  await members.getByRole("button", { name: "Save" }).click();
+  await expect(members.locator(".picker-row").filter({ hasText: agentName }).getByRole("checkbox")).toBeChecked();
+  await members.getByRole("button", { name: "Close members" }).click();
 
-  // Close panel, test multi-agent messaging
-  await page.getByRole("button", { name: "Agent settings" }).click();
+  // Test multi-agent messaging.
   const composer = page.getByRole("textbox", { name: "Message" });
   await composer.fill("multi ping");
   await page.getByRole("button", { name: "Send" }).click();
@@ -290,18 +293,21 @@ test("confirms before deleting an agent", async ({ page }) => {
   await page.getByRole("dialog", { name: "Delete agent?" }).getByRole("button", { name: "Delete" }).click();
   await expect(panel.getByText("Deleted")).toBeVisible();
 
-  await page.getByRole("button", { name: "Agent settings" }).click();
+  await panel.getByRole("button", { name: "Close" }).click();
   await page.getByRole("button", { name: "Members" }).click();
   await expect(page.getByLabel("Channel members").getByText(disposableName)).toHaveCount(0);
+  await page.getByLabel("Channel members").getByRole("button", { name: "Close members" }).click();
 
+  const cleanupHandle = uniqueHandle(test.info(), "cleanup");
+  const cleanupName = cleanupHandle.replace(/_/g, " ");
   await page.getByRole("button", { name: "Create agent" }).click();
-  await page.getByRole("dialog").getByLabel("New agent name").fill(disposableName);
+  await page.getByRole("dialog").getByLabel("New agent name").fill(cleanupName);
+  await page.getByRole("dialog").getByLabel("New agent handle").fill(cleanupHandle);
   await page.getByRole("dialog").getByRole("button", { name: "Create", exact: true }).click();
-  await expect(page.getByLabel("Bound agent").getByRole("button", { name: disposableName })).toBeVisible();
 
   await page.getByRole("button", { name: "Agent settings" }).click();
   const cleanupPanel = page.getByLabel("Agent details");
-  await cleanupPanel.getByLabel("Agent", { exact: true }).selectOption({ label: `${disposableName} (@${disposableHandle})` });
+  await cleanupPanel.getByLabel("Agent", { exact: true }).selectOption({ label: `${cleanupName} (@${cleanupHandle})` });
   await cleanupPanel.getByRole("button", { name: "Delete agent" }).click();
   await page.getByRole("dialog", { name: "Delete agent?" }).getByRole("button", { name: "Delete" }).click();
   await expect(cleanupPanel.getByText("Deleted")).toBeVisible();

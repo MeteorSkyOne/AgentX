@@ -77,7 +77,7 @@ test("mobile navigation, messaging, and side panels are usable", async ({ page }
   await page.getByRole("button", { name: "Send" }).click();
   const messages = page.getByLabel("Messages");
   await expect(messages.getByText(messageText, { exact: true })).toBeVisible();
-  await expect(messages.getByText(`Echo: ${messageText}`, { exact: true })).toBeVisible();
+  await expect(messages.getByText(`Echo: ${messageText}`, { exact: true }).first()).toBeVisible();
   await expect(composer).toHaveValue("");
   await expectNoHorizontalOverflow(page);
 
