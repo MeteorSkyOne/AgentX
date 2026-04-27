@@ -1,6 +1,8 @@
 import type { Agent, Channel, ConversationAgentContext, Thread, Workspace } from "../../api/types";
 import type { BrowserNotificationPermission } from "../../notifications/browser";
 
+export const AGENT_EFFORT_OPTIONS = ["low", "medium", "high", "xhigh"] as const;
+
 export function runWorkspaceOptions(
   agent: Agent,
   boundAgents: ConversationAgentContext[],

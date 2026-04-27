@@ -75,6 +75,7 @@ import {
 } from "./WorkspaceFileBrowser";
 import type { ShellProps } from "./shell/types";
 import {
+  AGENT_EFFORT_OPTIONS,
   agentToneColor,
   blurActiveElement,
   browserPermissionLabel,
@@ -1891,17 +1892,20 @@ export function Shell({
               </div>
               <div className="space-y-2">
                 <Label htmlFor="new-agent-effort">Effort</Label>
-                <Select
+                <Input
                   id="new-agent-effort"
                   value={newAgentEffort}
                   onChange={(e) => setNewAgentEffort(e.target.value)}
+                  list="new-agent-effort-suggestions"
+                  placeholder="default or custom"
                   aria-label="New agent effort"
-                >
-                  <option value="">Default</option>
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </Select>
+                  autoComplete="off"
+                />
+                <datalist id="new-agent-effort-suggestions">
+                  {AGENT_EFFORT_OPTIONS.map((option) => (
+                    <option key={option} value={option} />
+                  ))}
+                </datalist>
               </div>
             </div>
             <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">

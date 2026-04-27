@@ -43,6 +43,7 @@ import {
 import { WorkspaceFileBrowser } from "../WorkspaceFileBrowser";
 import type { ShellProps } from "./types";
 import {
+  AGENT_EFFORT_OPTIONS,
   agentKindLabel,
   agentToneColor,
   defaultAgentInstructionPath,
@@ -337,17 +338,21 @@ export function AgentDetailsPanel({
                 </div>
               </div>
               <div className="space-y-2">
-                <Label className="text-xs">Effort</Label>
-                <Select
+                <Label htmlFor="agent-effort" className="text-xs">Effort</Label>
+                <Input
+                  id="agent-effort"
                   value={effort}
                   onChange={(e) => setEffort(e.target.value)}
+                  list="agent-effort-suggestions"
+                  placeholder="default or custom"
                   aria-label="Agent effort"
-                >
-                  <option value="">Default</option>
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </Select>
+                  autoComplete="off"
+                />
+                <datalist id="agent-effort-suggestions">
+                  {AGENT_EFFORT_OPTIONS.map((option) => (
+                    <option key={option} value={option} />
+                  ))}
+                </datalist>
               </div>
               <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
                 <Checkbox

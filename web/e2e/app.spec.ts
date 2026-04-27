@@ -133,6 +133,25 @@ test("opens and closes the bound agent details panel", async ({ page }) => {
   await expect(page.getByLabel("Agent details")).toHaveCount(0);
 });
 
+test("agent settings accepts a custom effort value", async ({ page }, testInfo) => {
+  await signIn(page);
+  const customEffort = uniqueHandle(testInfo, "custom_effort");
+
+  await page.getByRole("button", { name: "Agent settings" }).click();
+  const panel = page.getByLabel("Agent details");
+  await panel.getByLabel("Agent effort").fill(customEffort);
+  await panel.getByRole("button", { name: "Save" }).click();
+  await expect(panel.getByText("Saved")).toBeVisible();
+  await expect(panel.getByLabel("Agent effort")).toHaveValue(customEffort);
+
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+  await page.getByRole("button", { name: "Agent settings" }).click();
+  await expect(
+    page.getByLabel("Agent details").getByLabel("Agent effort")
+  ).toHaveValue(customEffort);
+});
+
 test("keeps an empty project workspace path draft while editing", async ({ page }) => {
   await signIn(page);
 
