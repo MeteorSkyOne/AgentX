@@ -74,6 +74,29 @@ SQLite with Goose migrations in `internal/store/sqlite/migrations/`. The store i
 
 - Reuse components as much as possible, avoid reinventing the wheel.
 
+## Commit Messages
+
+Use Conventional Commits for all commits:
+
+```text
+<type>(<scope>): <summary>
+```
+
+- `type`: one of `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `build`, or `ci`.
+- `scope`: optional but preferred; use the main area touched, such as `api`, `store`, `web`, `e2e`, `scripts`, `runtime`, or `config`.
+- `summary`: imperative, lowercase, no trailing period, and keep it under 72 characters.
+- Use `feat` for user-visible capabilities, `fix` for behavior corrections, `refactor` for restructuring without intended behavior change, and `chore` only for maintenance that does not fit the other types.
+- If a commit mixes unrelated changes, split it before committing whenever practical.
+
+Examples:
+
+```text
+feat(web): add agent details panel
+fix(scripts): handle ctrl-c as clean dev shutdown
+refactor(store): split sqlite store by resource
+test(e2e): isolate playwright ports from dev server
+```
+
 ## Frontend
 
 React 19 app in `web/`. State management via TanStack Query for server state and a custom message state reducer (`web/src/messages/state.ts`) for real-time streaming. WebSocket hook in `web/src/ws/useConversationSocket.ts` handles subscribe/unsubscribe and event dispatch. UI uses Radix primitives with Tailwind 4. Composer supports slash command autocomplete and `@agent` mentions. Workspace file tree (`web/src/components/FileTree.tsx`) shows agent working directory contents. Markdown rendering is lazy-loaded.
