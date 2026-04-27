@@ -24,31 +24,14 @@ fi
 if [[ "${AGENTX_PROD_DRY_RUN:-}" == "1" ]]; then
   echo "AGENTX_ADMIN_TOKEN=${AGENTX_ADMIN_TOKEN:-<generated>}"
   echo "AGENTX_ADDR=$backend_addr"
-  echo "pnpm install --frozen-lockfile"
-  echo "pnpm run build"
-  echo "go build -o $binary ./cmd/agentx"
+  echo "bash scripts/build.sh $binary"
   echo "$binary"
   exit 0
 fi
 
-if ! command -v pnpm >/dev/null 2>&1; then
-  echo "pnpm is required. If Node.js Corepack is available, run: corepack enable" >&2
-  exit 1
-fi
-
-echo "Building AgentX web..."
-(
-  cd web
-  pnpm install --frozen-lockfile
-  pnpm run build
-)
-
-echo "Building AgentX server..."
-mkdir -p "$bin_dir"
-go build -o "$binary" ./cmd/agentx
+bash scripts/build.sh "$binary"
 
 echo "Starting AgentX production server at http://$backend_addr"
-echo "Setup token: $setup_token"
 echo "Press Ctrl+C to stop."
 
 export AGENTX_ADMIN_TOKEN="$setup_token"

@@ -64,7 +64,9 @@ Build the web client, compile the Go server, and serve both from one process:
 make prod
 ```
 
-The production server listens on `127.0.0.1:8080` by default. Set `AGENTX_ADDR` to change it. Set `AGENTX_ADMIN_TOKEN` to use a stable first-run setup token; otherwise the script generates and prints a token for the current run.
+Production builds embed the generated web assets into the `agentx` binary, so the compiled server can be moved and run without a separate `web/dist` directory.
+
+The production server listens on `127.0.0.1:8080` by default. Set `AGENTX_ADDR` to change it. Set `AGENTX_ADMIN_TOKEN` to use a stable first-run setup token; otherwise the script generates a token for the current run. When initial setup is still pending, the server prints the setup token to stdout only; it is not written to the startup log file.
 
 Reset the local admin username and password directly against the configured SQLite database:
 

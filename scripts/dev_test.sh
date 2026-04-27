@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 script="$repo_root/scripts/dev.sh"
 worktree_script="$repo_root/scripts/dev-worktree.sh"
 prod_script="$repo_root/scripts/prod.sh"
+build_script="$repo_root/scripts/build.sh"
 
 if [[ ! -f "$script" ]]; then
   echo "missing scripts/dev.sh" >&2
@@ -18,10 +19,15 @@ if [[ ! -f "$prod_script" ]]; then
   echo "missing scripts/prod.sh" >&2
   exit 1
 fi
+if [[ ! -f "$build_script" ]]; then
+  echo "missing scripts/build.sh" >&2
+  exit 1
+fi
 
 bash -n "$script"
 bash -n "$worktree_script"
 bash -n "$prod_script"
+bash -n "$build_script"
 
 output="$(
   cd "$repo_root"
@@ -70,18 +76,9 @@ case "$prod_output" in
 esac
 
 case "$prod_output" in
-  *"pnpm run build"* ) ;;
+  *"bash scripts/build.sh bin/agentx"* ) ;;
   * )
-    echo "prod dry run did not include web production build" >&2
-    echo "$prod_output" >&2
-    exit 1
-    ;;
-esac
-
-case "$prod_output" in
-  *"go build -o bin/agentx ./cmd/agentx"* ) ;;
-  * )
-    echo "prod dry run did not include server build" >&2
+    echo "prod dry run did not include embedded production build" >&2
     echo "$prod_output" >&2
     exit 1
     ;;

@@ -5,7 +5,7 @@ test:
 	bash scripts/dev_test.sh
 
 build:
-	go build ./cmd/agentx
+	bash scripts/build.sh agentx
 
 run:
 	go run ./cmd/agentx

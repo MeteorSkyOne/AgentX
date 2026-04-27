@@ -97,7 +97,6 @@ pids+=("$!")
 echo ""
 echo "Branch:          $branch"
 echo "Worktree:        $worktree_dir"
-echo "Setup token:     $setup_token"
 echo "Press Ctrl+C to stop and clean up."
 
 set +e

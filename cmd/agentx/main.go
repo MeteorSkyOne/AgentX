@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -26,6 +27,7 @@ import (
 	"github.com/meteorsky/agentx/internal/runtime/codex"
 	"github.com/meteorsky/agentx/internal/runtime/fake"
 	sqlitestore "github.com/meteorsky/agentx/internal/store/sqlite"
+	"github.com/meteorsky/agentx/internal/webdist"
 )
 
 const webDistDir = "web/dist"
@@ -90,10 +92,14 @@ func main() {
 			}),
 		},
 	})
+	if err := printSetupTokenIfNeeded(ctx, os.Stdout, st.Users(), cfg.AdminToken); err != nil {
+		slog.Error("check setup status", "error", err)
+		os.Exit(1)
+	}
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           newHTTPHandler(httpapi.NewRouter(a, bus), webDistDir),
+		Handler:           newHTTPHandler(httpapi.NewRouter(a, bus), webdist.FS(), resolveWebDistDir(webDistDir)),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -212,14 +218,73 @@ func configureLogging(startedAt time.Time) (*os.File, string, error) {
 	return file, path, nil
 }
 
-func newHTTPHandler(apiHandler http.Handler, distDir string) http.Handler {
-	if _, err := os.Stat(filepath.Join(distDir, "index.html")); err != nil {
+type passwordStatusStore interface {
+	HasPassword(ctx context.Context) (bool, error)
+}
+
+func printSetupTokenIfNeeded(ctx context.Context, stdout io.Writer, users passwordStatusStore, setupToken string) error {
+	hasPassword, err := users.HasPassword(ctx)
+	if err != nil {
+		return err
+	}
+	if hasPassword {
+		return nil
+	}
+	_, err = fmt.Fprintf(stdout, "Setup token: %s\n", strings.TrimSpace(setupToken))
+	return err
+}
+
+func newHTTPHandler(apiHandler http.Handler, webFS fs.FS, distDir string) http.Handler {
+	webFS = resolveWebFS(webFS, distDir)
+	if webFS == nil {
 		return apiHandler
 	}
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", apiHandler)
 	mux.Handle("/healthz", apiHandler)
-	mux.Handle("/", http.FileServer(http.Dir(distDir)))
+	mux.Handle("/", http.FileServer(http.FS(webFS)))
 	return mux
+}
+
+func resolveWebFS(webFS fs.FS, distDir string) fs.FS {
+	if hasWebIndex(webFS) {
+		return webFS
+	}
+	if _, err := os.Stat(filepath.Join(distDir, "index.html")); err == nil {
+		return os.DirFS(distDir)
+	}
+	return nil
+}
+
+func hasWebIndex(webFS fs.FS) bool {
+	if webFS == nil {
+		return false
+	}
+	_, err := fs.Stat(webFS, "index.html")
+	return err == nil
+}
+
+func resolveWebDistDir(distDir string) string {
+	return resolveWebDistDirFromExecutable(distDir, os.Executable)
+}
+
+func resolveWebDistDirFromExecutable(distDir string, executablePath func() (string, error)) string {
+	candidates := []string{distDir}
+	if !filepath.IsAbs(distDir) {
+		if executable, err := executablePath(); err == nil && executable != "" {
+			executableDir := filepath.Dir(executable)
+			candidates = append(candidates,
+				filepath.Join(executableDir, distDir),
+				filepath.Join(executableDir, "..", distDir),
+			)
+		}
+	}
+
+	for _, candidate := range candidates {
+		if _, err := os.Stat(filepath.Join(candidate, "index.html")); err == nil {
+			return candidate
+		}
+	}
+	return distDir
 }

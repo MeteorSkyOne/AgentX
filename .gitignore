@@ -2,6 +2,7 @@
 .worktrees/
 /agentx
 /bin/
+/internal/webdist/dist/
 logs/
 node_modules/
 .agentx/

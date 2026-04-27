@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/meteorsky/agentx/internal/app"
@@ -113,6 +114,69 @@ func TestConfigureLoggingCreatesStartupLogFile(t *testing.T) {
 	}
 }
 
+func TestPrintSetupTokenIfNeededWritesOnlyWhenSetupIsPending(t *testing.T) {
+	ctx := context.Background()
+	var stdout bytes.Buffer
+	users := fakePasswordStatusStore{hasPassword: false}
+
+	if err := printSetupTokenIfNeeded(ctx, &stdout, users, " secret-token "); err != nil {
+		t.Fatal(err)
+	}
+	if got := stdout.String(); got != "Setup token: secret-token\n" {
+		t.Fatalf("stdout = %q, want setup token", got)
+	}
+
+	stdout.Reset()
+	users.hasPassword = true
+	if err := printSetupTokenIfNeeded(ctx, &stdout, users, "secret-token"); err != nil {
+		t.Fatal(err)
+	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("stdout = %q, want no setup token", got)
+	}
+}
+
+func TestPrintSetupTokenIfNeededDoesNotWriteTokenToLogFile(t *testing.T) {
+	t.Chdir(t.TempDir())
+	previousLogger := slog.Default()
+	t.Cleanup(func() {
+		slog.SetDefault(previousLogger)
+	})
+
+	file, path, err := configureLogging(time.Date(2026, 4, 27, 15, 4, 5, 0, time.Local))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	if err := printSetupTokenIfNeeded(context.Background(), &stdout, fakePasswordStatusStore{}, "secret-token"); err != nil {
+		t.Fatal(err)
+	}
+	slog.Info("normal startup log")
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(stdout.String(), "secret-token") {
+		t.Fatalf("stdout = %q, want setup token", stdout.String())
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "secret-token") {
+		t.Fatalf("log file contains setup token: %q", string(body))
+	}
+}
+
+type fakePasswordStatusStore struct {
+	hasPassword bool
+	err         error
+}
+
+func (s fakePasswordStatusStore) HasPassword(context.Context) (bool, error) {
+	return s.hasPassword, s.err
+}
+
 func TestNewHTTPHandlerServesWebDistAndKeepsAPI(t *testing.T) {
 	distDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(distDir, "index.html"), []byte("app shell"), 0o644); err != nil {
@@ -131,7 +195,7 @@ func TestNewHTTPHandlerServesWebDistAndKeepsAPI(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	handler := newHTTPHandler(api, distDir)
+	handler := newHTTPHandler(api, nil, distDir)
 
 	indexRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(indexRecorder, httptest.NewRequest(http.MethodGet, "/", nil))
@@ -169,7 +233,7 @@ func TestNewHTTPHandlerUsesAPIWhenWebDistMissing(t *testing.T) {
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = w.Write([]byte(r.URL.Path))
 	})
-	handler := newHTTPHandler(api, filepath.Join(t.TempDir(), "missing"))
+	handler := newHTTPHandler(api, nil, filepath.Join(t.TempDir(), "missing"))
 
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/any-path", nil))
@@ -178,6 +242,77 @@ func TestNewHTTPHandlerUsesAPIWhenWebDistMissing(t *testing.T) {
 	}
 	if body := recorder.Body.String(); body != "/any-path" {
 		t.Fatalf("GET /any-path body = %q, want %q", body, "/any-path")
+	}
+}
+
+func TestNewHTTPHandlerServesEmbeddedWebDist(t *testing.T) {
+	api := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected API fallback path: %s", r.URL.Path)
+	})
+	webFS := fstest.MapFS{
+		"index.html":    {Data: []byte("embedded app shell")},
+		"assets/app.js": {Data: []byte("console.log('embedded agentx')")},
+	}
+	handler := newHTTPHandler(api, webFS, filepath.Join(t.TempDir(), "missing"))
+
+	indexRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(indexRecorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	if indexRecorder.Code != http.StatusOK {
+		t.Fatalf("GET / status = %d, want %d", indexRecorder.Code, http.StatusOK)
+	}
+	if body := indexRecorder.Body.String(); body != "embedded app shell" {
+		t.Fatalf("GET / body = %q, want %q", body, "embedded app shell")
+	}
+
+	assetRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(assetRecorder, httptest.NewRequest(http.MethodGet, "/assets/app.js", nil))
+	if assetRecorder.Code != http.StatusOK {
+		t.Fatalf("GET /assets/app.js status = %d, want %d", assetRecorder.Code, http.StatusOK)
+	}
+	if body := assetRecorder.Body.String(); body != "console.log('embedded agentx')" {
+		t.Fatalf("GET /assets/app.js body = %q", body)
+	}
+}
+
+func TestResolveWebDistDirPrefersWorkingDirectory(t *testing.T) {
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	mustWriteIndex(t, filepath.Join(cwd, webDistDir))
+
+	executable := filepath.Join(t.TempDir(), "bin", "agentx")
+	got := resolveWebDistDirFromExecutable(webDistDir, func() (string, error) {
+		return executable, nil
+	})
+
+	if got != webDistDir {
+		t.Fatalf("resolveWebDistDirFromExecutable() = %q, want %q", got, webDistDir)
+	}
+}
+
+func TestResolveWebDistDirFindsDistBesideBinaryParent(t *testing.T) {
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+
+	repoRoot := t.TempDir()
+	mustWriteIndex(t, filepath.Join(repoRoot, webDistDir))
+	executable := filepath.Join(repoRoot, "bin", "agentx")
+
+	got := resolveWebDistDirFromExecutable(webDistDir, func() (string, error) {
+		return executable, nil
+	})
+	want := filepath.Join(repoRoot, webDistDir)
+	if got != want {
+		t.Fatalf("resolveWebDistDirFromExecutable() = %q, want %q", got, want)
+	}
+}
+
+func mustWriteIndex(t *testing.T, distDir string) {
+	t.Helper()
+	if err := os.MkdirAll(distDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(distDir, "index.html"), []byte("app shell"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

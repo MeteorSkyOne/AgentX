@@ -63,7 +63,6 @@ echo "Starting AgentX web at http://$web_host:$web_port"
 ) &
 pids+=("$!")
 
-echo "Setup token: $setup_token"
 echo "Press Ctrl+C to stop both processes."
 
 set +e
