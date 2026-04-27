@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -89,6 +90,102 @@ func TestSendMessagePersistsUserMessageAndFakeBotReply(t *testing.T) {
 	}
 	if messages[1].Body != "Echo: hello" || messages[1].SenderType != domain.SenderBot {
 		t.Fatalf("second message = %#v", messages[1])
+	}
+}
+
+func TestSendReplyMessageResolvesReferenceAndDeletedPlaceholder(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	original, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "original message",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reply, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "reply message",
+		ReplyToMessageID: original.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply.ReplyToMessageID != original.ID {
+		t.Fatalf("reply_to_message_id = %q, want %q", reply.ReplyToMessageID, original.ID)
+	}
+	if reply.ReplyTo == nil || reply.ReplyTo.Deleted || reply.ReplyTo.Body != original.Body || reply.ReplyTo.SenderType != domain.SenderUser {
+		t.Fatalf("reply reference = %#v, want live original", reply.ReplyTo)
+	}
+
+	if err := app.DeleteMessage(ctx, original.ID); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := app.ListMessages(ctx, domain.ConversationChannel, bootstrap.Channel.ID, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range messages {
+		if message.ID == reply.ID {
+			if message.ReplyTo == nil || !message.ReplyTo.Deleted || message.ReplyTo.MessageID != original.ID {
+				t.Fatalf("reply reference after delete = %#v, want deleted placeholder", message.ReplyTo)
+			}
+			return
+		}
+	}
+	t.Fatalf("reply message %s missing from %#v", reply.ID, messages)
+}
+
+func TestSendReplyMessageRejectsInvalidReference(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "reply",
+		ReplyToMessageID: "msg_missing",
+	}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("missing reference error = %v, want ErrInvalidInput", err)
+	}
+
+	otherChannel, err := app.CreateChannel(ctx, bootstrap.Project.ID, "other", domain.ChannelTypeText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherMessage := domain.Message{
+		ID:               "msg_other_channel",
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   otherChannel.ID,
+		SenderType:       domain.SenderUser,
+		SenderID:         bootstrap.User.ID,
+		Kind:             domain.MessageText,
+		Body:             "other",
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := app.store.Messages().Create(ctx, otherMessage); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "reply",
+		ReplyToMessageID: otherMessage.ID,
+	}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("cross-conversation reference error = %v, want ErrInvalidInput", err)
 	}
 }
 
@@ -972,6 +1069,20 @@ func TestSlashPlanUsesClaudePlanPermissionAndStripsTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	referenced := domain.Message{
+		ID:               "msg_plan_reference",
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		SenderType:       domain.SenderUser,
+		SenderID:         bootstrap.User.ID,
+		Kind:             domain.MessageText,
+		Body:             "the existing bug report",
+		CreatedAt:        time.Now().UTC().Add(-time.Minute),
+	}
+	if err := st.Messages().Create(ctx, referenced); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := app.SendMessage(ctx, SendMessageRequest{
 		UserID:           bootstrap.User.ID,
@@ -979,6 +1090,7 @@ func TestSlashPlanUsesClaudePlanPermissionAndStripsTarget(t *testing.T) {
 		ConversationType: domain.ConversationChannel,
 		ConversationID:   bootstrap.Channel.ID,
 		Body:             "/plan @claude-default build the feature",
+		ReplyToMessageID: referenced.ID,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -988,6 +1100,87 @@ func TestSlashPlanUsesClaudePlanPermissionAndStripsTarget(t *testing.T) {
 	}
 	if strings.Contains(input.input.Prompt, "@claude-default") || !strings.Contains(input.input.Prompt, "build the feature") {
 		t.Fatalf("prompt = %q, want stripped target and task", input.input.Prompt)
+	}
+	if !strings.Contains(input.input.Prompt, referenced.Body) {
+		t.Fatalf("prompt = %q, want referenced message body", input.input.Prompt)
+	}
+}
+
+func TestAgentPromptIncludesReplyReferenceOutsideRecentContext(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	capture := &capturingRuntime{sends: make(chan capturedInput, 4)}
+	app := New(st, eventbus.New(), Options{
+		AdminToken:       "secret",
+		DataDir:          t.TempDir(),
+		DefaultAgentKind: domain.AgentKindFake,
+		Runtimes: map[string]agentruntime.Runtime{
+			domain.AgentKindFake: capture,
+		},
+	})
+	bootstrap, err := app.Bootstrap(ctx, BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	baseTime := time.Now().UTC().Add(-2 * time.Hour)
+	referenced := domain.Message{
+		ID:               "msg_old_reference",
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		SenderType:       domain.SenderUser,
+		SenderID:         bootstrap.User.ID,
+		Kind:             domain.MessageText,
+		Body:             "old reference outside recent history",
+		CreatedAt:        baseTime,
+	}
+	if err := st.Messages().Create(ctx, referenced); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Sessions().SetAgentSessionContextStartedAt(ctx, bootstrap.Agent.ID, domain.ConversationChannel, bootstrap.Channel.ID, baseTime.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < runtimeContextMessageLimit+5; i++ {
+		if err := st.Messages().Create(ctx, domain.Message{
+			ID:               fmt.Sprintf("msg_filler_%02d", i),
+			OrganizationID:   bootstrap.Organization.ID,
+			ConversationType: domain.ConversationChannel,
+			ConversationID:   bootstrap.Channel.ID,
+			SenderType:       domain.SenderUser,
+			SenderID:         bootstrap.User.ID,
+			Kind:             domain.MessageText,
+			Body:             fmt.Sprintf("filler %02d", i),
+			CreatedAt:        baseTime.Add(time.Duration(i+2) * time.Minute),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "please handle this",
+		ReplyToMessageID: referenced.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	input := readCapturedInput(t, capture.sends)
+	if !strings.Contains(input.input.Prompt, referenced.Body) {
+		t.Fatalf("prompt = %q, want referenced body outside recent context", input.input.Prompt)
+	}
+	if strings.Contains(input.input.Context, referenced.Body) {
+		t.Fatalf("context = %q, referenced body should not depend on recent history", input.input.Context)
 	}
 }
 

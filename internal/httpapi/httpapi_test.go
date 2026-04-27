@@ -449,6 +449,38 @@ func TestHTTPBoundNonChannelConversationsCanSendAndListMessages(t *testing.T) {
 	}
 }
 
+func TestHTTPSendReplyMessageReturnsResolvedReferenceAndRejectsInvalidTarget(t *testing.T) {
+	env := newTestEnv(t)
+
+	var bootstrap app.BootstrapResult
+	postJSON(t, env.server.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	}, http.StatusOK, &bootstrap)
+
+	var original domain.Message
+	postJSON(t, env.server.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages", bootstrap.SessionToken, map[string]string{
+		"body": "original over http",
+	}, http.StatusOK, &original)
+
+	var reply domain.Message
+	postJSON(t, env.server.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages", bootstrap.SessionToken, map[string]string{
+		"body":                "reply over http",
+		"reply_to_message_id": original.ID,
+	}, http.StatusOK, &reply)
+	if reply.ReplyToMessageID != original.ID {
+		t.Fatalf("reply_to_message_id = %q, want %q", reply.ReplyToMessageID, original.ID)
+	}
+	if reply.ReplyTo == nil || reply.ReplyTo.Deleted || reply.ReplyTo.Body != original.Body {
+		t.Fatalf("reply_to = %#v, want resolved original", reply.ReplyTo)
+	}
+
+	postJSON(t, env.server.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages", bootstrap.SessionToken, map[string]string{
+		"body":                "bad reply",
+		"reply_to_message_id": "msg_missing",
+	}, http.StatusBadRequest, nil)
+}
+
 func TestWebSocketReceivesMessageCreated(t *testing.T) {
 	env := newTestEnv(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

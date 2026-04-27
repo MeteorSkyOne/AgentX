@@ -6,6 +6,7 @@ import {
   mergeMessages,
   messageHistoryLoadingForEvent,
   messageMatchesActiveConversation,
+  removeMessageAndMarkReferencesDeleted,
   streamingRunHasCompletedMessage
 } from "./state";
 
@@ -33,6 +34,51 @@ describe("mergeMessages", () => {
     const result = mergeMessages([live], [older, live]);
 
     expect(result.map((item) => item.id)).toEqual(["msg_old", "msg_live"]);
+  });
+
+  it("refreshes reply previews when the referenced message updates", () => {
+    const original = message("msg_original", "chn_1", "user", "original", "2026-04-25T10:00:01Z");
+    const reply = {
+      ...message("msg_reply", "chn_1", "user", "reply", "2026-04-25T10:00:02Z"),
+      reply_to_message_id: original.id,
+      reply_to: {
+        message_id: original.id,
+        sender_type: original.sender_type,
+        sender_id: original.sender_id,
+        body: original.body,
+        created_at: original.created_at
+      }
+    } satisfies Message;
+    const updated = { ...original, body: "updated original" };
+
+    const result = mergeMessages([original, reply], [updated]);
+
+    expect(result.find((item) => item.id === reply.id)?.reply_to?.body).toBe("updated original");
+  });
+});
+
+describe("removeMessageAndMarkReferencesDeleted", () => {
+  it("removes the deleted message and marks loaded reply previews deleted", () => {
+    const original = message("msg_original", "chn_1", "user", "original", "2026-04-25T10:00:01Z");
+    const reply = {
+      ...message("msg_reply", "chn_1", "user", "reply", "2026-04-25T10:00:02Z"),
+      reply_to_message_id: original.id,
+      reply_to: {
+        message_id: original.id,
+        sender_type: original.sender_type,
+        sender_id: original.sender_id,
+        body: original.body,
+        created_at: original.created_at
+      }
+    } satisfies Message;
+
+    const result = removeMessageAndMarkReferencesDeleted([original, reply], original.id);
+
+    expect(result.map((item) => item.id)).toEqual([reply.id]);
+    expect(result[0].reply_to).toEqual({
+      message_id: original.id,
+      deleted: true
+    });
   });
 });
 

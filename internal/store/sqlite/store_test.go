@@ -132,6 +132,69 @@ func TestMessageMetadataRoundTripsArbitraryJSON(t *testing.T) {
 	}
 }
 
+func TestMessageReplyToMessageIDRoundTripsAndSurvivesUpdate(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	defer st.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_reply", DisplayName: "Reply", CreatedAt: now}
+	org := domain.Organization{ID: "org_reply", Name: "Reply", CreatedAt: now}
+	channel := domain.Channel{ID: "chn_reply", OrganizationID: org.ID, Name: "reply", CreatedAt: now}
+	original := domain.Message{
+		ID: "msg_reply_original", OrganizationID: org.ID, ConversationType: domain.ConversationChannel,
+		ConversationID: channel.ID, SenderType: domain.SenderUser, SenderID: user.ID,
+		Kind: domain.MessageText, Body: "original", CreatedAt: now,
+	}
+	reply := domain.Message{
+		ID: "msg_reply_child", OrganizationID: org.ID, ConversationType: domain.ConversationChannel,
+		ConversationID: channel.ID, SenderType: domain.SenderUser, SenderID: user.ID,
+		Kind: domain.MessageText, Body: "reply", ReplyToMessageID: original.ID, CreatedAt: now.Add(time.Second),
+	}
+
+	err := st.Tx(ctx, func(tx store.Tx) error {
+		if err := tx.Users().Create(ctx, user); err != nil {
+			return err
+		}
+		if err := tx.Organizations().Create(ctx, org); err != nil {
+			return err
+		}
+		if err := tx.Organizations().AddMember(ctx, org.ID, user.ID, domain.RoleOwner); err != nil {
+			return err
+		}
+		if err := tx.Channels().Create(ctx, channel); err != nil {
+			return err
+		}
+		if err := tx.Messages().Create(ctx, original); err != nil {
+			return err
+		}
+		return tx.Messages().Create(ctx, reply)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	messages, err := st.Messages().List(ctx, domain.ConversationChannel, channel.ID, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || messages[1].ReplyToMessageID != original.ID {
+		t.Fatalf("messages = %#v, want reply_to_message_id %q", messages, original.ID)
+	}
+
+	reply.Body = "updated reply"
+	if err := st.Messages().Update(ctx, reply); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := st.Messages().ByID(ctx, reply.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Body != "updated reply" || updated.ReplyToMessageID != original.ID {
+		t.Fatalf("updated message = %#v, want body update and preserved reply link", updated)
+	}
+}
+
 func TestMessagesListRecentReturnsLatestMessagesChronologically(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)

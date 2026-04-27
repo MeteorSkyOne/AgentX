@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/meteorsky/agentx/internal/domain"
-	"github.com/meteorsky/agentx/internal/id"
 )
 
 var ErrEmptyMessage = errors.New("empty message")
@@ -21,6 +20,7 @@ type SendMessageRequest struct {
 	ConversationType domain.ConversationType
 	ConversationID   string
 	Body             string
+	ReplyToMessageID string
 }
 
 type ConversationAgentContext struct {
@@ -53,19 +53,35 @@ func (a *App) ListProjectChannels(ctx context.Context, projectID string) ([]doma
 }
 
 func (a *App) ListMessages(ctx context.Context, conversationType domain.ConversationType, conversationID string, limit int) ([]domain.Message, error) {
-	return a.store.Messages().List(ctx, conversationType, conversationID, limit)
+	messages, err := a.store.Messages().List(ctx, conversationType, conversationID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return a.resolveMessageReferences(ctx, messages)
 }
 
 func (a *App) ListRecentMessages(ctx context.Context, conversationType domain.ConversationType, conversationID string, limit int) ([]domain.Message, error) {
-	return a.store.Messages().ListRecent(ctx, conversationType, conversationID, limit)
+	messages, err := a.store.Messages().ListRecent(ctx, conversationType, conversationID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return a.resolveMessageReferences(ctx, messages)
 }
 
 func (a *App) ListRecentMessagesBefore(ctx context.Context, conversationType domain.ConversationType, conversationID string, before time.Time, limit int) ([]domain.Message, error) {
-	return a.store.Messages().ListRecentBefore(ctx, conversationType, conversationID, before, limit)
+	messages, err := a.store.Messages().ListRecentBefore(ctx, conversationType, conversationID, before, limit)
+	if err != nil {
+		return nil, err
+	}
+	return a.resolveMessageReferences(ctx, messages)
 }
 
 func (a *App) Message(ctx context.Context, id string) (domain.Message, error) {
-	return a.store.Messages().ByID(ctx, id)
+	message, err := a.store.Messages().ByID(ctx, id)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return a.resolveMessageReference(ctx, message)
 }
 
 func (a *App) ConversationBinding(ctx context.Context, conversationType domain.ConversationType, conversationID string) (domain.ConversationBinding, error) {
@@ -115,6 +131,10 @@ func (a *App) SendMessage(ctx context.Context, req SendMessageRequest) (domain.M
 	if err != nil {
 		return domain.Message{}, err
 	}
+	req.ReplyToMessageID = strings.TrimSpace(req.ReplyToMessageID)
+	if err := a.validateReplyTarget(ctx, req); err != nil {
+		return domain.Message{}, err
+	}
 	agents, err := a.conversationAgents(ctx, scope)
 	if err != nil {
 		return domain.Message{}, err
@@ -127,28 +147,10 @@ func (a *App) SendMessage(ctx context.Context, req SendMessageRequest) (domain.M
 		return a.dispatchSlashCommand(ctx, req, agents, command)
 	}
 
-	message := domain.Message{
-		ID:               id.New("msg"),
-		OrganizationID:   req.OrganizationID,
-		ConversationType: req.ConversationType,
-		ConversationID:   req.ConversationID,
-		SenderType:       domain.SenderUser,
-		SenderID:         req.UserID,
-		Kind:             domain.MessageText,
-		Body:             body,
-		CreatedAt:        time.Now().UTC(),
-	}
-	if err := a.store.Messages().Create(ctx, message); err != nil {
+	message, err := a.createConversationMessage(ctx, req, domain.SenderUser, req.UserID, body, nil)
+	if err != nil {
 		return domain.Message{}, err
 	}
-
-	a.publishConversationEvent(domain.Event{
-		Type:             domain.EventMessageCreated,
-		OrganizationID:   message.OrganizationID,
-		ConversationType: message.ConversationType,
-		ConversationID:   message.ConversationID,
-		Payload:          domain.MessageCreatedPayload{Message: message},
-	})
 
 	for _, agent := range targetAgentsForBody(agents, message.Body) {
 		go a.runAgentForMessage(context.WithoutCancel(ctx), message, agent)
@@ -170,6 +172,10 @@ func (a *App) UpdateMessage(ctx context.Context, messageID string, body string) 
 	if err := a.store.Messages().Update(ctx, message); err != nil {
 		return domain.Message{}, err
 	}
+	message, err = a.resolveMessageReference(ctx, message)
+	if err != nil {
+		return domain.Message{}, err
+	}
 	a.publishConversationEvent(domain.Event{
 		Type:             domain.EventMessageUpdated,
 		OrganizationID:   message.OrganizationID,
@@ -178,6 +184,71 @@ func (a *App) UpdateMessage(ctx context.Context, messageID string, body string) 
 		Payload:          domain.MessageUpdatedPayload{Message: message},
 	})
 	return message, nil
+}
+
+func (a *App) validateReplyTarget(ctx context.Context, req SendMessageRequest) error {
+	if req.ReplyToMessageID == "" {
+		return nil
+	}
+	referenced, err := a.store.Messages().ByID(ctx, req.ReplyToMessageID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrInvalidInput
+		}
+		return err
+	}
+	if referenced.OrganizationID != req.OrganizationID ||
+		referenced.ConversationType != req.ConversationType ||
+		referenced.ConversationID != req.ConversationID {
+		return ErrInvalidInput
+	}
+	return nil
+}
+
+func (a *App) resolveMessageReferences(ctx context.Context, messages []domain.Message) ([]domain.Message, error) {
+	for i := range messages {
+		resolved, err := a.resolveMessageReference(ctx, messages[i])
+		if err != nil {
+			return nil, err
+		}
+		messages[i] = resolved
+	}
+	return messages, nil
+}
+
+func (a *App) resolveMessageReference(ctx context.Context, message domain.Message) (domain.Message, error) {
+	message.ReplyTo = nil
+	message.ReplyToMessageID = strings.TrimSpace(message.ReplyToMessageID)
+	if message.ReplyToMessageID == "" {
+		return message, nil
+	}
+	referenced, err := a.store.Messages().ByID(ctx, message.ReplyToMessageID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			message.ReplyTo = &domain.MessageReference{MessageID: message.ReplyToMessageID, Deleted: true}
+			return message, nil
+		}
+		return domain.Message{}, err
+	}
+	if referenced.OrganizationID != message.OrganizationID ||
+		referenced.ConversationType != message.ConversationType ||
+		referenced.ConversationID != message.ConversationID {
+		message.ReplyTo = &domain.MessageReference{MessageID: message.ReplyToMessageID, Deleted: true}
+		return message, nil
+	}
+	message.ReplyTo = messageReferenceFromMessage(referenced)
+	return message, nil
+}
+
+func messageReferenceFromMessage(message domain.Message) *domain.MessageReference {
+	createdAt := message.CreatedAt
+	return &domain.MessageReference{
+		MessageID:  message.ID,
+		SenderType: message.SenderType,
+		SenderID:   message.SenderID,
+		Body:       message.Body,
+		CreatedAt:  &createdAt,
+	}
 }
 
 func (a *App) DeleteMessage(ctx context.Context, messageID string) error {

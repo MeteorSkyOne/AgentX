@@ -1,5 +1,5 @@
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Send, Terminal } from "lucide-react";
+import { AlertCircle, Reply, Send, Terminal, X } from "lucide-react";
 import { sendMessage } from "../api/client";
 import type { Agent, ConversationType, Message } from "../api/types";
 import { Button } from "@/components/ui/button";
@@ -16,11 +16,20 @@ interface ComposerProps {
     label: string;
   };
   typingAgents?: TypingAgent[];
-  mentionAgents?: Pick<Agent, "id" | "name" | "handle" | "kind">[];
+  mentionAgents?: Pick<Agent, "id" | "name" | "handle" | "kind" | "bot_user_id">[];
+  replyToMessage?: Message | null;
+  onCancelReplyTo?: () => void;
   onSent: (message: Message) => void;
 }
 
-export function Composer({ conversation, typingAgents, mentionAgents = [], onSent }: ComposerProps) {
+export function Composer({
+  conversation,
+  typingAgents,
+  mentionAgents = [],
+  replyToMessage,
+  onCancelReplyTo,
+  onSent
+}: ComposerProps) {
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -115,7 +124,9 @@ export function Composer({ conversation, typingAgents, mentionAgents = [], onSen
     setDismissedCommandKey(null);
     setDismissedMentionKey(null);
     try {
-      const message = await sendMessage(conversation.type, conversation.id, submittedBody);
+      const message = await sendMessage(conversation.type, conversation.id, submittedBody, {
+        replyToMessageID: replyToMessage?.id
+      });
       onSent(message);
     } catch (err) {
       setBody(submittedBody);
@@ -275,6 +286,28 @@ export function Composer({ conversation, typingAgents, mentionAgents = [], onSen
               ))}
             </div>
           )}
+          {replyToMessage && (
+            <div className="mb-2 flex min-w-0 items-center gap-2 rounded-md border border-border bg-muted/40 px-2 py-1.5 text-xs">
+              <Reply className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="shrink-0 font-medium text-foreground">
+                Replying to {messageSenderLabel(replyToMessage, mentionAgents)}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                {messagePreview(replyToMessage.body)}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 shrink-0"
+                title="Cancel reply"
+                aria-label="Cancel reply"
+                onClick={onCancelReplyTo}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
           <div
             className={cn(
               "flex min-h-11 items-center gap-2 rounded-md border border-input bg-secondary/60 px-3 py-2 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-background focus-within:ring-[3px] focus-within:ring-ring/20",
@@ -426,4 +459,23 @@ function mentionTokenAt(value: string, caret: number) {
     end: caret,
     query: match[2] ?? ""
   };
+}
+
+function messageSenderLabel(
+  message: Message,
+  agents: Pick<Agent, "name" | "bot_user_id">[]
+): string {
+  if (message.sender_type === "user") {
+    return "You";
+  }
+  if (message.sender_type === "system") {
+    return "System";
+  }
+  const agent = agents.find((item) => item.bot_user_id === message.sender_id);
+  return agent?.name ?? "Agent";
+}
+
+function messagePreview(body: string): string {
+  const preview = body.replace(/\s+/g, " ").trim();
+  return preview || "(empty)";
 }

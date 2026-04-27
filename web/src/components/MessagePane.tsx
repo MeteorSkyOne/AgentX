@@ -8,12 +8,13 @@ import {
   CircleAlert,
   MessageSquare,
   Pencil,
+  Reply,
   Save,
   Trash2,
   Wrench
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ConversationAgentContext, Message, ProcessItem } from "../api/types";
+import type { ConversationAgentContext, Message, MessageReference, ProcessItem } from "../api/types";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,7 @@ interface MessagePaneProps {
   agents: ConversationAgentContext[];
   onUpdateMessage: (messageID: string, body: string) => Promise<Message>;
   onDeleteMessage: (message: Message) => Promise<void>;
+  onReplyMessage: (message: Message) => void;
   onLoadOlder: () => boolean;
 }
 
@@ -60,6 +62,7 @@ export function MessagePane({
   agents,
   onUpdateMessage,
   onDeleteMessage,
+  onReplyMessage,
   onLoadOlder,
 }: MessagePaneProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -67,6 +70,7 @@ export function MessagePane({
   const olderAnchorMessageIDRef = useRef<string | null>(null);
   const agentByBotID = new Map(agents.map((item) => [item.agent.bot_user_id, item.agent]));
   const agentByID = new Map(agents.map((item) => [item.agent.id, item.agent]));
+  const messagesByID = new Map(messages.map((message) => [message.id, message]));
 
   useLayoutEffect(() => {
     const anchorID = olderAnchorMessageIDRef.current;
@@ -103,6 +107,14 @@ export function MessagePane({
     }
   }
 
+  function jumpToMessage(messageID: string) {
+    const viewport = viewportRef.current;
+    const target = viewport?.querySelector<HTMLElement>(
+      `[data-message-id="${cssEscape(messageID)}"]`
+    );
+    target?.scrollIntoView({ block: "center" });
+  }
+
   if (isLoading) {
     return (
       <section className="flex min-h-0 flex-1 items-center justify-center">
@@ -136,6 +148,10 @@ export function MessagePane({
           )}
           {messages.map((message) => {
             const agent = agentByBotID.get(message.sender_id);
+            const replyAgent =
+              message.reply_to?.sender_type === "bot"
+                ? agentByBotID.get(message.reply_to.sender_id ?? "")
+                : undefined;
             return (
               <MessageItem
                 key={message.id}
@@ -143,8 +159,14 @@ export function MessagePane({
                 agentName={agent?.name}
                 agentKind={agent?.kind}
                 agentID={agent?.id}
+                replyAgentName={replyAgent?.name}
+                replyTargetLoaded={Boolean(
+                  message.reply_to && messagesByID.has(message.reply_to.message_id)
+                )}
                 onUpdateMessage={onUpdateMessage}
                 onDeleteMessage={onDeleteMessage}
+                onReplyMessage={onReplyMessage}
+                onJumpToReplyMessage={jumpToMessage}
               />
             );
           })}
@@ -191,8 +213,12 @@ interface MessageItemProps {
   agentName?: string;
   agentKind?: string;
   agentID?: string;
+  replyAgentName?: string;
+  replyTargetLoaded?: boolean;
   onUpdateMessage: (messageID: string, body: string) => Promise<Message>;
   onDeleteMessage: (message: Message) => Promise<void>;
+  onReplyMessage: (message: Message) => void;
+  onJumpToReplyMessage?: (messageID: string) => void;
 }
 
 function MessageItem(props: MessageItemProps) {
@@ -207,8 +233,12 @@ function ConversationMessageItem({
   agentName,
   agentKind,
   agentID,
+  replyAgentName,
+  replyTargetLoaded = false,
   onUpdateMessage,
   onDeleteMessage,
+  onReplyMessage,
+  onJumpToReplyMessage,
 }: MessageItemProps) {
   const [editing, setEditing] = useState(false);
   const [draftBody, setDraftBody] = useState(message.body);
@@ -284,6 +314,17 @@ function ConversationMessageItem({
                 variant="ghost"
                 size="icon"
                 className="h-7 w-7"
+                title="Reply"
+                aria-label="Reply"
+                disabled={pending}
+                onClick={() => onReplyMessage(message)}
+              >
+                <Reply className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
                 title="Edit message"
                 aria-label="Edit message"
                 disabled={pending}
@@ -310,6 +351,14 @@ function ConversationMessageItem({
           )}
         </div>
         {process.length > 0 && <ProcessBlock items={process} defaultOpen={false} />}
+        {message.reply_to && (
+          <MessageReferencePreview
+            reference={message.reply_to}
+            agentName={replyAgentName}
+            loaded={replyTargetLoaded}
+            onOpen={onJumpToReplyMessage}
+          />
+        )}
         {editing ? (
           <div className="space-y-2">
             <Textarea
@@ -350,6 +399,65 @@ function ConversationMessageItem({
       </div>
     </div>
   );
+}
+
+function MessageReferencePreview({
+  reference,
+  agentName,
+  loaded,
+  onOpen,
+}: {
+  reference: MessageReference;
+  agentName?: string;
+  loaded: boolean;
+  onOpen?: (messageID: string) => void;
+}) {
+  const deleted = Boolean(reference.deleted);
+  const label = deleted ? "Referenced message" : messageReferenceSenderLabel(reference, agentName);
+  const body = deleted ? "Referenced message deleted" : messageReferencePreview(reference.body ?? "");
+  const className =
+    "flex min-w-0 max-w-full items-center gap-2 rounded-md border border-border bg-muted/35 px-2 py-1.5 text-left text-xs text-muted-foreground";
+  const content = (
+    <>
+      <Reply className="h-3.5 w-3.5 shrink-0" />
+      <span className="shrink-0 font-medium text-foreground">{label}</span>
+      <span className="min-w-0 flex-1 truncate">{body}</span>
+    </>
+  );
+
+  if (!deleted && loaded && onOpen) {
+    return (
+      <button
+        type="button"
+        className={cn(className, "transition-colors hover:bg-muted/70 hover:text-foreground")}
+        title="Open referenced message"
+        aria-label="Open referenced message"
+        onClick={() => onOpen(reference.message_id)}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return <div className={className}>{content}</div>;
+}
+
+function messageReferenceSenderLabel(reference: MessageReference, agentName?: string): string {
+  if (reference.sender_type === "user") {
+    return "You";
+  }
+  if (reference.sender_type === "system") {
+    return "System";
+  }
+  if (reference.sender_type === "bot") {
+    return agentName ?? "Agent";
+  }
+  return "Message";
+}
+
+function messageReferencePreview(body: string): string {
+  const preview = body.replace(/\s+/g, " ").trim();
+  return preview || "(empty)";
 }
 
 function ContextSeparator({ message }: { message: Message }) {

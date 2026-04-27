@@ -12,7 +12,8 @@ import (
 )
 
 type sendMessageRequest struct {
-	Body string `json:"body"`
+	Body             string `json:"body"`
+	ReplyToMessageID string `json:"reply_to_message_id"`
 }
 
 type messageUpdateRequest struct {
@@ -161,6 +162,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		ConversationType: conversationType,
 		ConversationID:   chi.URLParam(r, "id"),
 		Body:             req.Body,
+		ReplyToMessageID: req.ReplyToMessageID,
 	})
 	if err != nil {
 		if errors.Is(err, app.ErrEmptyMessage) {

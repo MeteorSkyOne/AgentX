@@ -56,6 +56,7 @@ import {
   mergeMessages,
   messageHistoryLoadingForEvent,
   messageMatchesActiveConversation,
+  removeMessageAndMarkReferencesDeleted,
   streamingRunHasCompletedMessage
 } from "./messages/state";
 import type { AgentXEvent } from "./ws/events";
@@ -344,7 +345,7 @@ export default function App() {
           break;
         case "MessageDeleted":
           setConversationMessages((current) =>
-            current.filter((message) => message.id !== event.payload.message_id)
+            removeMessageAndMarkReferencesDeleted(current, event.payload.message_id)
           );
           break;
         case "AgentRunStarted":
@@ -622,7 +623,7 @@ export default function App() {
 
   async function handleDeleteMessage(message: Message): Promise<void> {
     await deleteMessage(message.id);
-    setConversationMessages((current) => current.filter((item) => item.id !== message.id));
+    setConversationMessages((current) => removeMessageAndMarkReferencesDeleted(current, message.id));
   }
 
   async function handleSaveChannelAgents(

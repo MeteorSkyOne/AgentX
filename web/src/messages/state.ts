@@ -1,4 +1,4 @@
-import type { ConversationType, Message } from "../api/types";
+import type { ConversationType, Message, MessageReference } from "../api/types";
 import type { AgentXEvent } from "../ws/events";
 
 interface ActiveConversation {
@@ -16,9 +16,64 @@ export function mergeMessages(current: Message[], incoming: Message[]): Message[
     messagesByID.set(message.id, message);
   }
 
-  return Array.from(messagesByID.values()).sort(
+  const merged = Array.from(messagesByID.values()).sort(
     (left, right) => Date.parse(left.created_at) - Date.parse(right.created_at)
   );
+  return refreshReplyReferences(merged, incoming);
+}
+
+export function removeMessageAndMarkReferencesDeleted(
+  current: Message[],
+  messageID: string
+): Message[] {
+  return current
+    .filter((message) => message.id !== messageID)
+    .map((message) => {
+      if (message.reply_to?.message_id !== messageID) {
+        return message;
+      }
+      return {
+        ...message,
+        reply_to: {
+          message_id: messageID,
+          deleted: true
+        }
+      };
+    });
+}
+
+function refreshReplyReferences(messages: Message[], updatedMessages: Message[]): Message[] {
+  if (updatedMessages.length === 0) {
+    return messages;
+  }
+  const referencesByID = new Map<string, MessageReference>();
+  for (const message of updatedMessages) {
+    referencesByID.set(message.id, referenceFromMessage(message));
+  }
+  return messages.map((message) => {
+    const referenceID = message.reply_to?.message_id;
+    if (!referenceID) {
+      return message;
+    }
+    const reference = referencesByID.get(referenceID);
+    if (!reference) {
+      return message;
+    }
+    return {
+      ...message,
+      reply_to: reference
+    };
+  });
+}
+
+function referenceFromMessage(message: Message): MessageReference {
+  return {
+    message_id: message.id,
+    sender_type: message.sender_type,
+    sender_id: message.sender_id,
+    body: message.body,
+    created_at: message.created_at
+  };
 }
 
 export function eventMatchesActiveConversation(

@@ -339,13 +339,18 @@ export function conversationContext(
 export function sendMessage(
   type: ConversationType,
   id: string,
-  body: string
+  body: string,
+  options: { replyToMessageID?: string } = {}
 ): Promise<Message> {
+  const payload: { body: string; reply_to_message_id?: string } = { body };
+  if (options.replyToMessageID) {
+    payload.reply_to_message_id = options.replyToMessageID;
+  }
   return request<Message>(
     `/api/conversations/${encodeURIComponent(type)}/${encodeURIComponent(id)}/messages`,
     {
       method: "POST",
-      body: JSON.stringify({ body })
+      body: JSON.stringify(payload)
     }
   );
 }

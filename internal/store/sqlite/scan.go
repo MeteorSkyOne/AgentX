@@ -152,16 +152,17 @@ func scanMessage(scanner interface {
 	Scan(dest ...any) error
 }) (domain.Message, error) {
 	var message domain.Message
-	var conversationType, senderType, kind, metadataJSON, createdAt string
+	var conversationType, senderType, kind, metadataJSON, replyToMessageID, createdAt string
 	if err := scanner.Scan(
 		&message.ID, &message.OrganizationID, &conversationType, &message.ConversationID,
-		&senderType, &message.SenderID, &kind, &message.Body, &metadataJSON, &createdAt,
+		&senderType, &message.SenderID, &kind, &message.Body, &metadataJSON, &replyToMessageID, &createdAt,
 	); err != nil {
 		return domain.Message{}, err
 	}
 	message.ConversationType = domain.ConversationType(conversationType)
 	message.SenderType = domain.SenderType(senderType)
 	message.Kind = domain.MessageKind(kind)
+	message.ReplyToMessageID = replyToMessageID
 	if metadataJSON != "" && metadataJSON != "{}" {
 		var meta map[string]any
 		if err := json.Unmarshal([]byte(metadataJSON), &meta); err == nil && len(meta) > 0 {

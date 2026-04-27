@@ -27,6 +27,15 @@ export interface MessageMetadata {
   [key: string]: JsonValue | ProcessItem[] | undefined;
 }
 
+export interface MessageReference {
+  message_id: string;
+  deleted?: boolean;
+  sender_type?: SenderType;
+  sender_id?: string;
+  body?: string;
+  created_at?: string;
+}
+
 export interface User {
   id: string;
   display_name: string;
@@ -165,6 +174,8 @@ export interface Message {
   kind: MessageKind;
   body: string;
   metadata?: MessageMetadata;
+  reply_to_message_id?: string;
+  reply_to?: MessageReference;
   created_at: string;
 }
 

@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import { Composer } from "../Composer";
 import { MessagePane } from "../MessagePane";
 import type { Channel, ConversationAgentContext, Message, Thread } from "../../api/types";
@@ -43,6 +44,46 @@ export function ConversationPanel({
   onLoadOlderMessages: ShellProps["onLoadOlderMessages"];
   onMessageSent: ShellProps["onMessageSent"];
 }) {
+  const [replyTargetState, setReplyTargetState] = useState<{
+    conversationKey: string;
+    message: Message;
+  } | null>(null);
+  const conversationKey = useMemo(
+    () => (composerConversation ? `${composerConversation.type}:${composerConversation.id}` : ""),
+    [composerConversation]
+  );
+  const replyTarget =
+    replyTargetState?.conversationKey === conversationKey ? replyTargetState.message : null;
+
+  function clearReplyTarget() {
+    setReplyTargetState(null);
+  }
+
+  function selectReplyTarget(message: Message) {
+    if (!conversationKey) {
+      return;
+    }
+    setReplyTargetState({ conversationKey, message });
+  }
+
+  useEffect(() => {
+    clearReplyTarget();
+  }, [conversationKey]);
+
+  useEffect(() => {
+    if (!replyTarget) {
+      return;
+    }
+    const currentTarget = messages.find((message) => message.id === replyTarget.id);
+    if (!currentTarget) {
+      clearReplyTarget();
+      return;
+    }
+    if (currentTarget !== replyTarget) {
+      setReplyTargetState({ conversationKey, message: currentTarget });
+    }
+  }, [conversationKey, messages, replyTarget, replyTarget?.id]);
+
   if (selectedChannel?.type === "thread" && !activeThread) {
     return (
       <ThreadForum
@@ -67,17 +108,23 @@ export function ConversationPanel({
         onUpdateMessage={onUpdateMessage}
         onDeleteMessage={onDeleteMessage}
         onLoadOlder={onLoadOlderMessages}
+        onReplyMessage={selectReplyTarget}
       />
       <Composer
         conversation={composerConversation}
         mentionAgents={boundAgents.map((item) => item.agent)}
+        replyToMessage={replyTarget}
+        onCancelReplyTo={clearReplyTarget}
         typingAgents={streaming
           .filter((s) => !s.error)
           .map((s) => {
             const agent = boundAgents.find((b) => b.agent.id === s.agentID);
             return { name: agent?.agent.name ?? "Agent" };
           })}
-        onSent={onMessageSent}
+        onSent={(message) => {
+          clearReplyTarget();
+          onMessageSent(message);
+        }}
       />
     </>
   );

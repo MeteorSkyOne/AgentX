@@ -104,6 +104,12 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 	if prompt == "" {
 		prompt = userMessage.Body
 	}
+	prompt, err = a.promptWithReplyReference(ctx, userMessage, prompt)
+	if err != nil {
+		a.setFailedAgentSession(ctx, agent.ID, userMessage, "")
+		a.publishAgentRunFailed(userMessage, runID, err)
+		return
+	}
 
 	sessionKey := agent.ID + ":" + string(userMessage.ConversationType) + ":" + userMessage.ConversationID
 	startedPublished := false
@@ -260,6 +266,42 @@ func (a *App) runtimeContextForMessage(ctx context.Context, agentID string, user
 		)
 	}
 	return strings.TrimSpace(b.String()), nil
+}
+
+func (a *App) promptWithReplyReference(ctx context.Context, userMessage domain.Message, prompt string) (string, error) {
+	replyToMessageID := strings.TrimSpace(userMessage.ReplyToMessageID)
+	if replyToMessageID == "" {
+		return prompt, nil
+	}
+
+	referenced, err := a.store.Messages().ByID(ctx, replyToMessageID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return deletedReplyReferencePrompt(replyToMessageID, prompt), nil
+		}
+		return "", err
+	}
+	if referenced.OrganizationID != userMessage.OrganizationID ||
+		referenced.ConversationType != userMessage.ConversationType ||
+		referenced.ConversationID != userMessage.ConversationID {
+		return deletedReplyReferencePrompt(replyToMessageID, prompt), nil
+	}
+
+	var b strings.Builder
+	b.WriteString("The current user message is replying to this referenced message.\n")
+	fmt.Fprintf(&b, "Referenced message ID: %s\n", referenced.ID)
+	fmt.Fprintf(&b, "Referenced sender: %s\n", runtimeSenderLabel(referenced))
+	fmt.Fprintf(&b, "Referenced created at: %s\n", referenced.CreatedAt.Format(time.RFC3339))
+	b.WriteString("Referenced body:\n")
+	b.WriteString(runtimeMessageBody(referenced.Body))
+	b.WriteString("\n\nUser message:\n")
+	b.WriteString(prompt)
+	return b.String(), nil
+}
+
+func deletedReplyReferencePrompt(messageID string, prompt string) string {
+	return "The current user message is replying to a referenced message, but that referenced message was deleted or is unavailable.\n" +
+		"Referenced message ID: " + messageID + "\n\nUser message:\n" + prompt
 }
 
 func runtimeSenderLabel(message domain.Message) string {

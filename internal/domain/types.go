@@ -169,16 +169,27 @@ type ChannelAgent struct {
 }
 
 type Message struct {
-	ID               string           `json:"id"`
-	OrganizationID   string           `json:"organization_id"`
-	ConversationType ConversationType `json:"conversation_type"`
-	ConversationID   string           `json:"conversation_id"`
-	SenderType       SenderType       `json:"sender_type"`
-	SenderID         string           `json:"sender_id"`
-	Kind             MessageKind      `json:"kind"`
-	Body             string           `json:"body"`
-	Metadata         map[string]any   `json:"metadata,omitempty"`
-	CreatedAt        time.Time        `json:"created_at"`
+	ID               string            `json:"id"`
+	OrganizationID   string            `json:"organization_id"`
+	ConversationType ConversationType  `json:"conversation_type"`
+	ConversationID   string            `json:"conversation_id"`
+	SenderType       SenderType        `json:"sender_type"`
+	SenderID         string            `json:"sender_id"`
+	Kind             MessageKind       `json:"kind"`
+	Body             string            `json:"body"`
+	Metadata         map[string]any    `json:"metadata,omitempty"`
+	ReplyToMessageID string            `json:"reply_to_message_id,omitempty"`
+	ReplyTo          *MessageReference `json:"reply_to,omitempty"`
+	CreatedAt        time.Time         `json:"created_at"`
+}
+
+type MessageReference struct {
+	MessageID  string     `json:"message_id"`
+	Deleted    bool       `json:"deleted,omitempty"`
+	SenderType SenderType `json:"sender_type,omitempty"`
+	SenderID   string     `json:"sender_id,omitempty"`
+	Body       string     `json:"body,omitempty"`
+	CreatedAt  *time.Time `json:"created_at,omitempty"`
 }
 
 type ProcessItem struct {

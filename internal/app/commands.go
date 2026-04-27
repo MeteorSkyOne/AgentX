@@ -346,6 +346,10 @@ func (a *App) createCommandSystemMessage(ctx context.Context, req SendMessageReq
 }
 
 func (a *App) createConversationMessage(ctx context.Context, req SendMessageRequest, senderType domain.SenderType, senderID string, body string, metadata map[string]any) (domain.Message, error) {
+	replyToMessageID := ""
+	if senderType == domain.SenderUser {
+		replyToMessageID = req.ReplyToMessageID
+	}
 	message := domain.Message{
 		ID:               id.New("msg"),
 		OrganizationID:   req.OrganizationID,
@@ -356,9 +360,14 @@ func (a *App) createConversationMessage(ctx context.Context, req SendMessageRequ
 		Kind:             domain.MessageText,
 		Body:             body,
 		Metadata:         metadata,
+		ReplyToMessageID: replyToMessageID,
 		CreatedAt:        time.Now().UTC(),
 	}
 	if err := a.store.Messages().Create(ctx, message); err != nil {
+		return domain.Message{}, err
+	}
+	message, err := a.resolveMessageReference(ctx, message)
+	if err != nil {
 		return domain.Message{}, err
 	}
 	a.publishConversationEvent(domain.Event{
