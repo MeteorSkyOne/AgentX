@@ -708,7 +708,7 @@ export function Shell({
                   />
 
                   <AgentsSidebar
-                    agents={activeAgents}
+                    agents={agents}
                     boundAgents={boundAgents}
                     contextLoading={contextLoading}
                     onOpenPanel={(agentID) => {
@@ -810,7 +810,6 @@ export function Shell({
               agents={activeAgents}
               boundAgents={boundAgents}
               selectedAgent={selectedAgent}
-              onSaveChannelAgents={onSaveChannelAgents}
               onUpdateAgent={onUpdateAgent}
               onDeleteAgent={onDeleteAgent}
               onLoadWorkspaceTree={onLoadWorkspaceTree}
@@ -969,7 +968,7 @@ export function Shell({
 
                 {/* Agents Section */}
                 <AgentsSidebar
-                  agents={activeAgents}
+                  agents={agents}
                   boundAgents={boundAgents}
                   contextLoading={contextLoading}
                   onOpenPanel={(agentID) => {
@@ -1152,7 +1151,6 @@ export function Shell({
                 agents={activeAgents}
                 boundAgents={boundAgents}
                 selectedAgent={selectedAgent}
-                onSaveChannelAgents={onSaveChannelAgents}
                 onUpdateAgent={onUpdateAgent}
                 onDeleteAgent={onDeleteAgent}
                 onLoadWorkspaceTree={onLoadWorkspaceTree}

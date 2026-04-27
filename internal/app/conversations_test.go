@@ -591,6 +591,55 @@ func TestSendMessageDispatchesAllAgentsOrOnlyMentionedHandles(t *testing.T) {
 	})
 }
 
+func TestAgentChannelsListsJoinedChannels(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	support, err := app.CreateChannel(ctx, bootstrap.Project.ID, "support", domain.ChannelTypeThread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SetChannelAgents(ctx, support.ID, []domain.ChannelAgent{{
+		AgentID:        bootstrap.Agent.ID,
+		RunWorkspaceID: bootstrap.Workspace.ID,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	channels, err := app.AgentChannels(ctx, bootstrap.Agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(channels) != 2 {
+		t.Fatalf("channels = %#v, want two joined channels", channels)
+	}
+	for _, item := range channels {
+		switch item.Channel.ID {
+		case bootstrap.Channel.ID:
+			if item.RunWorkspace.ID != bootstrap.ProjectWorkspace.ID {
+				t.Fatalf("general run workspace = %q, want %q", item.RunWorkspace.ID, bootstrap.ProjectWorkspace.ID)
+			}
+		case support.ID:
+			if item.RunWorkspace.ID != bootstrap.Workspace.ID {
+				t.Fatalf("support run workspace = %q, want %q", item.RunWorkspace.ID, bootstrap.Workspace.ID)
+			}
+		default:
+			t.Fatalf("unexpected channel = %#v", item.Channel)
+		}
+	}
+
+	if err := app.ArchiveChannel(ctx, support.ID); err != nil {
+		t.Fatal(err)
+	}
+	channels, err = app.AgentChannels(ctx, bootstrap.Agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(channels) != 1 || channels[0].Channel.ID != bootstrap.Channel.ID {
+		t.Fatalf("channels after archive = %#v, want only bootstrap channel", channels)
+	}
+}
+
 func TestDirectedMessageIsIncludedInLaterAgentContext(t *testing.T) {
 	ctx := context.Background()
 	st, err := sqlitestore.Open(ctx, ":memory:")

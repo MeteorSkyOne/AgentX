@@ -172,6 +172,29 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) handleAgentChannels(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	agent, ok, err := s.authorizedAgent(r, userID, chi.URLParam(r, "agentID"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	channels, err := s.app.AgentChannels(r.Context(), agent.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, channels)
+}
+
 func (s *Server) handleChannelAgents(w http.ResponseWriter, r *http.Request) {
 	userID, ok := userIDFromContext(r.Context())
 	if !ok {

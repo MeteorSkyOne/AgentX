@@ -522,6 +522,50 @@ func (a *App) ChannelAgents(ctx context.Context, channelID string) ([]Conversati
 	})
 }
 
+func (a *App) AgentChannels(ctx context.Context, agentID string) ([]AgentChannelContext, error) {
+	agent, err := a.store.Agents().ByID(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	bindings, err := a.store.ChannelAgents().ListByAgent(ctx, agent.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]AgentChannelContext, 0, len(bindings))
+	for _, binding := range bindings {
+		channel, err := a.store.Channels().ByID(ctx, binding.ChannelID)
+		if err != nil {
+			return nil, err
+		}
+		if channel.ArchivedAt != nil {
+			continue
+		}
+		if channel.OrganizationID != agent.OrganizationID {
+			return nil, ErrInvalidInput
+		}
+		project, err := a.store.Projects().ByID(ctx, channel.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		runWorkspaceID := binding.RunWorkspaceID
+		if runWorkspaceID == "" {
+			runWorkspaceID = project.WorkspaceID
+		}
+		runWorkspace, err := a.store.Workspaces().ByID(ctx, runWorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, AgentChannelContext{
+			Binding:      binding,
+			Channel:      channel,
+			Project:      project,
+			RunWorkspace: runWorkspace,
+		})
+	}
+	return result, nil
+}
+
 func (a *App) SetChannelAgents(ctx context.Context, channelID string, bindings []domain.ChannelAgent) ([]ConversationAgentContext, error) {
 	channel, err := a.store.Channels().ByID(ctx, channelID)
 	if err != nil {

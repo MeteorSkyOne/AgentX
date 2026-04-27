@@ -2,6 +2,7 @@ import type {
   AuthResponse,
   BootstrapResponse,
   Agent,
+  AgentChannelContext,
   Channel,
   ConversationAgentContext,
   ConversationContext,
@@ -264,6 +265,10 @@ export function deleteAgent(agentID: string): Promise<void> {
   return request<void>(`/api/agents/${encodeURIComponent(agentID)}`, {
     method: "DELETE"
   });
+}
+
+export function agentChannels(agentID: string): Promise<AgentChannelContext[]> {
+  return request<AgentChannelContext[]>(`/api/agents/${encodeURIComponent(agentID)}/channels`);
 }
 
 export function channelAgents(channelID: string): Promise<ConversationAgentContext[]> {

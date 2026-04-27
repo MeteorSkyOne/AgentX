@@ -54,6 +54,7 @@ func NewRouter(a *app.App, bus *eventbus.Bus) http.Handler {
 			r.Put("/channels/{channelID}/agents", s.handleSetChannelAgents)
 			r.Patch("/threads/{threadID}", s.handleUpdateThread)
 			r.Delete("/threads/{threadID}", s.handleArchiveThread)
+			r.Get("/agents/{agentID}/channels", s.handleAgentChannels)
 			r.Patch("/agents/{agentID}", s.handleUpdateAgent)
 			r.Delete("/agents/{agentID}", s.handleDeleteAgent)
 			r.Get("/workspaces/{workspaceID}", s.handleWorkspace)

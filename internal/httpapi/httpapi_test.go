@@ -141,6 +141,27 @@ func TestHTTPAgentCreateAndUpdateRoundTripsEffort(t *testing.T) {
 	}
 }
 
+func TestHTTPAgentChannels(t *testing.T) {
+	ts := newTestServer(t)
+
+	var bootstrap app.BootstrapResult
+	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	}, http.StatusOK, &bootstrap)
+
+	var channels []app.AgentChannelContext
+	getJSON(t, ts.URL+"/api/agents/"+bootstrap.Agent.ID+"/channels", bootstrap.SessionToken, http.StatusOK, &channels)
+	if len(channels) != 1 || channels[0].Channel.ID != bootstrap.Channel.ID {
+		t.Fatalf("channels = %#v, want bootstrap channel", channels)
+	}
+	if channels[0].RunWorkspace.ID != bootstrap.ProjectWorkspace.ID {
+		t.Fatalf("run workspace = %q, want %q", channels[0].RunWorkspace.ID, bootstrap.ProjectWorkspace.ID)
+	}
+
+	getJSON(t, ts.URL+"/api/agents/not-a-real-agent/channels", bootstrap.SessionToken, http.StatusNotFound, nil)
+}
+
 func TestHTTPSlashCommandErrorsAndSuccess(t *testing.T) {
 	ts := newTestServer(t)
 

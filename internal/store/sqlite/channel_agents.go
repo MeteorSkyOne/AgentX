@@ -55,6 +55,31 @@ ORDER BY created_at ASC, agent_id ASC`, channelID)
 	return agents, nil
 }
 
+func (r channelAgentRepo) ListByAgent(ctx context.Context, agentID string) ([]domain.ChannelAgent, error) {
+	rows, err := r.q.QueryContext(ctx, `
+SELECT channel_id, agent_id, run_workspace_id, created_at, updated_at
+FROM channel_agents
+WHERE agent_id = ?
+ORDER BY created_at ASC, channel_id ASC`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var agents []domain.ChannelAgent
+	for rows.Next() {
+		agent, err := scanChannelAgent(rows)
+		if err != nil {
+			return nil, err
+		}
+		agents = append(agents, agent)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return agents, nil
+}
+
 func (r channelAgentRepo) DeleteForAgent(ctx context.Context, agentID string) error {
 	_, err := r.q.ExecContext(ctx, `DELETE FROM channel_agents WHERE agent_id = ?`, agentID)
 	return err

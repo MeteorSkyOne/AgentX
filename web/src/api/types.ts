@@ -154,6 +154,13 @@ export interface ConversationAgentContext {
   run_workspace: Workspace;
 }
 
+export interface AgentChannelContext {
+  binding: ChannelAgent;
+  channel: Channel;
+  project: Project;
+  run_workspace: Workspace;
+}
+
 export interface ConversationContext {
   project: Project;
   channel: Channel;

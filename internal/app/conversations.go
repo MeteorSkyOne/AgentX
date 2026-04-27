@@ -30,6 +30,13 @@ type ConversationAgentContext struct {
 	RunWorkspace    domain.Workspace    `json:"run_workspace"`
 }
 
+type AgentChannelContext struct {
+	Binding      domain.ChannelAgent `json:"binding"`
+	Channel      domain.Channel      `json:"channel"`
+	Project      domain.Project      `json:"project"`
+	RunWorkspace domain.Workspace    `json:"run_workspace"`
+}
+
 type ConversationContext struct {
 	Project   domain.Project             `json:"project"`
 	Channel   domain.Channel             `json:"channel"`

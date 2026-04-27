@@ -1,18 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Bot,
   Database,
   FileText,
   FolderOpen,
+  Hash,
   Key,
   Plus,
   RefreshCw,
   Save,
   Settings,
   Trash2,
-  UserRound,
   X,
 } from "lucide-react";
+import { agentChannels as fetchAgentChannels } from "../../api/client";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,7 +47,6 @@ import {
   agentKindLabel,
   agentToneColor,
   defaultAgentInstructionPath,
-  runWorkspaceOptions,
 } from "./utils";
 
 export function AgentDetailsPanel({
@@ -54,7 +55,6 @@ export function AgentDetailsPanel({
   agents,
   boundAgents,
   selectedAgent,
-  onSaveChannelAgents,
   onUpdateAgent,
   onDeleteAgent,
   onLoadWorkspaceTree,
@@ -69,9 +69,6 @@ export function AgentDetailsPanel({
   agents: Agent[];
   boundAgents: ConversationAgentContext[];
   selectedAgent?: Agent;
-  onSaveChannelAgents: (
-    bindings: Array<{ agent_id: string; run_workspace_id?: string }>
-  ) => Promise<void>;
   onUpdateAgent: ShellProps["onUpdateAgent"];
   onDeleteAgent: ShellProps["onDeleteAgent"];
   onLoadWorkspaceTree: ShellProps["onLoadWorkspaceTree"];
@@ -81,8 +78,6 @@ export function AgentDetailsPanel({
   onCreateAgentModal: () => void;
   onClose: () => void;
 }) {
-  const [checkedAgents, setCheckedAgents] = useState<Record<string, boolean>>({});
-  const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [agentID, setAgentID] = useState(selectedAgent?.id ?? "");
   const [name, setName] = useState(selectedAgent?.name ?? "");
   const [description, setDescription] = useState(selectedAgent?.description ?? "");
@@ -115,6 +110,13 @@ export function AgentDetailsPanel({
 
   const selected = agents.find((a) => a.id === agentID) ?? selectedAgent;
   const selectedBinding = boundAgents.find((item) => item.agent.id === selected?.id);
+  const selectedAgentID = selected?.id ?? "";
+  const agentChannelsQuery = useQuery({
+    queryKey: ["agent-channels", selectedAgentID],
+    queryFn: () => fetchAgentChannels(selectedAgentID),
+    enabled: Boolean(selectedAgentID),
+  });
+  const joinedChannels = agentChannelsQuery.data ?? [];
   const selectedConfigWorkspaceID = selected?.config_workspace_id ?? "";
   const envEntries = useMemo(
     () => Object.entries(selected?.env ?? {}).sort(([l], [r]) => l.localeCompare(r)),
@@ -126,17 +128,6 @@ export function AgentDetailsPanel({
     setAgentID(selectedAgent.id);
     setActiveTab("settings");
   }, [selectedAgent?.id]);
-
-  useEffect(() => {
-    const nextChecked: Record<string, boolean> = {};
-    const nextOverrides: Record<string, string> = {};
-    for (const item of boundAgents) {
-      nextChecked[item.agent.id] = true;
-      nextOverrides[item.agent.id] = item.binding.run_workspace_id ?? "";
-    }
-    setCheckedAgents(nextChecked);
-    setOverrides(nextOverrides);
-  }, [boundAgents]);
 
   useEffect(() => {
     if (!selected) return;
@@ -188,17 +179,6 @@ export function AgentDetailsPanel({
       void loadTree({ quiet: true });
     }
   }, [activeTab, selectedConfigWorkspaceID]);
-
-  async function saveBindings() {
-    const bindings = agents
-      .filter((a) => checkedAgents[a.id])
-      .map((a) => ({
-        agent_id: a.id,
-        run_workspace_id: overrides[a.id]?.trim() || undefined
-      }));
-    await onSaveChannelAgents(bindings);
-    setStatus("Saved");
-  }
 
   async function saveAgent() {
     if (!selected) return;
@@ -395,9 +375,9 @@ export function AgentDetailsPanel({
             <Settings className="h-3.5 w-3.5" />
             Settings
           </TabsTrigger>
-          <TabsTrigger value="members" className="gap-1 text-xs">
-            <UserRound className="h-3.5 w-3.5" />
-            Members
+          <TabsTrigger value="channels" className="gap-1 text-xs">
+            <Hash className="h-3.5 w-3.5" />
+            Channels
           </TabsTrigger>
           <TabsTrigger value="workspace" className="gap-1 text-xs">
             <FolderOpen className="h-3.5 w-3.5" />
@@ -563,43 +543,44 @@ export function AgentDetailsPanel({
           </ScrollArea>
         </TabsContent>
 
-        {/* Members Tab */}
-        <TabsContent value="members" className="min-h-0 flex-1 overflow-hidden px-4 pb-4">
+        {/* Channels Tab */}
+        <TabsContent value="channels" className="min-h-0 flex-1 overflow-hidden px-4 pb-4">
           <ScrollArea className="h-full">
             <div className="space-y-3 pr-2">
-              <p className="text-xs text-muted-foreground">
-                {selectedChannel ? `#${selectedChannel.name}` : "No channel selected"}
-              </p>
-              {agents.map((a) => (
-                <div key={a.id} className="picker-row rounded-lg border border-border p-3">
-                  <label className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(checkedAgents[a.id])}
-                      onChange={(e) =>
-                        setCheckedAgents((c) => ({ ...c, [a.id]: e.target.checked }))
-                      }
-                    />
-                    <span className="text-sm font-medium">{a.name}</span>
-                  </label>
-                  <Select
-                    className="mt-2"
-                    value={overrides[a.id] ?? ""}
-                    onChange={(e) => setOverrides((c) => ({ ...c, [a.id]: e.target.value }))}
-                    aria-label={`${a.name} run workspace`}
-                    selectClassName="h-8 px-2 pr-8 text-xs"
+              {agentChannelsQuery.isLoading ? (
+                <p className="text-xs text-muted-foreground">Loading channels...</p>
+              ) : agentChannelsQuery.isError ? (
+                <p className="text-xs text-muted-foreground">
+                  {agentChannelsQuery.error instanceof Error
+                    ? agentChannelsQuery.error.message
+                    : "Load channels failed"}
+                </p>
+              ) : joinedChannels.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No joined channels</p>
+              ) : (
+                joinedChannels.map((item) => (
+                  <div
+                    key={item.channel.id}
+                    className={cn(
+                      "rounded-lg border border-border p-3",
+                      item.channel.id === selectedChannel?.id && "border-primary/50 bg-accent/40"
+                    )}
                   >
-                    {runWorkspaceOptions(a, boundAgents, projectWorkspace).map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              ))}
-              <Button size="sm" className="w-full gap-2" onClick={saveBindings}>
-                <Save className="h-4 w-4" />
-                Save
-              </Button>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Hash className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.channel.name}</span>
+                      <Badge variant="outline" className="shrink-0 text-[10px] uppercase">
+                        {item.channel.type}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">{item.project.name}</p>
+                    <div className="workspace-path mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+                      <Database className="h-3 w-3" />
+                      <span className="truncate">Run: {item.run_workspace.path}</span>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </ScrollArea>
         </TabsContent>

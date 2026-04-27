@@ -634,6 +634,7 @@ export default function App() {
     }
     await setChannelAgents(selectedChannelID, bindings);
     await queryClient.invalidateQueries({ queryKey: ["channel-agents", selectedChannelID] });
+    await queryClient.invalidateQueries({ queryKey: ["agent-channels"] });
     await queryClient.invalidateQueries({ queryKey: ["conversation-context"] });
   }
 
