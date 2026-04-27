@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -59,44 +60,69 @@ func (a *App) runAgentForMessage(ctx context.Context, userMessage domain.Message
 }
 
 func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage domain.Message, target ConversationAgentContext, runID string, opts agentRunOptions) {
+	var tracker *agentRunTracker
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			a.publishAgentRunFailed(userMessage, runID, fmt.Errorf("agent run panic: %v", recovered))
+			err := fmt.Errorf("agent run panic: %v", recovered)
+			if tracker != nil {
+				a.recordAgentRunMetric(context.WithoutCancel(ctx), tracker.metric(agentRunMetricInput{
+					Status:      "failed",
+					CompletedAt: time.Now().UTC(),
+				}))
+			}
+			a.publishAgentRunFailed(userMessage, runID, err)
 		}
 	}()
 
 	agent := target.Agent
 	workspace := target.RunWorkspace
 	runAttrs := agentRunLogAttrs(runID, userMessage, agent, workspace.Path, target.ConfigWorkspace.Path)
+	startedAt := time.Now().UTC()
+	scope, scopeErr := a.conversationScope(ctx, userMessage.ConversationType, userMessage.ConversationID)
+	if scopeErr != nil {
+		slog.Warn("agent run metrics scope lookup failed", append(runAttrs, "error", scopeErr)...)
+	}
+	runTracker := agentRunTracker{
+		RunID:       runID,
+		UserMessage: userMessage,
+		Agent:       agent,
+		Scope:       runMetricScope(scope),
+		StartedAt:   startedAt,
+	}
+	tracker = &runTracker
+	failRun := func(failCtx context.Context, providerSessionID string, err error) {
+		a.setFailedAgentSession(failCtx, agent.ID, userMessage, providerSessionID)
+		a.recordAgentRunMetric(failCtx, runTracker.metric(agentRunMetricInput{
+			Status:            "failed",
+			ProviderSessionID: providerSessionID,
+			CompletedAt:       time.Now().UTC(),
+		}))
+		a.publishAgentRunFailed(userMessage, runID, err)
+	}
 	slog.Info("agent run starting", runAttrs...)
 	if err := os.MkdirAll(workspace.Path, 0o755); err != nil {
-		a.setFailedAgentSession(ctx, agent.ID, userMessage, "")
-		a.publishAgentRunFailed(userMessage, runID, err)
+		failRun(ctx, "", err)
 		return
 	}
 	if err := ensureAgentInstructionFiles(target.ConfigWorkspace.Path, agent); err != nil {
-		a.setFailedAgentSession(ctx, agent.ID, userMessage, "")
-		a.publishAgentRunFailed(userMessage, runID, err)
+		failRun(ctx, "", err)
 		return
 	}
 	rt, ok := a.runtimeForAgent(agent)
 	if !ok {
-		a.setFailedAgentSession(ctx, agent.ID, userMessage, "")
-		a.publishAgentRunFailed(userMessage, runID, fmt.Errorf("runtime for agent kind %q is not configured", agent.Kind))
+		failRun(ctx, "", fmt.Errorf("runtime for agent kind %q is not configured", agent.Kind))
 		return
 	}
 
 	previousSessionID, err := a.previousProviderSessionID(ctx, agent.ID, userMessage)
 	if err != nil {
-		a.setFailedAgentSession(ctx, agent.ID, userMessage, "")
-		a.publishAgentRunFailed(userMessage, runID, err)
+		failRun(ctx, "", err)
 		return
 	}
 
 	runtimeContext, err := a.runtimeContextForMessage(ctx, agent.ID, userMessage)
 	if err != nil {
-		a.setFailedAgentSession(ctx, agent.ID, userMessage, "")
-		a.publishAgentRunFailed(userMessage, runID, err)
+		failRun(ctx, "", err)
 		return
 	}
 
@@ -106,8 +132,7 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 	}
 	prompt, err = a.promptWithReplyReference(ctx, userMessage, prompt)
 	if err != nil {
-		a.setFailedAgentSession(ctx, agent.ID, userMessage, "")
-		a.publishAgentRunFailed(userMessage, runID, err)
+		failRun(ctx, "", err)
 		return
 	}
 
@@ -129,15 +154,14 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 		})
 		if err != nil {
 			slog.Error("agent runtime session start failed", append(runAttrs, "error", err)...)
-			a.setFailedAgentSession(ctx, agent.ID, userMessage, "")
-			a.publishAgentRunFailed(userMessage, runID, err)
+			failRun(ctx, "", err)
 			return
 		}
 
 		providerSessionID := session.CurrentSessionID()
 		if err := a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, providerSessionID, "running"); err != nil {
 			_ = session.Close(context.WithoutCancel(ctx))
-			a.publishAgentRunFailed(userMessage, runID, err)
+			failRun(ctx, providerSessionID, err)
 			return
 		}
 		if !startedPublished {
@@ -153,21 +177,21 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 
 		if err := session.Send(ctx, agentruntime.Input{Prompt: prompt, Context: runtimeContext}); err != nil {
 			slog.Error("agent runtime send failed", append(runAttrs, "provider_session_id", session.CurrentSessionID(), "error", err)...)
-			a.setFailedAgentSession(ctx, agent.ID, userMessage, session.CurrentSessionID())
-			a.publishAgentRunFailed(userMessage, runID, err)
+			failRun(ctx, session.CurrentSessionID(), err)
 			_ = session.Close(context.WithoutCancel(ctx))
 			return
 		}
 
 		var thinkingBuf strings.Builder
 		var processBuf []domain.ProcessItem
+		var firstTokenAt *time.Time
+		var usage *agentruntime.Usage
 		retryWithoutPreviousSession := false
 	eventLoop:
 		for {
 			select {
 			case <-ctx.Done():
-				a.setFailedAgentSession(context.WithoutCancel(ctx), agent.ID, userMessage, session.CurrentSessionID())
-				a.publishAgentRunFailed(userMessage, runID, ctx.Err())
+				failRun(context.WithoutCancel(ctx), session.CurrentSessionID(), ctx.Err())
 				_ = session.Close(context.WithoutCancel(ctx))
 				return
 			case evt, ok := <-session.Events():
@@ -175,13 +199,23 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 					_ = session.Close(context.WithoutCancel(ctx))
 					return
 				}
+				if evt.Usage != nil {
+					usage = evt.Usage
+				}
 				switch evt.Type {
 				case agentruntime.EventDelta:
+					if firstTokenAt == nil && strings.TrimSpace(evt.Text) != "" {
+						now := time.Now().UTC()
+						firstTokenAt = &now
+					}
 					if evt.Thinking != "" {
 						thinkingBuf.WriteString(evt.Thinking)
 					}
 					process := runtimeProcessItems(evt)
 					processBuf = append(processBuf, process...)
+					if evt.Text == "" && evt.Thinking == "" && len(process) == 0 {
+						continue
+					}
 					a.publishConversationEvent(domain.Event{
 						Type:             domain.EventAgentOutputDelta,
 						OrganizationID:   userMessage.OrganizationID,
@@ -190,11 +224,21 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 						Payload:          domain.AgentOutputDeltaPayload{RunID: runID, AgentID: agent.ID, Text: evt.Text, Thinking: evt.Thinking, Process: process},
 					})
 				case agentruntime.EventCompleted:
+					completedAt := time.Now().UTC()
+					if firstTokenAt == nil && strings.TrimSpace(evt.Text) != "" {
+						firstTokenAt = &completedAt
+					}
 					if evt.Thinking != "" {
 						thinkingBuf.WriteString(evt.Thinking)
 					}
 					processBuf = append(processBuf, runtimeProcessItems(evt)...)
-					a.completeAgentRun(ctx, userMessage, agent, runID, session.CurrentSessionID(), evt.Text, thinkingBuf.String(), processBuf)
+					a.completeAgentRun(ctx, userMessage, agent, runID, session.CurrentSessionID(), evt.Text, thinkingBuf.String(), processBuf, runTracker.metric(agentRunMetricInput{
+						Status:            "completed",
+						ProviderSessionID: session.CurrentSessionID(),
+						FirstTokenAt:      firstTokenAt,
+						CompletedAt:       completedAt,
+						Usage:             usage,
+					}))
 					if opts.OnCompleted != nil {
 						if err := opts.OnCompleted(ctx); err != nil {
 							a.publishAgentRunFailed(userMessage, runID, err)
@@ -207,7 +251,7 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 					if evt.StaleSession && previousSessionID != "" {
 						slog.Warn("agent runtime stale provider session; retrying without resume", append(runAttrs, "provider_session_id", previousSessionID, "error", err)...)
 						if err := a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, "", "stale"); err != nil {
-							a.publishAgentRunFailed(userMessage, runID, err)
+							failRun(ctx, session.CurrentSessionID(), err)
 							_ = session.Close(context.WithoutCancel(ctx))
 							return
 						}
@@ -216,6 +260,13 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 						break eventLoop
 					}
 					slog.Error("agent runtime event failed", append(runAttrs, "provider_session_id", session.CurrentSessionID(), "error", err)...)
+					a.recordAgentRunMetric(ctx, runTracker.metric(agentRunMetricInput{
+						Status:            "failed",
+						ProviderSessionID: session.CurrentSessionID(),
+						CompletedAt:       time.Now().UTC(),
+						FirstTokenAt:      firstTokenAt,
+						Usage:             usage,
+					}))
 					a.setFailedAgentSession(ctx, agent.ID, userMessage, session.CurrentSessionID())
 					a.publishAgentRunFailed(userMessage, runID, err)
 					_ = session.Close(context.WithoutCancel(ctx))
@@ -354,11 +405,18 @@ func (a *App) previousProviderSessionID(ctx context.Context, agentID string, mes
 	return session.ProviderSessionID, nil
 }
 
-func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, agent domain.Agent, runID string, providerSessionID string, body string, thinking string, process []domain.ProcessItem) {
+func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, agent domain.Agent, runID string, providerSessionID string, body string, thinking string, process []domain.ProcessItem, metric domain.AgentRunMetric) {
 	createdAt := time.Now().UTC()
 	if !createdAt.After(userMessage.CreatedAt) {
 		createdAt = userMessage.CreatedAt.Add(time.Nanosecond)
 	}
+	botMessageID := id.New("msg")
+	metric.ResponseMessageID = botMessageID
+	if metric.CompletedAt == nil {
+		completedAt := createdAt
+		metric.CompletedAt = &completedAt
+	}
+	metricSummary := messageMetricsSummary(metric)
 	var metadata map[string]any
 	if thinking = strings.TrimSpace(thinking); thinking != "" {
 		metadata = map[string]any{"thinking": thinking}
@@ -369,8 +427,12 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 		}
 		metadata["process"] = process
 	}
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	metadata["metrics"] = metricSummary
 	botMessage := domain.Message{
-		ID:               id.New("msg"),
+		ID:               botMessageID,
 		OrganizationID:   userMessage.OrganizationID,
 		ConversationType: userMessage.ConversationType,
 		ConversationID:   userMessage.ConversationID,
@@ -383,6 +445,11 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 	}
 	if err := a.store.Messages().Create(ctx, botMessage); err != nil {
 		a.setFailedAgentSession(ctx, agent.ID, userMessage, providerSessionID)
+		metric.Status = "failed"
+		metric.ResponseMessageID = ""
+		now := time.Now().UTC()
+		metric.CompletedAt = &now
+		a.recordAgentRunMetric(ctx, metric)
 		a.publishAgentRunFailed(userMessage, runID, err)
 		return
 	}
@@ -395,9 +462,12 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 	})
 	a.notifyAgentMessageCreated(context.WithoutCancel(ctx), agent.Name, botMessage)
 	if err := a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, providerSessionID, "completed"); err != nil {
+		metric.Status = "failed"
+		a.recordAgentRunMetric(ctx, metric)
 		a.publishAgentRunFailed(userMessage, runID, err)
 		return
 	}
+	a.recordAgentRunMetric(ctx, metric)
 	a.publishConversationEvent(domain.Event{
 		Type:             domain.EventAgentRunCompleted,
 		OrganizationID:   userMessage.OrganizationID,
@@ -423,6 +493,218 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 
 func (a *App) setFailedAgentSession(ctx context.Context, agentID string, message domain.Message, providerSessionID string) {
 	_ = a.store.Sessions().SetAgentSession(ctx, agentID, message.ConversationType, message.ConversationID, providerSessionID, "failed")
+}
+
+type agentRunMetricScope struct {
+	ProjectID string
+	ChannelID string
+	ThreadID  string
+}
+
+type agentRunTracker struct {
+	RunID       string
+	UserMessage domain.Message
+	Agent       domain.Agent
+	Scope       agentRunMetricScope
+	StartedAt   time.Time
+}
+
+type agentRunMetricInput struct {
+	Status            string
+	ProviderSessionID string
+	ResponseMessageID string
+	FirstTokenAt      *time.Time
+	CompletedAt       time.Time
+	Usage             *agentruntime.Usage
+}
+
+func (t agentRunTracker) metric(input agentRunMetricInput) domain.AgentRunMetric {
+	completedAt := input.CompletedAt
+	var completedAtPtr *time.Time
+	if !completedAt.IsZero() {
+		completedAtPtr = &completedAt
+	}
+	usage := input.Usage
+	metric := domain.AgentRunMetric{
+		RunID:             t.RunID,
+		OrganizationID:    t.UserMessage.OrganizationID,
+		ProjectID:         t.Scope.ProjectID,
+		ChannelID:         t.Scope.ChannelID,
+		ThreadID:          t.Scope.ThreadID,
+		ConversationType:  t.UserMessage.ConversationType,
+		ConversationID:    t.UserMessage.ConversationID,
+		MessageID:         t.UserMessage.ID,
+		ResponseMessageID: input.ResponseMessageID,
+		AgentID:           t.Agent.ID,
+		AgentName:         t.Agent.Name,
+		Provider:          providerForAgent(t.Agent),
+		Model:             strings.TrimSpace(t.Agent.Model),
+		Status:            input.Status,
+		StartedAt:         t.StartedAt,
+		FirstTokenAt:      input.FirstTokenAt,
+		CompletedAt:       completedAtPtr,
+		CreatedAt:         time.Now().UTC(),
+	}
+	if usage != nil {
+		if model := strings.TrimSpace(usage.Model); model != "" {
+			metric.Model = model
+		}
+		metric.InputTokens = usage.InputTokens
+		metric.CachedInputTokens = usage.CachedInputTokens
+		metric.CacheCreationInputTokens = usage.CacheCreationInputTokens
+		metric.CacheReadInputTokens = usage.CacheReadInputTokens
+		metric.OutputTokens = usage.OutputTokens
+		metric.ReasoningOutputTokens = usage.ReasoningOutputTokens
+		metric.TotalTokens = usage.TotalTokens
+		metric.TotalCostUSD = usage.TotalCostUSD
+		metric.RawUsageJSON = rawUsageJSON(usage.Raw)
+	}
+	if metric.TotalTokens == nil && metric.InputTokens != nil && metric.OutputTokens != nil {
+		total := *metric.InputTokens + *metric.OutputTokens
+		metric.TotalTokens = &total
+	}
+	if completedAtPtr != nil {
+		duration := completedAt.Sub(t.StartedAt).Milliseconds()
+		if duration < 0 {
+			duration = 0
+		}
+		metric.DurationMS = &duration
+	}
+	if input.FirstTokenAt != nil {
+		ttft := input.FirstTokenAt.Sub(t.StartedAt).Milliseconds()
+		if ttft < 0 {
+			ttft = 0
+		}
+		metric.TTFTMS = &ttft
+	}
+	if completedAtPtr != nil && metric.OutputTokens != nil {
+		seconds := metricTPSSeconds(t.StartedAt, completedAt, input.FirstTokenAt)
+		if seconds > 0 {
+			tps := float64(*metric.OutputTokens) / seconds
+			metric.TPS = &tps
+		}
+	}
+	metric.CacheHitRate = metricCacheHitRate(metric)
+	return metric
+}
+
+func metricTPSSeconds(startedAt time.Time, completedAt time.Time, firstTokenAt *time.Time) float64 {
+	totalSeconds := completedAt.Sub(startedAt).Seconds()
+	if totalSeconds < 0 {
+		totalSeconds = 0
+	}
+	if firstTokenAt == nil {
+		return totalSeconds
+	}
+	observedSeconds := completedAt.Sub(*firstTokenAt).Seconds()
+	if observedSeconds < 0 {
+		observedSeconds = 0
+	}
+	if observedSeconds < 0.25 && totalSeconds > observedSeconds {
+		return totalSeconds
+	}
+	return observedSeconds
+}
+
+func metricCacheHitRate(metric domain.AgentRunMetric) *float64 {
+	input := int64PtrValue(metric.InputTokens)
+	cacheCreation := int64PtrValue(metric.CacheCreationInputTokens)
+	cacheRead := int64PtrValue(metric.CacheReadInputTokens)
+	cached := int64PtrValue(metric.CachedInputTokens)
+	if cacheRead > cached {
+		cached = cacheRead
+	}
+	if cached <= 0 {
+		return nil
+	}
+
+	denominator := input
+	if cacheRead > 0 || cacheCreation > 0 {
+		denominator = input + cacheCreation + cacheRead
+	} else if cached > input {
+		denominator = input + cached
+	}
+	if denominator <= 0 {
+		return nil
+	}
+
+	rate := float64(cached) / float64(denominator)
+	if rate < 0 {
+		rate = 0
+	}
+	if rate > 1 {
+		rate = 1
+	}
+	return &rate
+}
+
+func int64PtrValue(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func runMetricScope(scope conversationScope) agentRunMetricScope {
+	result := agentRunMetricScope{
+		ProjectID: scope.project.ID,
+		ChannelID: scope.channel.ID,
+	}
+	if scope.thread != nil {
+		result.ThreadID = scope.thread.ID
+	}
+	return result
+}
+
+func providerForAgent(agent domain.Agent) string {
+	switch strings.TrimSpace(agent.Kind) {
+	case domain.AgentKindClaude:
+		return domain.AgentKindClaude
+	case domain.AgentKindCodex:
+		return domain.AgentKindCodex
+	case "", domain.AgentKindFake:
+		return domain.AgentKindFake
+	default:
+		return strings.TrimSpace(agent.Kind)
+	}
+}
+
+func rawUsageJSON(raw any) string {
+	if raw == nil {
+		return ""
+	}
+	content, err := json.Marshal(raw)
+	if err != nil {
+		return ""
+	}
+	return string(content)
+}
+
+func messageMetricsSummary(metric domain.AgentRunMetric) domain.MessageMetricsSummary {
+	return domain.MessageMetricsSummary{
+		RunID:        metric.RunID,
+		Provider:     metric.Provider,
+		TTFTMS:       metric.TTFTMS,
+		TPS:          metric.TPS,
+		DurationMS:   metric.DurationMS,
+		InputTokens:  metric.InputTokens,
+		OutputTokens: metric.OutputTokens,
+		TotalTokens:  metric.TotalTokens,
+		CacheHitRate: metric.CacheHitRate,
+	}
+}
+
+func (a *App) recordAgentRunMetric(ctx context.Context, metric domain.AgentRunMetric) {
+	if err := a.store.Metrics().Create(ctx, metric); err != nil {
+		slog.Warn(
+			"agent run metric persist failed",
+			"run_id", metric.RunID,
+			"agent_id", metric.AgentID,
+			"provider", metric.Provider,
+			"status", metric.Status,
+			"error", err,
+		)
+	}
 }
 
 func (a *App) publishAgentRunFailed(message domain.Message, runID string, err error) {

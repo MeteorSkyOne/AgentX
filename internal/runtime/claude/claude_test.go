@@ -154,6 +154,34 @@ func TestLineHandlerParsesClaudeStreamJSON(t *testing.T) {
 	}
 }
 
+func TestLineHandlerParsesClaudeResultUsage(t *testing.T) {
+	handler := newLineHandler("fallback")
+
+	events, err := handler.HandleLine([]byte(`{"type":"result","subtype":"success","is_error":false,"result":"ok","model":"claude-test","duration_ms":1200,"duration_api_ms":900,"total_cost_usd":0.0123,"usage":{"input_tokens":100,"cache_creation_input_tokens":25,"cache_read_input_tokens":50,"output_tokens":20}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != runtime.EventCompleted {
+		t.Fatalf("events = %#v", events)
+	}
+	usage := events[0].Usage
+	if usage == nil {
+		t.Fatal("usage is nil")
+	}
+	if usage.Model != "claude-test" || ptrValue(usage.InputTokens) != 100 || ptrValue(usage.OutputTokens) != 20 {
+		t.Fatalf("usage = %#v", usage)
+	}
+	if ptrValue(usage.CacheCreationInputTokens) != 25 || ptrValue(usage.CacheReadInputTokens) != 50 {
+		t.Fatalf("cache usage = %#v", usage)
+	}
+	if ptrValue(usage.DurationMS) != 1200 || ptrValue(usage.DurationAPIMS) != 900 {
+		t.Fatalf("duration usage = %#v", usage)
+	}
+	if usage.TotalCostUSD == nil || *usage.TotalCostUSD != 0.0123 {
+		t.Fatalf("cost = %#v", usage.TotalCostUSD)
+	}
+}
+
 func TestLineHandlerParsesThinkingContent(t *testing.T) {
 	handler := newLineHandler("fallback")
 
@@ -387,4 +415,11 @@ func readTrimmed(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return strings.TrimSpace(string(content))
+}
+
+func ptrValue(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }

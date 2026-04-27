@@ -44,6 +44,10 @@ func (s *Store) Users() store.UserStore {
 	return userRepo{q: s.db}
 }
 
+func (s *Store) UserPreferences() store.UserPreferencesStore {
+	return userPreferencesRepo{q: s.db}
+}
+
 func (s *Store) Organizations() store.OrganizationStore {
 	return organizationRepo{q: s.db}
 }
@@ -92,8 +96,16 @@ func (s *Store) Sessions() store.SessionStore {
 	return sessionRepo{q: s.db}
 }
 
+func (s *Store) Metrics() store.MetricsStore {
+	return metricsRepo{q: s.db}
+}
+
 func (t *txStore) Users() store.UserStore {
 	return userRepo{q: t.tx}
+}
+
+func (t *txStore) UserPreferences() store.UserPreferencesStore {
+	return userPreferencesRepo{q: t.tx}
 }
 
 func (t *txStore) Organizations() store.OrganizationStore {
@@ -142,4 +154,8 @@ func (t *txStore) Bindings() store.BindingStore {
 
 func (t *txStore) Sessions() store.SessionStore {
 	return sessionRepo{q: t.tx}
+}
+
+func (t *txStore) Metrics() store.MetricsStore {
+	return metricsRepo{q: t.tx}
 }

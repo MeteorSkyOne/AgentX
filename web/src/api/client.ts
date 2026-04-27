@@ -1,4 +1,5 @@
 import type {
+  AgentRunMetric,
   AuthResponse,
   BootstrapResponse,
   Agent,
@@ -9,11 +10,13 @@ import type {
   ConversationType,
   CreateThreadResponse,
   Message,
+  MetricsProvider,
   NotificationSettings,
   Organization,
   Project,
   Thread,
   User,
+  UserPreferences,
   Workspace,
   WorkspaceFile,
   WorkspaceTreeEntry
@@ -95,6 +98,17 @@ export function me(): Promise<User> {
   return request<User>("/api/me");
 }
 
+export function userPreferences(): Promise<UserPreferences> {
+  return request<UserPreferences>("/api/me/preferences");
+}
+
+export function updateUserPreferences(payload: UserPreferences): Promise<UserPreferences> {
+  return request<UserPreferences>("/api/me/preferences", {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
 export function organizations(): Promise<Organization[]> {
   return request<Organization[]>("/api/organizations");
 }
@@ -170,6 +184,16 @@ export function projectChannels(projectID: string): Promise<Channel[]> {
   return request<Channel[]>(`/api/projects/${encodeURIComponent(projectID)}/channels`);
 }
 
+export function projectMetrics(
+  projectID: string,
+  options: MetricsOptions = {}
+): Promise<AgentRunMetric[]> {
+  const params = metricsParams(options);
+  return request<AgentRunMetric[]>(
+    `/api/projects/${encodeURIComponent(projectID)}/metrics${params}`
+  );
+}
+
 export function createChannel(
   projectID: string,
   name: string,
@@ -199,6 +223,16 @@ export function deleteChannel(channelID: string): Promise<void> {
 
 export function channelThreads(channelID: string): Promise<Thread[]> {
   return request<Thread[]>(`/api/channels/${encodeURIComponent(channelID)}/threads`);
+}
+
+export function channelMetrics(
+  channelID: string,
+  options: MetricsOptions = {}
+): Promise<AgentRunMetric[]> {
+  const params = metricsParams(options);
+  return request<AgentRunMetric[]>(
+    `/api/channels/${encodeURIComponent(channelID)}/metrics${params}`
+  );
 }
 
 export function createThread(
@@ -341,6 +375,17 @@ export function conversationContext(
   );
 }
 
+export function conversationMetrics(
+  type: ConversationType,
+  id: string,
+  options: MetricsOptions = {}
+): Promise<AgentRunMetric[]> {
+  const params = metricsParams(options);
+  return request<AgentRunMetric[]>(
+    `/api/conversations/${encodeURIComponent(type)}/${encodeURIComponent(id)}/metrics${params}`
+  );
+}
+
 export function sendMessage(
   type: ConversationType,
   id: string,
@@ -371,4 +416,25 @@ export function deleteMessage(messageID: string): Promise<void> {
   return request<void>(`/api/messages/${encodeURIComponent(messageID)}`, {
     method: "DELETE"
   });
+}
+
+type MetricsOptions = {
+  limit?: number;
+  provider?: MetricsProvider | "";
+  group?: "agent" | "";
+};
+
+function metricsParams(options: MetricsOptions): string {
+  const params = new URLSearchParams();
+  if (options.limit) {
+    params.set("limit", String(options.limit));
+  }
+  if (options.provider) {
+    params.set("provider", options.provider);
+  }
+  if (options.group) {
+    params.set("group", options.group);
+  }
+  const query = params.toString();
+  return query ? `?${query}` : "";
 }

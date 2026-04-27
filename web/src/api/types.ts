@@ -21,10 +21,23 @@ export interface ProcessItem {
   created_at?: string;
 }
 
+export interface MessageMetricsSummary {
+  run_id: string;
+  provider: string;
+  ttft_ms?: number | null;
+  tps?: number | null;
+  duration_ms?: number | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  total_tokens?: number | null;
+  cache_hit_rate?: number | null;
+}
+
 export interface MessageMetadata {
   thinking?: string;
   process?: ProcessItem[];
-  [key: string]: JsonValue | ProcessItem[] | undefined;
+  metrics?: MessageMetricsSummary;
+  [key: string]: JsonValue | ProcessItem[] | MessageMetricsSummary | undefined;
 }
 
 export interface MessageReference {
@@ -55,6 +68,52 @@ export interface NotificationSettings {
   webhook_secret_configured: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface UserPreferences {
+  show_ttft: boolean;
+  show_tps: boolean;
+}
+
+export type MetricsProvider = "claude" | "codex" | "fake";
+
+export interface AgentRunMetric {
+  run_id: string;
+  organization_id: string;
+  project_id?: string;
+  project_name?: string;
+  channel_id?: string;
+  channel_name?: string;
+  thread_id?: string;
+  thread_title?: string;
+  conversation_type: ConversationType;
+  conversation_id: string;
+  message_id: string;
+  response_message_id?: string;
+  agent_id: string;
+  agent_name: string;
+  provider: string;
+  model: string;
+  status: string;
+  run_count?: number;
+  completed_runs?: number;
+  failed_runs?: number;
+  started_at: string;
+  first_token_at?: string | null;
+  completed_at?: string | null;
+  ttft_ms?: number | null;
+  duration_ms?: number | null;
+  tps?: number | null;
+  input_tokens?: number | null;
+  cached_input_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+  cache_read_input_tokens?: number | null;
+  output_tokens?: number | null;
+  reasoning_output_tokens?: number | null;
+  total_tokens?: number | null;
+  cache_hit_rate?: number | null;
+  total_cost_usd?: number | null;
+  created_at: string;
 }
 
 export interface Channel {

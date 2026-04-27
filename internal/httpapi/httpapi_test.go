@@ -276,6 +276,58 @@ func TestHTTPMeRequiresBearerToken(t *testing.T) {
 	}
 }
 
+func TestHTTPPreferencesAndMetricsEndpoints(t *testing.T) {
+	ts := newTestServer(t)
+
+	var bootstrap app.BootstrapResult
+	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	}, http.StatusOK, &bootstrap)
+
+	var preferences map[string]bool
+	getJSON(t, ts.URL+"/api/me/preferences", bootstrap.SessionToken, http.StatusOK, &preferences)
+	if !preferences["show_ttft"] || !preferences["show_tps"] {
+		t.Fatalf("default preferences = %#v", preferences)
+	}
+	putJSON(t, ts.URL+"/api/me/preferences", bootstrap.SessionToken, map[string]bool{
+		"show_ttft": false,
+		"show_tps":  true,
+	}, http.StatusOK, &preferences)
+	if preferences["show_ttft"] || !preferences["show_tps"] {
+		t.Fatalf("updated preferences = %#v", preferences)
+	}
+
+	var sent domain.Message
+	postJSON(t, ts.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages", bootstrap.SessionToken, map[string]string{
+		"body": "metrics",
+	}, http.StatusOK, &sent)
+
+	var rows []domain.AgentRunMetric
+	requireEventually(t, time.Second, func() bool {
+		getJSON(t, ts.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/metrics?provider=fake", bootstrap.SessionToken, http.StatusOK, &rows)
+		return len(rows) == 1 && rows[0].Provider == domain.AgentKindFake && rows[0].MessageID == sent.ID
+	})
+	if rows[0].ProjectName != bootstrap.Project.Name || rows[0].ChannelName != bootstrap.Channel.Name {
+		t.Fatalf("metrics scope names = %#v, want project %q channel %q", rows[0], bootstrap.Project.Name, bootstrap.Channel.Name)
+	}
+	getJSON(t, ts.URL+"/api/channels/"+bootstrap.Channel.ID+"/metrics", bootstrap.SessionToken, http.StatusOK, &rows)
+	if len(rows) != 1 {
+		t.Fatalf("channel metrics rows = %#v", rows)
+	}
+	getJSON(t, ts.URL+"/api/projects/"+bootstrap.Project.ID+"/metrics", bootstrap.SessionToken, http.StatusOK, &rows)
+	if len(rows) != 1 {
+		t.Fatalf("project metrics rows = %#v", rows)
+	}
+	getJSON(t, ts.URL+"/api/projects/"+bootstrap.Project.ID+"/metrics?group=agent", bootstrap.SessionToken, http.StatusOK, &rows)
+	if len(rows) != 1 || rows[0].RunCount != 1 || rows[0].AgentID != bootstrap.Agent.ID {
+		t.Fatalf("project metric summaries = %#v", rows)
+	}
+	getJSON(t, ts.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/metrics?provider=bad", bootstrap.SessionToken, http.StatusBadRequest, nil)
+	getJSON(t, ts.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/metrics?group=bad", bootstrap.SessionToken, http.StatusBadRequest, nil)
+	getJSON(t, ts.URL+"/api/me/preferences", "", http.StatusUnauthorized, nil)
+}
+
 func TestHTTPSendMessageRejectsUnknownChannelWithoutCreatingOrphan(t *testing.T) {
 	ts := newTestServer(t)
 

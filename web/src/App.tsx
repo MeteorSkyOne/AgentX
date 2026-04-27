@@ -31,6 +31,8 @@ import {
   updateNotificationSettings,
   updateProject,
   updateThread,
+  updateUserPreferences,
+  userPreferences,
   workspace,
   workspaceFile,
   workspaceTree
@@ -47,6 +49,7 @@ import type {
   ProcessItem,
   Project,
   Thread,
+  UserPreferences,
   WorkspaceTreeEntry
 } from "./api/types";
 import { LoginView } from "./components/LoginView";
@@ -171,6 +174,12 @@ export default function App() {
     queryKey: ["notification-settings", selectedOrganizationID],
     queryFn: () => notificationSettings(selectedOrganizationID as string),
     enabled: hasSession && Boolean(selectedOrganizationID)
+  });
+
+  const userPreferencesQuery = useQuery({
+    queryKey: ["user-preferences", sessionToken],
+    queryFn: userPreferences,
+    enabled: hasSession && meQuery.isSuccess
   });
 
   const channelAgentsQuery = useQuery({
@@ -683,6 +692,12 @@ export default function App() {
     return updated;
   }
 
+  async function handleUpdateUserPreferences(payload: UserPreferences): Promise<UserPreferences> {
+    const updated = await updateUserPreferences(payload);
+    await queryClient.invalidateQueries({ queryKey: ["user-preferences", sessionToken] });
+    return updated;
+  }
+
   async function handleTestNotificationSettings(): Promise<void> {
     await testNotificationSettings(selectedOrganizationID as string);
   }
@@ -754,6 +769,8 @@ export default function App() {
       streaming={Object.values(streamingByRunID)}
       notificationSettings={notificationSettingsQuery.data}
       notificationSettingsLoading={notificationSettingsQuery.isLoading}
+      preferences={userPreferencesQuery.data ?? { show_ttft: true, show_tps: true }}
+      preferencesLoading={userPreferencesQuery.isLoading}
       theme={theme}
       onSelectProject={handleSelectProject}
       onCreateProject={handleCreateProject}
@@ -772,6 +789,7 @@ export default function App() {
       onUpdateAgent={handleUpdateAgent}
       onDeleteAgent={handleDeleteAgent}
       onUpdateNotificationSettings={handleUpdateNotificationSettings}
+      onUpdateUserPreferences={handleUpdateUserPreferences}
       onTestNotificationSettings={handleTestNotificationSettings}
       onLoadWorkspaceTree={handleLoadWorkspaceTree}
       onReadWorkspaceFile={handleReadWorkspaceFile}

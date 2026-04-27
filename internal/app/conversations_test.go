@@ -198,6 +198,10 @@ func TestAgentRunStreamsAndPersistsProcessMetadata(t *testing.T) {
 	defer st.Close()
 
 	bus := eventbus.New()
+	inputTokens := int64(42)
+	cachedTokens := int64(12)
+	outputTokens := int64(7)
+	totalTokens := int64(49)
 	app := New(st, bus, Options{
 		AdminToken: "secret",
 		DataDir:    t.TempDir(),
@@ -223,7 +227,14 @@ func TestAgentRunStreamsAndPersistsProcessMetadata(t *testing.T) {
 					}},
 				},
 				{Type: agentruntime.EventDelta, Text: "done"},
-				{Type: agentruntime.EventCompleted, Text: "done"},
+				{Type: agentruntime.EventCompleted, Text: "done", Usage: &agentruntime.Usage{
+					Model:             "fake-test",
+					InputTokens:       &inputTokens,
+					CachedInputTokens: &cachedTokens,
+					OutputTokens:      &outputTokens,
+					TotalTokens:       &totalTokens,
+					Raw:               map[string]any{"input_tokens": 42},
+				}},
 			}},
 		},
 	})
@@ -307,6 +318,135 @@ func TestAgentRunStreamsAndPersistsProcessMetadata(t *testing.T) {
 	toolCall, ok := process[1].(map[string]any)
 	if !ok || toolCall["type"] != "tool_call" || toolCall["tool_name"] != "Read" {
 		t.Fatalf("tool process metadata = %#v", process[1])
+	}
+	metricsMeta, ok := botMessage.Metadata["metrics"].(map[string]any)
+	if !ok {
+		t.Fatalf("metrics metadata = %#v", botMessage.Metadata["metrics"])
+	}
+	if metricsMeta["provider"] != domain.AgentKindFake || metricsMeta["input_tokens"] != float64(42) || metricsMeta["output_tokens"] != float64(7) {
+		t.Fatalf("metrics metadata = %#v", metricsMeta)
+	}
+	var rows []domain.AgentRunMetric
+	requireEventuallyApp(t, time.Second, func() bool {
+		var err error
+		rows, err = app.ConversationMetrics(ctx, domain.ConversationChannel, bootstrap.Channel.ID, store.MetricsFilter{Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(rows) == 1
+	})
+	if rows[0].Provider != domain.AgentKindFake || rows[0].InputTokens == nil || *rows[0].InputTokens != 42 || rows[0].ResponseMessageID != botMessage.ID {
+		t.Fatalf("metrics rows = %#v", rows)
+	}
+}
+
+func TestAgentRunPersistsFailedMetric(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	bus := eventbus.New()
+	app := New(st, bus, Options{
+		AdminToken: "secret",
+		DataDir:    t.TempDir(),
+		Runtimes: map[string]agentruntime.Runtime{
+			domain.AgentKindFake: scriptedRuntime{events: []agentruntime.Event{
+				{Type: agentruntime.EventFailed, Error: "runtime failed"},
+			}},
+		},
+	})
+	bootstrap, err := app.Bootstrap(ctx, BootstrapRequest{
+		AdminToken:  "secret",
+		DisplayName: "Meteorsky",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "fail",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	requireEventuallyApp(t, time.Second, func() bool {
+		rows, err := app.ConversationMetrics(ctx, domain.ConversationChannel, bootstrap.Channel.ID, store.MetricsFilter{Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(rows) == 1 && rows[0].Status == "failed" && rows[0].ResponseMessageID == ""
+	})
+}
+
+func TestAgentRunMetricTPSUsesDurationForBatchedOutput(t *testing.T) {
+	startedAt := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
+	completedAt := startedAt.Add(10 * time.Second)
+	firstTokenAt := completedAt.Add(-time.Millisecond)
+	outputTokens := int64(100)
+	tracker := agentRunTracker{
+		RunID: "run_test",
+		UserMessage: domain.Message{
+			ID:               "msg_test",
+			OrganizationID:   "org_test",
+			ConversationType: domain.ConversationChannel,
+			ConversationID:   "chn_test",
+			CreatedAt:        startedAt,
+		},
+		Agent:     domain.Agent{ID: "agt_test", Name: "Codex", Kind: domain.AgentKindCodex},
+		StartedAt: startedAt,
+	}
+	metric := tracker.metric(agentRunMetricInput{
+		Status:       "completed",
+		FirstTokenAt: &firstTokenAt,
+		CompletedAt:  completedAt,
+		Usage:        &agentruntime.Usage{OutputTokens: &outputTokens},
+	})
+	if metric.TPS == nil || *metric.TPS != 10 {
+		t.Fatalf("tps = %#v, want 10", metric.TPS)
+	}
+	if metric.TTFTMS == nil || *metric.TTFTMS != 9999 {
+		t.Fatalf("ttft = %#v, want 9999", metric.TTFTMS)
+	}
+}
+
+func TestAgentRunMetricCacheHitUsesTotalInputSideTokens(t *testing.T) {
+	startedAt := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
+	inputTokens := int64(3)
+	cacheReadTokens := int64(11639)
+	outputTokens := int64(3880)
+	tracker := agentRunTracker{
+		RunID: "run_cache",
+		UserMessage: domain.Message{
+			ID:               "msg_cache",
+			OrganizationID:   "org_test",
+			ConversationType: domain.ConversationChannel,
+			ConversationID:   "chn_test",
+			CreatedAt:        startedAt,
+		},
+		Agent:     domain.Agent{ID: "agt_test", Name: "Claude", Kind: domain.AgentKindClaude},
+		StartedAt: startedAt,
+	}
+	metric := tracker.metric(agentRunMetricInput{
+		Status:      "completed",
+		CompletedAt: startedAt.Add(10 * time.Second),
+		Usage: &agentruntime.Usage{
+			InputTokens:          &inputTokens,
+			CacheReadInputTokens: &cacheReadTokens,
+			OutputTokens:         &outputTokens,
+		},
+	})
+	if metric.CacheHitRate == nil {
+		t.Fatal("cache hit rate is nil")
+	}
+	if *metric.CacheHitRate > 1 || *metric.CacheHitRate < 0.99 {
+		t.Fatalf("cache hit rate = %v, want <= 1 and near 1", *metric.CacheHitRate)
 	}
 }
 

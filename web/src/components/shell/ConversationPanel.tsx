@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Composer } from "../Composer";
 import { MessagePane } from "../MessagePane";
-import type { Channel, ConversationAgentContext, Message, Thread } from "../../api/types";
+import type { Channel, ConversationAgentContext, Message, Thread, UserPreferences } from "../../api/types";
 import type { ComposerConversation, ShellProps, StreamingMessage } from "./types";
 import { ThreadForum } from "./ThreadForum";
 
@@ -15,6 +15,7 @@ export function ConversationPanel({
   hasOlderMessages,
   streaming,
   boundAgents,
+  preferences,
   composerConversation,
   onSelectThread,
   onCreateThread,
@@ -34,6 +35,7 @@ export function ConversationPanel({
   hasOlderMessages: boolean;
   streaming: StreamingMessage[];
   boundAgents: ConversationAgentContext[];
+  preferences: UserPreferences;
   composerConversation?: ComposerConversation;
   onSelectThread: ShellProps["onSelectThread"];
   onCreateThread: ShellProps["onCreateThread"];
@@ -105,6 +107,7 @@ export function ConversationPanel({
         hasOlderMessages={hasOlderMessages}
         streaming={streaming}
         agents={boundAgents}
+        preferences={preferences}
         onUpdateMessage={onUpdateMessage}
         onDeleteMessage={onDeleteMessage}
         onLoadOlder={onLoadOlderMessages}

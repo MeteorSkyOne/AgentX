@@ -41,8 +41,24 @@ type Event struct {
 	Text         string
 	Thinking     string
 	Process      []ProcessItem
+	Usage        *Usage
 	Error        string
 	StaleSession bool
+}
+
+type Usage struct {
+	Model                    string
+	InputTokens              *int64
+	CachedInputTokens        *int64
+	CacheCreationInputTokens *int64
+	CacheReadInputTokens     *int64
+	OutputTokens             *int64
+	ReasoningOutputTokens    *int64
+	TotalTokens              *int64
+	TotalCostUSD             *float64
+	DurationMS               *int64
+	DurationAPIMS            *int64
+	Raw                      any
 }
 
 type ProcessItem struct {

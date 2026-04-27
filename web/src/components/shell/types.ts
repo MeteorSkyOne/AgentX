@@ -12,6 +12,7 @@ import type {
   Project,
   Thread,
   User,
+  UserPreferences,
   Workspace,
   WorkspaceTreeEntry,
 } from "../../api/types";
@@ -60,6 +61,8 @@ export interface ShellProps {
   streaming: StreamingMessage[];
   notificationSettings?: NotificationSettings;
   notificationSettingsLoading: boolean;
+  preferences: UserPreferences;
+  preferencesLoading: boolean;
   theme: ThemeMode;
   onSelectProject: (projectID: string) => void;
   onCreateProject: (name: string) => Promise<Project>;
@@ -102,6 +105,7 @@ export interface ShellProps {
     webhook_url: string;
     webhook_secret?: string;
   }) => Promise<NotificationSettings>;
+  onUpdateUserPreferences: (payload: UserPreferences) => Promise<UserPreferences>;
   onTestNotificationSettings: () => Promise<void>;
   onLoadWorkspaceTree: (workspaceID: string) => Promise<WorkspaceTreeEntry>;
   onReadWorkspaceFile: (workspaceID: string, path: string) => Promise<string>;

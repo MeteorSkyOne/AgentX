@@ -64,6 +64,31 @@ func scanNotificationSettings(scanner interface {
 	return settings, nil
 }
 
+func scanUserPreferences(scanner interface {
+	Scan(dest ...any) error
+}) (domain.UserPreferences, error) {
+	var preferences domain.UserPreferences
+	var showTTFT, showTPS int
+	var createdAt, updatedAt string
+	if err := scanner.Scan(
+		&preferences.UserID, &showTTFT, &showTPS, &createdAt, &updatedAt,
+	); err != nil {
+		return domain.UserPreferences{}, err
+	}
+	var err error
+	preferences.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return domain.UserPreferences{}, err
+	}
+	preferences.UpdatedAt, err = parseTime(updatedAt)
+	if err != nil {
+		return domain.UserPreferences{}, err
+	}
+	preferences.ShowTTFT = showTTFT != 0
+	preferences.ShowTPS = showTPS != 0
+	return preferences, nil
+}
+
 func scanProject(scanner interface {
 	Scan(dest ...any) error
 }) (domain.Project, error) {

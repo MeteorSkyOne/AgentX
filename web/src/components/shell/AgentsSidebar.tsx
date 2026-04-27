@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Plus, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/collapsible";
 import type { Agent, ConversationAgentContext } from "../../api/types";
 import { AgentAvatar } from "../AgentAvatar";
+import { uniqueAgents } from "./agentLists";
 
 export function AgentsSidebar({
   agents,
@@ -23,6 +24,7 @@ export function AgentsSidebar({
   onCreateAgent: () => void;
 }) {
   const [open, setOpen] = useState(true);
+  const visibleAgents = useMemo(() => uniqueAgents(agents).filter((agent) => agent.enabled), [agents]);
   const boundAgentIDs = new Set(boundAgents.map((item) => item.agent.id));
 
   return (
@@ -36,7 +38,7 @@ export function AgentsSidebar({
           </button>
         </CollapsibleTrigger>
         <CollapsibleContent className="min-w-0 max-w-full space-y-0.5 overflow-hidden">
-          {agents.map((agent) => {
+          {visibleAgents.map((agent) => {
             const joined = boundAgentIDs.has(agent.id);
             return (
               <button
@@ -57,7 +59,7 @@ export function AgentsSidebar({
               </button>
             );
           })}
-          {agents.length === 0 && (
+          {visibleAgents.length === 0 && (
             <p className="px-2 py-1.5 text-xs text-muted-foreground">No agents</p>
           )}
           <button

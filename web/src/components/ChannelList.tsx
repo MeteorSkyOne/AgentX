@@ -1,8 +1,16 @@
 import { useState } from "react";
-import { Check, Hash, ChevronDown, ChevronRight, Pencil, Plus, Rows3, Trash2, X } from "lucide-react";
+import { BarChart3, Check, Hash, ChevronDown, ChevronRight, Pencil, Plus, Rows3, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Channel } from "../api/types";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Collapsible,
@@ -13,17 +21,20 @@ import {
 interface ChannelListProps {
   channels: Channel[];
   selectedChannelID?: string;
+  metricsActive?: boolean;
   onSelect: (channel: Channel) => void;
+  onOpenMetrics?: () => void;
   onCreate: () => void;
   onUpdate: (channelID: string, name: string) => Promise<Channel>;
   onDelete: (channel: Channel) => Promise<void>;
 }
 
-export function ChannelList({ channels, selectedChannelID, onSelect, onCreate, onUpdate, onDelete }: ChannelListProps) {
+export function ChannelList({ channels, selectedChannelID, metricsActive = false, onSelect, onOpenMetrics, onCreate, onUpdate, onDelete }: ChannelListProps) {
   const [open, setOpen] = useState(true);
   const [editingID, setEditingID] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [pendingID, setPendingID] = useState<string | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<Channel | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function beginEdit(channel: Channel) {
@@ -47,12 +58,14 @@ export function ChannelList({ channels, selectedChannelID, onSelect, onCreate, o
     }
   }
 
-  async function remove(channel: Channel) {
-    if (!window.confirm(`Delete #${channel.name}?`)) return;
+  async function remove() {
+    const channel = deleteCandidate;
+    if (!channel) return;
     setPendingID(channel.id);
     setError(null);
     try {
       await onDelete(channel);
+      setDeleteCandidate(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Delete channel failed");
     } finally {
@@ -61,6 +74,7 @@ export function ChannelList({ channels, selectedChannelID, onSelect, onCreate, o
   }
 
   return (
+    <>
     <Collapsible open={open} onOpenChange={setOpen} className="min-w-0 max-w-full overflow-hidden">
       <CollapsibleTrigger asChild>
         <button className="flex min-w-0 max-w-full w-full items-center gap-1 px-1 py-1 text-xs font-semibold uppercase text-muted-foreground hover:text-foreground">
@@ -73,12 +87,28 @@ export function ChannelList({ channels, selectedChannelID, onSelect, onCreate, o
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent className="min-w-0 max-w-full space-y-0.5 overflow-hidden">
+        {onOpenMetrics ? (
+          <button
+            className={cn(
+              "flex min-h-10 min-w-0 max-w-full w-full items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-left text-sm transition-colors md:min-h-8",
+              metricsActive
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+            )}
+            title="Metrics"
+            aria-label="Metrics"
+            onClick={onOpenMetrics}
+          >
+            <BarChart3 className="h-4 w-4 shrink-0" />
+            <span className="block min-w-0 truncate">Metrics</span>
+          </button>
+        ) : null}
         {channels.map((channel) => (
           <div
             key={channel.id}
             className={cn(
               "group flex min-h-10 min-w-0 max-w-full w-full items-center gap-1 overflow-hidden rounded-md px-1 py-0.5 text-sm transition-colors md:min-h-8",
-              channel.id === selectedChannelID
+              !metricsActive && channel.id === selectedChannelID
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
             )}
@@ -150,7 +180,10 @@ export function ChannelList({ channels, selectedChannelID, onSelect, onCreate, o
                   title="Delete channel"
                   aria-label="Delete channel"
                   disabled={pendingID === channel.id}
-                  onClick={() => remove(channel)}
+                  onClick={() => {
+                    setError(null);
+                    setDeleteCandidate(channel);
+                  }}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
@@ -173,5 +206,29 @@ export function ChannelList({ channels, selectedChannelID, onSelect, onCreate, o
         </button>
       </CollapsibleContent>
     </Collapsible>
+    <Dialog
+      open={Boolean(deleteCandidate)}
+      onOpenChange={(open) => {
+        if (!open && !pendingID) setDeleteCandidate(null);
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete channel</DialogTitle>
+          <DialogDescription>
+            Delete #{deleteCandidate?.name}? Messages and threads in this channel will no longer be available.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setDeleteCandidate(null)} disabled={Boolean(pendingID)}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={() => remove()} disabled={!deleteCandidate || Boolean(pendingID)}>
+            Delete
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   ArrowLeft,
+  BarChart3,
   Bot,
   ChevronDown,
   FolderOpen,
@@ -39,6 +40,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -62,8 +64,10 @@ import {
 } from "../notifications/browser";
 import { AgentDetailsPanel } from "./shell/AgentDetailsPanel";
 import { AgentsSidebar } from "./shell/AgentsSidebar";
+import { uniqueAgents, uniqueConversationAgents } from "./shell/agentLists";
 import { ConversationPanel } from "./shell/ConversationPanel";
 import { MembersPanel } from "./shell/MembersPanel";
+import { MetricsPanel } from "./shell/MetricsPanel";
 import {
   useWorkspaceFileBrowser,
   WorkspaceFileEditorPane,
@@ -103,6 +107,8 @@ export function Shell({
   streaming,
   notificationSettings,
   notificationSettingsLoading,
+  preferences,
+  preferencesLoading,
   theme,
   onSelectProject,
   onCreateProject,
@@ -121,6 +127,7 @@ export function Shell({
   onUpdateAgent,
   onDeleteAgent,
   onUpdateNotificationSettings,
+  onUpdateUserPreferences,
   onTestNotificationSettings,
   onLoadWorkspaceTree,
   onReadWorkspaceFile,
@@ -137,6 +144,7 @@ export function Shell({
   const [focusedAgentID, setFocusedAgentID] = useState("");
   const [membersPanelOpen, setMembersPanelOpen] = useState(false);
   const [projectFilesOpen, setProjectFilesOpen] = useState(false);
+  const [mainView, setMainView] = useState<"chat" | "metrics">("chat");
   const [mobileProjectFilesView, setMobileProjectFilesView] = useState<"tree" | "editor">("tree");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [mobileAgentPanelOpen, setMobileAgentPanelOpen] = useState(false);
@@ -182,14 +190,22 @@ export function Shell({
   const [webhookEnabled, setWebhookEnabled] = useState(false);
   const [webhookURL, setWebhookURL] = useState("");
   const [webhookSecret, setWebhookSecret] = useState("");
+  const [showTTFT, setShowTTFT] = useState(preferences.show_ttft);
+  const [showTPS, setShowTPS] = useState(preferences.show_tps);
   const [notificationActionError, setNotificationActionError] = useState<string | null>(null);
   const [notificationActionStatus, setNotificationActionStatus] = useState<string | null>(null);
   const [notificationSavePending, setNotificationSavePending] = useState(false);
   const [notificationTestPending, setNotificationTestPending] = useState(false);
-  const boundAgents = conversationContext?.agents ?? channelAgents;
-  const activeAgents = useMemo(() => agents.filter((agent) => agent.enabled), [agents]);
+  const [preferencesPending, setPreferencesPending] = useState(false);
+  const [preferencesError, setPreferencesError] = useState<string | null>(null);
+  const visibleAgents = useMemo(() => uniqueAgents(agents), [agents]);
+  const boundAgents = useMemo(
+    () => uniqueConversationAgents(conversationContext?.agents ?? channelAgents),
+    [channelAgents, conversationContext?.agents]
+  );
+  const activeAgents = useMemo(() => visibleAgents.filter((agent) => agent.enabled), [visibleAgents]);
   const selectedAgent =
-    agents.find((agent) => agent.id === focusedAgentID) ?? boundAgents[0]?.agent ?? activeAgents[0];
+    visibleAgents.find((agent) => agent.id === focusedAgentID) ?? boundAgents[0]?.agent ?? activeAgents[0];
   const activeThread = conversationContext?.thread;
   const projectFilesController = useWorkspaceFileBrowser({
     workspaceID: projectWorkspace?.id,
@@ -226,6 +242,7 @@ export function Shell({
   useEffect(() => {
     setAgentPanelOpen(false);
     setFocusedAgentID("");
+    setMainView("chat");
   }, [selectedChannel?.id, activeConversation?.id]);
 
   useEffect(() => {
@@ -233,7 +250,12 @@ export function Shell({
     setMobileAgentPanelOpen(false);
     setMobileMembersPanelOpen(false);
     setFocusedAgentID("");
+    setMainView("chat");
   }, [selectedChannel?.id, activeConversation?.id]);
+
+  useEffect(() => {
+    setMainView("chat");
+  }, [project?.id]);
 
   useEffect(() => {
     setThreadTitleDraft(activeThread?.title ?? "");
@@ -263,12 +285,15 @@ export function Shell({
   useEffect(() => {
     if (!accountSettingsOpen) {
       syncNotificationDraft();
+      syncPreferenceDraft();
     }
   }, [
     accountSettingsOpen,
     notificationSettings?.organization_id,
     notificationSettings?.webhook_enabled,
-    notificationSettings?.webhook_url
+    notificationSettings?.webhook_url,
+    preferences.show_ttft,
+    preferences.show_tps
   ]);
 
   async function submitProject() {
@@ -356,6 +381,28 @@ export function Shell({
     setNotificationActionStatus(null);
   }
 
+  function syncPreferenceDraft() {
+    setShowTTFT(preferences.show_ttft);
+    setShowTPS(preferences.show_tps);
+    setPreferencesError(null);
+  }
+
+  async function saveMetricDisplayPreferences(next: { show_ttft: boolean; show_tps: boolean }) {
+    setShowTTFT(next.show_ttft);
+    setShowTPS(next.show_tps);
+    setPreferencesError(null);
+    setPreferencesPending(true);
+    try {
+      await onUpdateUserPreferences(next);
+    } catch (err) {
+      setShowTTFT(preferences.show_ttft);
+      setShowTPS(preferences.show_tps);
+      setPreferencesError(err instanceof Error ? err.message : "Save preferences failed");
+    } finally {
+      setPreferencesPending(false);
+    }
+  }
+
   async function enableBrowserNotifications() {
     const permission = await requestBrowserNotificationPermission();
     setBrowserPermission(permission);
@@ -408,6 +455,7 @@ export function Shell({
   function openProjectFiles() {
     if (!projectWorkspace?.id) return;
     blurActiveElement();
+    setMainView("chat");
     setAgentPanelOpen(false);
     setMembersPanelOpen(false);
     setMobileNavOpen(false);
@@ -416,6 +464,19 @@ export function Shell({
     setMobileProjectFilesView("tree");
     setProjectFilesOpen(true);
     void projectFilesController.loadTree({ quiet: true });
+  }
+
+  function openMetrics() {
+    if (!project && !selectedChannel) return;
+    blurActiveElement();
+    setProjectFilesOpen(false);
+    setMobileProjectFilesView("tree");
+    setAgentPanelOpen(false);
+    setMembersPanelOpen(false);
+    setMobileNavOpen(false);
+    setMobileAgentPanelOpen(false);
+    setMobileMembersPanelOpen(false);
+    setMainView("metrics");
   }
 
   function toggleProjectFiles() {
@@ -444,9 +505,14 @@ export function Shell({
     onSelectProject(projectID);
   }
 
+  function selectSidebarChannel(channel: Channel) {
+    setMainView("chat");
+    onSelectChannel(channel);
+  }
+
   function selectMobileChannel(channel: Channel) {
     setMobileNavOpen(false);
-    onSelectChannel(channel);
+    selectSidebarChannel(channel);
   }
 
   async function submitChannel() {
@@ -463,7 +529,7 @@ export function Shell({
     const name = newAgentName.trim();
     if (!name) return;
     const handle = normalizeAgentHandle(newAgentHandle || name);
-    if (agents.some((agent) => agent.handle === handle)) {
+    if (visibleAgents.some((agent) => agent.handle === handle)) {
       setNewAgentError(`Agent @${handle} already exists. Choose a different handle.`);
       return;
     }
@@ -545,6 +611,8 @@ export function Shell({
 
   const title = conversationTitle(selectedChannel, activeThread, boundAgents.map((item) => item.agent));
   const subtitle = conversationSubtitle(selectedChannel, activeThread, boundAgents.length);
+  const headerTitle = mainView === "metrics" ? "Metrics" : title;
+  const headerSubtitle = mainView === "metrics" ? project?.name ?? "No project" : subtitle;
   const composerConversation =
     activeConversation && selectedChannel?.type === "text"
       ? { type: activeConversation.type, id: activeConversation.id, label: `#${selectedChannel.name}` }
@@ -594,9 +662,9 @@ export function Shell({
             </Button>
           ) : null}
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-sm font-semibold">{projectFilesOpen ? "Project files" : title}</h1>
+            <h1 className="truncate text-sm font-semibold">{projectFilesOpen ? "Project files" : headerTitle}</h1>
             <p className="truncate text-xs text-muted-foreground">
-              {projectFilesOpen ? projectWorkspace?.path ?? "No workspace" : subtitle}
+              {projectFilesOpen ? projectWorkspace?.path ?? "No workspace" : headerSubtitle}
             </p>
           </div>
           <Button
@@ -692,6 +760,12 @@ export function Shell({
               className="min-h-0 flex-1"
             />
           )
+        ) : mainView === "metrics" ? (
+          <MetricsPanel
+            project={project}
+            selectedChannel={selectedChannel}
+            activeConversation={activeConversation}
+          />
         ) : (
           <ConversationPanel
             selectedChannel={selectedChannel}
@@ -703,6 +777,7 @@ export function Shell({
             hasOlderMessages={hasOlderMessages}
             streaming={streaming}
             boundAgents={boundAgents}
+            preferences={preferences}
             composerConversation={composerConversation}
             onSelectThread={onSelectThread}
             onCreateThread={onCreateThread}
@@ -797,7 +872,9 @@ export function Shell({
                   <ChannelList
                     channels={channels}
                     selectedChannelID={selectedChannel?.id}
+                    metricsActive={mainView === "metrics"}
                     onSelect={selectMobileChannel}
+                    onOpenMetrics={openMetrics}
                     onCreate={() => {
                       setMobileNavOpen(false);
                       setChannelDraftOpen(true);
@@ -807,7 +884,7 @@ export function Shell({
                   />
 
                   <AgentsSidebar
-                    agents={agents}
+                    agents={activeAgents}
                     boundAgents={boundAgents}
                     contextLoading={contextLoading}
                     onOpenPanel={(agentID) => {
@@ -1067,7 +1144,9 @@ export function Shell({
                 <ChannelList
                   channels={channels}
                   selectedChannelID={selectedChannel?.id}
-                  onSelect={onSelectChannel}
+                  metricsActive={mainView === "metrics"}
+                  onSelect={selectSidebarChannel}
+                  onOpenMetrics={openMetrics}
                   onCreate={() => setChannelDraftOpen(true)}
                   onUpdate={onUpdateChannel}
                   onDelete={onDeleteChannel}
@@ -1075,7 +1154,7 @@ export function Shell({
 
                 {/* Agents Section */}
                 <AgentsSidebar
-                  agents={agents}
+                  agents={activeAgents}
                   boundAgents={boundAgents}
                   contextLoading={contextLoading}
                   onOpenPanel={(agentID) => {
@@ -1205,6 +1284,18 @@ export function Shell({
                 <Button
                   variant="ghost"
                   size="icon"
+                  className={cn("h-8 w-8", mainView === "metrics" && "bg-accent")}
+                  title="Metrics"
+                  aria-label="Metrics"
+                  aria-pressed={mainView === "metrics"}
+                  disabled={!project && !selectedChannel}
+                  onClick={openMetrics}
+                >
+                  <BarChart3 className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
                   className="h-8 w-8"
                   title="Project files"
                   aria-label="Project files"
@@ -1240,6 +1331,13 @@ export function Shell({
               </div>
             </div>
 
+            {mainView === "metrics" ? (
+              <MetricsPanel
+                project={project}
+                selectedChannel={selectedChannel}
+                activeConversation={activeConversation}
+              />
+            ) : (
             <ConversationPanel
               selectedChannel={selectedChannel}
               activeThread={activeThread}
@@ -1250,6 +1348,7 @@ export function Shell({
               hasOlderMessages={hasOlderMessages}
               streaming={streaming}
               boundAgents={boundAgents}
+              preferences={preferences}
               composerConversation={composerConversation}
               onSelectThread={onSelectThread}
               onCreateThread={onCreateThread}
@@ -1260,6 +1359,7 @@ export function Shell({
               onLoadOlderMessages={onLoadOlderMessages}
               onMessageSent={onMessageSent}
             />
+            )}
           </div>
           )}
         </ResizablePanel>
@@ -1373,6 +1473,37 @@ export function Shell({
                   Enable
                 </Button>
               </div>
+            </div>
+            <div className="grid gap-3 rounded-md border border-border p-3">
+              <div>
+                <h3 className="text-sm font-medium">Message metrics</h3>
+                <p className="text-xs text-muted-foreground">
+                  {preferencesPending ? "Saving" : "Shown under bot replies"}
+                </p>
+              </div>
+              <label className="flex items-center justify-between gap-4 text-sm">
+                <span>Show TTFT</span>
+                <Switch
+                  checked={showTTFT}
+                  disabled={preferencesLoading || preferencesPending}
+                  aria-label="Show TTFT"
+                  onCheckedChange={(checked) =>
+                    void saveMetricDisplayPreferences({ show_ttft: checked, show_tps: showTPS })
+                  }
+                />
+              </label>
+              <label className="flex items-center justify-between gap-4 text-sm">
+                <span>Show TPS</span>
+                <Switch
+                  checked={showTPS}
+                  disabled={preferencesLoading || preferencesPending}
+                  aria-label="Show TPS"
+                  onCheckedChange={(checked) =>
+                    void saveMetricDisplayPreferences({ show_ttft: showTTFT, show_tps: checked })
+                  }
+                />
+              </label>
+              {preferencesError && <p className="text-sm text-destructive">{preferencesError}</p>}
             </div>
             <div className="grid gap-3 rounded-md border border-border p-3">
               <div className="flex items-center justify-between gap-3">

@@ -419,6 +419,168 @@ func TestNotificationSettingsUpsertRoundTripsRawSecret(t *testing.T) {
 	}
 }
 
+func TestUserPreferencesDefaultTableUpsert(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	defer st.Close()
+
+	now := time.Date(2026, 4, 25, 10, 0, 0, 0, time.UTC)
+	user := domain.User{ID: "usr_preferences", DisplayName: "Prefs", CreatedAt: now}
+	if err := st.Users().Create(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	_, err := st.UserPreferences().ByUser(ctx, user.ID)
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("ByUser error = %v, want sql.ErrNoRows", err)
+	}
+	if err := st.UserPreferences().Upsert(ctx, domain.UserPreferences{
+		UserID:    user.ID,
+		ShowTTFT:  false,
+		ShowTPS:   true,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UserPreferences().Upsert(ctx, domain.UserPreferences{
+		UserID:    user.ID,
+		ShowTTFT:  true,
+		ShowTPS:   false,
+		CreatedAt: now.Add(-time.Hour),
+		UpdatedAt: now.Add(time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.UserPreferences().ByUser(ctx, user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.ShowTTFT || got.ShowTPS {
+		t.Fatalf("preferences = %#v", got)
+	}
+	if !got.CreatedAt.Equal(now) || !got.UpdatedAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("timestamps = %s/%s", got.CreatedAt, got.UpdatedAt)
+	}
+}
+
+func TestMetricsQueriesFilterByScopeAndProvider(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	defer st.Close()
+
+	fixture := seedBindingFixture(t, ctx, st)
+	firstTokenAt := fixture.now.Add(500 * time.Millisecond)
+	completedAt := fixture.now.Add(2 * time.Second)
+	inputTokens := int64(100)
+	outputTokens := int64(20)
+	cacheHitRate := 0.3
+	if err := st.Metrics().Create(ctx, domain.AgentRunMetric{
+		RunID:             "run_metrics_1",
+		OrganizationID:    fixture.org.ID,
+		ProjectID:         "prj_metrics",
+		ChannelID:         "chn_metrics",
+		ConversationType:  domain.ConversationChannel,
+		ConversationID:    "chn_metrics",
+		MessageID:         "msg_prompt_1",
+		AgentID:           fixture.agent1.ID,
+		AgentName:         fixture.agent1.Name,
+		Provider:          domain.AgentKindCodex,
+		Model:             "gpt-test",
+		Status:            "completed",
+		StartedAt:         fixture.now,
+		FirstTokenAt:      &firstTokenAt,
+		CompletedAt:       &completedAt,
+		TTFTMS:            int64Ptr(500),
+		DurationMS:        int64Ptr(2000),
+		TPS:               float64Ptr(10),
+		InputTokens:       &inputTokens,
+		CachedInputTokens: int64Ptr(30),
+		OutputTokens:      &outputTokens,
+		TotalTokens:       int64Ptr(120),
+		CacheHitRate:      &cacheHitRate,
+		TotalCostUSD:      float64Ptr(0.001),
+		RawUsageJSON:      `{"input_tokens":100}`,
+		CreatedAt:         fixture.now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Metrics().Create(ctx, domain.AgentRunMetric{
+		RunID:            "run_metrics_2",
+		OrganizationID:   fixture.org.ID,
+		ProjectID:        "prj_metrics",
+		ChannelID:        "chn_metrics",
+		ThreadID:         "thr_metrics",
+		ConversationType: domain.ConversationThread,
+		ConversationID:   "thr_metrics",
+		MessageID:        "msg_prompt_2",
+		AgentID:          fixture.agent2.ID,
+		AgentName:        fixture.agent2.Name,
+		Provider:         domain.AgentKindClaude,
+		Status:           "failed",
+		StartedAt:        fixture.now.Add(time.Second),
+		CompletedAt:      &completedAt,
+		DurationMS:       int64Ptr(1000),
+		CreatedAt:        fixture.now.Add(time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	channelRows, err := st.Metrics().ListByChannel(ctx, "chn_metrics", store.MetricsFilter{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(channelRows) != 2 || channelRows[0].RunID != "run_metrics_2" || channelRows[1].RunID != "run_metrics_1" {
+		t.Fatalf("channel rows = %#v", channelRows)
+	}
+	codexRows, err := st.Metrics().ListByProject(ctx, "prj_metrics", store.MetricsFilter{Limit: 10, Provider: domain.AgentKindCodex})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(codexRows) != 1 || codexRows[0].Provider != domain.AgentKindCodex || codexRows[0].InputTokens == nil || *codexRows[0].InputTokens != 100 {
+		t.Fatalf("codex rows = %#v", codexRows)
+	}
+	conversationRows, err := st.Metrics().ListByConversation(ctx, domain.ConversationThread, "thr_metrics", store.MetricsFilter{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conversationRows) != 1 || conversationRows[0].ThreadID != "thr_metrics" {
+		t.Fatalf("conversation rows = %#v", conversationRows)
+	}
+
+	moreInputTokens := int64(50)
+	moreOutputTokens := int64(10)
+	if err := st.Metrics().Create(ctx, domain.AgentRunMetric{
+		RunID:            "run_metrics_3",
+		OrganizationID:   fixture.org.ID,
+		ProjectID:        "prj_metrics",
+		ChannelID:        "chn_metrics",
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   "chn_metrics",
+		MessageID:        "msg_prompt_3",
+		AgentID:          fixture.agent1.ID,
+		AgentName:        fixture.agent1.Name,
+		Provider:         domain.AgentKindCodex,
+		Model:            "gpt-test",
+		Status:           "completed",
+		StartedAt:        fixture.now.Add(2 * time.Second),
+		CompletedAt:      &completedAt,
+		DurationMS:       int64Ptr(1000),
+		InputTokens:      &moreInputTokens,
+		OutputTokens:     &moreOutputTokens,
+		TotalTokens:      int64Ptr(60),
+		CreatedAt:        fixture.now.Add(2 * time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	summaryRows, err := st.Metrics().ListAgentSummariesByProject(ctx, "prj_metrics", store.MetricsFilter{Limit: 10, Provider: domain.AgentKindCodex})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaryRows) != 1 || summaryRows[0].AgentID != fixture.agent1.ID || summaryRows[0].RunCount != 2 || summaryRows[0].InputTokens == nil || *summaryRows[0].InputTokens != 150 {
+		t.Fatalf("summary rows = %#v", summaryRows)
+	}
+}
+
 func TestBindingUpsertReplacesAgentAndWorkspace(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
@@ -718,4 +880,12 @@ func seedBindingFixture(t *testing.T, ctx context.Context, st *Store) bindingFix
 		t.Fatal(err)
 	}
 	return fixture
+}
+
+func int64Ptr(value int64) *int64 {
+	return &value
+}
+
+func float64Ptr(value float64) *float64 {
+	return &value
 }

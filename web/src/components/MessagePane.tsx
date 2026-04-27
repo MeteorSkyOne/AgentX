@@ -14,7 +14,7 @@ import {
   Wrench
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ConversationAgentContext, Message, MessageReference, ProcessItem } from "../api/types";
+import type { ConversationAgentContext, Message, MessageReference, ProcessItem, UserPreferences } from "../api/types";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { AgentAvatar, agentKindColor } from "./AgentAvatar";
+import { messageMetricsParts } from "./messageMetrics";
 
 const MarkdownRenderer = lazy(() =>
   import("./MarkdownRenderer").then((module) => ({ default: module.MarkdownRenderer }))
@@ -43,6 +44,7 @@ interface MessagePaneProps {
   hasOlderMessages: boolean;
   streaming: StreamingMessage[];
   agents: ConversationAgentContext[];
+  preferences: UserPreferences;
   onUpdateMessage: (messageID: string, body: string) => Promise<Message>;
   onDeleteMessage: (message: Message) => Promise<void>;
   onReplyMessage: (message: Message) => void;
@@ -60,6 +62,7 @@ export function MessagePane({
   hasOlderMessages,
   streaming,
   agents,
+  preferences,
   onUpdateMessage,
   onDeleteMessage,
   onReplyMessage,
@@ -163,6 +166,7 @@ export function MessagePane({
                 replyTargetLoaded={Boolean(
                   message.reply_to && messagesByID.has(message.reply_to.message_id)
                 )}
+                preferences={preferences}
                 onUpdateMessage={onUpdateMessage}
                 onDeleteMessage={onDeleteMessage}
                 onReplyMessage={onReplyMessage}
@@ -215,6 +219,7 @@ interface MessageItemProps {
   agentID?: string;
   replyAgentName?: string;
   replyTargetLoaded?: boolean;
+  preferences: UserPreferences;
   onUpdateMessage: (messageID: string, body: string) => Promise<Message>;
   onDeleteMessage: (message: Message) => Promise<void>;
   onReplyMessage: (message: Message) => void;
@@ -235,6 +240,7 @@ function ConversationMessageItem({
   agentID,
   replyAgentName,
   replyTargetLoaded = false,
+  preferences,
   onUpdateMessage,
   onDeleteMessage,
   onReplyMessage,
@@ -249,6 +255,7 @@ function ConversationMessageItem({
   const label = isBot ? agentName ?? "Agent" : isSystem ? "System" : "You";
   const initial = label.charAt(0).toUpperCase();
   const process = isBot ? processFromMetadata(message.metadata) : [];
+  const metricsParts = isBot ? messageMetricsParts(message.metadata?.metrics, preferences) : [];
 
   useEffect(() => {
     if (!editing) {
@@ -394,6 +401,16 @@ function ConversationMessageItem({
             <div className="prose prose-sm max-w-none overflow-hidden break-words select-text dark:prose-invert">
               <MessageMarkdown text={message.body} />
             </div>
+            {metricsParts.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                {metricsParts.map((part, index) => (
+                  <span key={part} className="flex items-center gap-1.5">
+                    {index > 0 && <span className="text-muted-foreground/60">·</span>}
+                    <span>{part}</span>
+                  </span>
+                ))}
+              </div>
+            )}
           </>
         )}
       </div>

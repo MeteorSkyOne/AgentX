@@ -79,6 +79,55 @@ func TestLineHandlerParsesCodexJSONEvents(t *testing.T) {
 	}
 }
 
+func TestLineHandlerParsesCodexUsageEvents(t *testing.T) {
+	handler := newLineHandler("fallback")
+
+	events, err := handler.HandleLine([]byte(`{"type":"token_count.info","info":{"last_token_usage":{"input_tokens":80,"cached_input_tokens":30,"output_tokens":10,"reasoning_output_tokens":4,"total_tokens":94}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("events = %#v", events)
+	}
+	events, err = handler.HandleLine([]byte(`{"type":"turn.completed"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != runtime.EventCompleted {
+		t.Fatalf("events = %#v", events)
+	}
+	usage := events[0].Usage
+	if usage == nil {
+		t.Fatal("usage is nil")
+	}
+	if ptrValue(usage.InputTokens) != 80 || ptrValue(usage.CachedInputTokens) != 30 || ptrValue(usage.OutputTokens) != 10 || ptrValue(usage.ReasoningOutputTokens) != 4 || ptrValue(usage.TotalTokens) != 94 {
+		t.Fatalf("usage = %#v", usage)
+	}
+
+	handler = newLineHandler("fallback")
+	events, err = handler.HandleLine([]byte(`{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":7,"total_tokens":12,"total_cost_usd":0.001}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage = events[0].Usage
+	if ptrValue(usage.InputTokens) != 5 || ptrValue(usage.OutputTokens) != 7 || ptrValue(usage.TotalTokens) != 12 {
+		t.Fatalf("turn usage = %#v", usage)
+	}
+	if usage.TotalCostUSD == nil || *usage.TotalCostUSD != 0.001 {
+		t.Fatalf("cost = %#v", usage.TotalCostUSD)
+	}
+
+	handler = newLineHandler("fallback")
+	events, err = handler.HandleLine([]byte(`{"type":"turn.completed","turn":{"usage":{"input_tokens":11,"total_tokens":17,"cache_read_input_tokens":3}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage = events[0].Usage
+	if ptrValue(usage.InputTokens) != 11 || ptrValue(usage.OutputTokens) != 6 || ptrValue(usage.TotalTokens) != 17 || ptrValue(usage.CachedInputTokens) != 3 {
+		t.Fatalf("nested turn usage = %#v", usage)
+	}
+}
+
 func TestLineHandlerParsesReasoningItem(t *testing.T) {
 	handler := newLineHandler("fallback")
 
@@ -351,4 +400,11 @@ func readTrimmed(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return strings.TrimSpace(string(content))
+}
+
+func ptrValue(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }

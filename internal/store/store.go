@@ -10,6 +10,7 @@ import (
 type Store interface {
 	Tx(ctx context.Context, fn func(Tx) error) error
 	Users() UserStore
+	UserPreferences() UserPreferencesStore
 	Organizations() OrganizationStore
 	NotificationSettings() NotificationSettingsStore
 	Projects() ProjectStore
@@ -22,10 +23,12 @@ type Store interface {
 	ChannelAgents() ChannelAgentStore
 	Bindings() BindingStore
 	Sessions() SessionStore
+	Metrics() MetricsStore
 }
 
 type Tx interface {
 	Users() UserStore
+	UserPreferences() UserPreferencesStore
 	Organizations() OrganizationStore
 	NotificationSettings() NotificationSettingsStore
 	Projects() ProjectStore
@@ -38,6 +41,7 @@ type Tx interface {
 	ChannelAgents() ChannelAgentStore
 	Bindings() BindingStore
 	Sessions() SessionStore
+	Metrics() MetricsStore
 }
 
 type UserStore interface {
@@ -46,6 +50,11 @@ type UserStore interface {
 	First(ctx context.Context) (domain.User, error)
 	CreateAPISession(ctx context.Context, token string, userID string) error
 	UserIDByAPISession(ctx context.Context, token string) (string, error)
+}
+
+type UserPreferencesStore interface {
+	ByUser(ctx context.Context, userID string) (domain.UserPreferences, error)
+	Upsert(ctx context.Context, preferences domain.UserPreferences) error
 }
 
 type OrganizationStore interface {
@@ -131,4 +140,20 @@ type SessionStore interface {
 	ResetAgentSessionContext(ctx context.Context, agentID string, conversationType domain.ConversationType, conversationID string, contextStartedAt time.Time) error
 	SetAgentSessionContextStartedAt(ctx context.Context, agentID string, conversationType domain.ConversationType, conversationID string, contextStartedAt time.Time) error
 	ByConversation(ctx context.Context, agentID string, conversationType domain.ConversationType, conversationID string) (domain.AgentSession, error)
+}
+
+type MetricsFilter struct {
+	Limit    int
+	Provider string
+	Group    string
+}
+
+type MetricsStore interface {
+	Create(ctx context.Context, metric domain.AgentRunMetric) error
+	ListByConversation(ctx context.Context, conversationType domain.ConversationType, conversationID string, filter MetricsFilter) ([]domain.AgentRunMetric, error)
+	ListByChannel(ctx context.Context, channelID string, filter MetricsFilter) ([]domain.AgentRunMetric, error)
+	ListByProject(ctx context.Context, projectID string, filter MetricsFilter) ([]domain.AgentRunMetric, error)
+	ListAgentSummariesByConversation(ctx context.Context, conversationType domain.ConversationType, conversationID string, filter MetricsFilter) ([]domain.AgentRunMetric, error)
+	ListAgentSummariesByChannel(ctx context.Context, channelID string, filter MetricsFilter) ([]domain.AgentRunMetric, error)
+	ListAgentSummariesByProject(ctx context.Context, projectID string, filter MetricsFilter) ([]domain.AgentRunMetric, error)
 }
