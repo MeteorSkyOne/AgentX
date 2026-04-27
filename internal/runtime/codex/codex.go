@@ -60,9 +60,6 @@ func (r Runtime) StartSession(ctx context.Context, req runtime.StartSessionReque
 
 func (r Runtime) buildArgs(req runtime.StartSessionRequest, input runtime.Input) []string {
 	var args []string
-	if workspace := strings.TrimSpace(req.Workspace); workspace != "" {
-		args = append(args, "--cd", workspace)
-	}
 	args = append(args, "exec")
 	previousSessionID := usablePreviousSessionID(req.PreviousSessionID)
 	if previousSessionID != "" {
