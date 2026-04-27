@@ -2,10 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/meteorsky/agentx/internal/app"
@@ -21,9 +26,23 @@ import (
 )
 
 const webDistDir = "web/dist"
+const logDir = "logs"
 
 func main() {
-	ctx := context.Background()
+	logFile, logPath, err := configureLogging(time.Now())
+	if err != nil {
+		slog.Error("create log file", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := logFile.Close(); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "close log file %s: %v\n", logPath, err)
+		}
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	cfg := config.FromEnv()
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		slog.Error("create data dir", "error", err)
@@ -75,10 +94,57 @@ func main() {
 	}
 
 	slog.Info("agentx listening", "addr", cfg.Addr)
-	if err := server.ListenAndServe(); err != nil {
+	if err := runHTTPServer(ctx, server); err != nil {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func runHTTPServer(ctx context.Context, server *http.Server) error {
+	return serveHTTP(ctx, server, server.ListenAndServe)
+}
+
+func serveHTTP(ctx context.Context, server *http.Server, serve func() error) error {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- serve()
+	}()
+
+	select {
+	case <-ctx.Done():
+		slog.Info("agentx shutting down")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		slog.Info("agentx stopped")
+		return nil
+	case err := <-errCh:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	}
+}
+
+func configureLogging(startedAt time.Time) (*os.File, string, error) {
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return nil, "", err
+	}
+
+	path := filepath.Join(logDir, "log-"+startedAt.Format("20060102-150405")+".log")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, "", err
+	}
+
+	writer := io.MultiWriter(os.Stderr, file)
+	slog.SetDefault(slog.New(slog.NewTextHandler(writer, nil)))
+	return file, path, nil
 }
 
 func newHTTPHandler(apiHandler http.Handler, distDir string) http.Handler {

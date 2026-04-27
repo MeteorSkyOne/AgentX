@@ -2,6 +2,7 @@
 .worktrees/
 /agentx
 /bin/
+logs/
 node_modules/
 .agentx/
 .agentx-e2e/

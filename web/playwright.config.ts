@@ -20,6 +20,12 @@ const noProxy = mergeNoProxy(process.env.NO_PROXY, process.env.no_proxy);
 process.env.NO_PROXY = noProxy;
 process.env.no_proxy = noProxy;
 
+const e2eHost = "127.0.0.1";
+const e2eApiPort = 19080;
+const e2eWebPort = 15174;
+const e2eApiOrigin = `http://${e2eHost}:${e2eApiPort}`;
+const e2eWebOrigin = `http://${e2eHost}:${e2eWebPort}`;
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
@@ -29,7 +35,7 @@ export default defineConfig({
     timeout: 10_000
   },
   use: {
-    baseURL: "http://127.0.0.1:5174",
+    baseURL: e2eWebOrigin,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     video: "retain-on-failure"
@@ -37,16 +43,18 @@ export default defineConfig({
   reporter: [["list"], ["html", { open: "never" }]],
   webServer: [
     {
+      name: "agentx-api",
       command:
-        "cd .. && rm -rf .agentx-e2e && mkdir -p .agentx-e2e && AGENTX_ADDR=127.0.0.1:18080 AGENTX_DATA_DIR=.agentx-e2e AGENTX_SQLITE_PATH=.agentx-e2e/agentx.db AGENTX_ADMIN_TOKEN=e2e-token go run ./cmd/agentx",
-      url: "http://127.0.0.1:18080/healthz",
+        `cd .. && rm -rf .agentx-e2e && mkdir -p .agentx-e2e && AGENTX_ADDR=${e2eHost}:${e2eApiPort} AGENTX_DATA_DIR=.agentx-e2e AGENTX_SQLITE_PATH=.agentx-e2e/agentx.db AGENTX_ADMIN_TOKEN=e2e-token go run ./cmd/agentx`,
+      url: `${e2eApiOrigin}/healthz`,
       timeout: 30_000,
       reuseExistingServer: false
     },
     {
+      name: "agentx-web",
       command:
-        "AGENTX_API_TARGET=http://127.0.0.1:18080 pnpm exec vite --host 127.0.0.1 --port 5174 --strictPort",
-      url: "http://127.0.0.1:5174",
+        `AGENTX_API_TARGET=${e2eApiOrigin} pnpm exec vite --host ${e2eHost} --port ${e2eWebPort} --strictPort`,
+      url: e2eWebOrigin,
       timeout: 30_000,
       reuseExistingServer: false
     }

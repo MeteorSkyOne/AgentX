@@ -17,7 +17,7 @@ if [[ "${AGENTX_DEV_DRY_RUN:-}" == "1" ]]; then
   echo "AGENTX_DATA_DIR=$data_dir"
   echo "AGENTX_SQLITE_PATH=$sqlite_path"
   echo "go run ./cmd/agentx"
-  echo "pnpm run dev -- --host $web_host --port $web_port"
+  echo "pnpm exec vite --host $web_host --port $web_port --strictPort"
   exit 0
 fi
 
@@ -38,7 +38,13 @@ cleanup() {
   wait "${pids[@]}" 2>/dev/null || true
 }
 
-trap cleanup EXIT INT TERM
+handle_signal() {
+  cleanup
+  exit 0
+}
+
+trap cleanup EXIT
+trap handle_signal INT TERM
 
 echo "Starting AgentX API at http://$backend_addr"
 (
@@ -53,7 +59,7 @@ pids+=("$!")
 echo "Starting AgentX web at http://$web_host:$web_port"
 (
   cd web
-  pnpm run dev -- --host "$web_host" --port "$web_port"
+  pnpm exec vite --host "$web_host" --port "$web_port" --strictPort
 ) &
 pids+=("$!")
 
@@ -64,4 +70,9 @@ set +e
 wait -n "${pids[@]}"
 status="$?"
 set -e
+if [[ "$status" -eq 130 || "$status" -eq 143 ]]; then
+  cleanup
+  exit 0
+fi
+cleanup
 exit "$status"

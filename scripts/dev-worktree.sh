@@ -43,13 +43,20 @@ cleanup() {
   echo ""
   echo "Stopping dev stack..."
   for pid in "${pids[@]}"; do
-    kill "$pid" 2>/dev/null || true
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+    fi
   done
   wait "${pids[@]}" 2>/dev/null || true
   if [[ -n "$created_worktree" ]]; then
     echo "Removing worktree at $created_worktree"
     git -C "$repo_root" worktree remove --force "$created_worktree" 2>/dev/null || true
   fi
+}
+
+handle_signal() {
+  cleanup
+  exit 0
 }
 
 cd "$worktree_dir"
@@ -67,7 +74,8 @@ if [[ ! -d web/node_modules ]]; then
 fi
 
 pids=()
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap handle_signal INT TERM
 
 echo "Starting AgentX API at http://$backend_addr"
 (
@@ -82,7 +90,7 @@ pids+=("$!")
 echo "Starting AgentX web at http://$web_host:$web_port"
 (
   cd web
-  pnpm run dev -- --host "$web_host" --port "$web_port"
+  pnpm exec vite --host "$web_host" --port "$web_port" --strictPort
 ) &
 pids+=("$!")
 
@@ -96,4 +104,9 @@ set +e
 wait -n "${pids[@]}"
 status="$?"
 set -e
+if [[ "$status" -eq 130 || "$status" -eq 143 ]]; then
+  cleanup
+  exit 0
+fi
+cleanup
 exit "$status"

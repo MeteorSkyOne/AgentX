@@ -105,13 +105,21 @@ export function Composer({ conversation, typingAgents, mentionAgents = [], onSen
       return;
     }
 
+    const submittedBody = trimmed;
     setError(null);
     setSubmitting(true);
+    setBody("");
+    setCaret(0);
+    setCommandIndex(0);
+    setMentionIndex(0);
+    setDismissedCommandKey(null);
+    setDismissedMentionKey(null);
     try {
-      const message = await sendMessage(conversation.type, conversation.id, trimmed);
-      setBody("");
+      const message = await sendMessage(conversation.type, conversation.id, submittedBody);
       onSent(message);
     } catch (err) {
+      setBody(submittedBody);
+      setCaret(submittedBody.length);
       setError(err instanceof Error ? err.message : "Message failed");
     } finally {
       setSubmitting(false);

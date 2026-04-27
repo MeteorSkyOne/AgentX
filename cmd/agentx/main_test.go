@@ -1,12 +1,111 @@
 package main
 
 import (
+	"context"
+	"io"
+	"log"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
+
+func TestServeHTTPShutsDownWhenContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = listener.Close()
+	})
+
+	server := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("ok"))
+		}),
+	}
+	t.Cleanup(func() {
+		_ = server.Close()
+	})
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- serveHTTP(ctx, server, func() error {
+			return server.Serve(listener)
+		})
+	}()
+
+	resp, err := http.Get("http://" + listener.Addr().String())
+	if err != nil {
+		t.Fatalf("GET test server: %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if closeErr := resp.Body.Close(); closeErr != nil {
+		t.Fatalf("close response body: %v", closeErr)
+	}
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if string(body) != "ok" {
+		t.Fatalf("response body = %q, want ok", string(body))
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("serveHTTP() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("serveHTTP() did not stop after context cancellation")
+	}
+}
+
+func TestConfigureLoggingCreatesStartupLogFile(t *testing.T) {
+	t.Chdir(t.TempDir())
+	previousLogger := slog.Default()
+	t.Cleanup(func() {
+		slog.SetDefault(previousLogger)
+	})
+
+	startedAt := time.Date(2026, 4, 27, 15, 4, 5, 0, time.Local)
+	file, path, err := configureLogging(startedAt)
+	if err != nil {
+		t.Fatalf("configureLogging() error = %v", err)
+	}
+
+	wantPath := filepath.Join(logDir, "log-20260427-150405.log")
+	if path != wantPath {
+		t.Fatalf("log path = %q, want %q", path, wantPath)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("stat log file: %v", err)
+	}
+
+	slog.Info("slog entry")
+	log.Print("standard log entry")
+	if err := file.Close(); err != nil {
+		t.Fatalf("close log file: %v", err)
+	}
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	got := string(body)
+	if !strings.Contains(got, "slog entry") {
+		t.Fatalf("log file does not contain slog entry: %q", got)
+	}
+	if !strings.Contains(got, "standard log entry") {
+		t.Fatalf("log file does not contain standard log entry: %q", got)
+	}
+}
 
 func TestNewHTTPHandlerServesWebDistAndKeepsAPI(t *testing.T) {
 	distDir := t.TempDir()

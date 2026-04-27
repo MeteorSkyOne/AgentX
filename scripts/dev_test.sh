@@ -3,10 +3,15 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 script="$repo_root/scripts/dev.sh"
+worktree_script="$repo_root/scripts/dev-worktree.sh"
 prod_script="$repo_root/scripts/prod.sh"
 
 if [[ ! -f "$script" ]]; then
   echo "missing scripts/dev.sh" >&2
+  exit 1
+fi
+if [[ ! -f "$worktree_script" ]]; then
+  echo "missing scripts/dev-worktree.sh" >&2
   exit 1
 fi
 if [[ ! -f "$prod_script" ]]; then
@@ -15,6 +20,7 @@ if [[ ! -f "$prod_script" ]]; then
 fi
 
 bash -n "$script"
+bash -n "$worktree_script"
 bash -n "$prod_script"
 
 output="$(
@@ -41,7 +47,7 @@ case "$output" in
 esac
 
 case "$output" in
-  *"pnpm run dev -- --host 127.0.0.1 --port 5173"* ) ;;
+  *"pnpm exec vite --host 127.0.0.1 --port 5173 --strictPort"* ) ;;
   * )
     echo "dry run did not include default vite host and port" >&2
     echo "$output" >&2

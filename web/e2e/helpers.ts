@@ -6,11 +6,24 @@ interface OrganizationSeed {
 
 interface ProjectSeed {
   id: string;
+  name: string;
 }
 
 interface ChannelSeed {
   id: string;
   name: string;
+  type: "text" | "thread";
+}
+
+interface AgentSeed {
+  id: string;
+  enabled: boolean;
+}
+
+interface E2ERequestInit {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
 }
 
 export interface DenseNavigationSeed {
@@ -26,11 +39,13 @@ export async function setLightTheme(page: Page) {
   });
 }
 
-export async function seedDenseNavigation(page: Page, testInfo: TestInfo): Promise<DenseNavigationSeed> {
-  const stamp = `${slug(testInfo.project.name)}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-  return page.evaluate(async ({ stamp }) => {
-    async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function request<T>(
+  page: Page,
+  path: string,
+  init: E2ERequestInit = {}
+): Promise<T> {
+  return page.evaluate(
+    async ({ path, init }) => {
       const token = localStorage.getItem("agentx.session_token");
       if (!token) throw new Error("missing session token");
 
@@ -48,64 +63,169 @@ export async function seedDenseNavigation(page: Page, testInfo: TestInfo): Promi
         return undefined as T;
       }
       return response.json() as Promise<T>;
+    },
+    { path, init }
+  );
+}
+
+export function uniqueName(testInfo: TestInfo, prefix: string): string {
+  return `${prefix} ${uniqueSuffix(testInfo)}`;
+}
+
+export function uniqueHandle(testInfo: TestInfo, prefix: string): string {
+  return `${slug(prefix)}_${uniqueSuffix(testInfo, "_")}`;
+}
+
+export async function createProjectViaAPI(
+  page: Page,
+  testInfo: TestInfo,
+  prefix = "Project"
+): Promise<ProjectSeed> {
+  const organizationID = await firstOrganizationID(page);
+  return request<ProjectSeed>(
+    page,
+    `/api/organizations/${encodeURIComponent(organizationID)}/projects`,
+    {
+      method: "POST",
+      body: JSON.stringify({ name: uniqueName(testInfo, prefix) }),
     }
+  );
+}
 
-    const organizations = await request<OrganizationSeed[]>("/api/organizations");
-    const organizationID = organizations[0]?.id;
-    if (!organizationID) throw new Error("missing organization");
+export async function createChannelViaAPI(
+  page: Page,
+  testInfo: TestInfo,
+  options: {
+    projectID?: string;
+    prefix?: string;
+    type?: "text" | "thread";
+    bindDefaultAgent?: boolean;
+  } = {}
+): Promise<ChannelSeed> {
+  const projectID = options.projectID ?? (await firstProject(page)).id;
+  const type = options.type ?? "text";
+  const channel = await request<ChannelSeed>(
+    page,
+    `/api/projects/${encodeURIComponent(projectID)}/channels`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        name: uniqueName(testInfo, options.prefix ?? type),
+        type,
+      }),
+    }
+  );
+  if (options.bindDefaultAgent !== false) {
+    const agent = await firstEnabledAgent(page);
+    await request(
+      page,
+      `/api/channels/${encodeURIComponent(channel.id)}/agents`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ agents: [{ agent_id: agent.id }] }),
+      }
+    );
+  }
+  return channel;
+}
 
-    const projects = await request<ProjectSeed[]>(`/api/organizations/${encodeURIComponent(organizationID)}/projects`);
-    const projectID = projects[0]?.id;
-    if (!projectID) throw new Error("missing project");
+export async function seedDenseNavigation(page: Page, testInfo: TestInfo): Promise<DenseNavigationSeed> {
+  const stamp = uniqueSuffix(testInfo, "_");
+  const organizationID = await firstOrganizationID(page);
+  const projectID = (await firstProject(page)).id;
 
-    const projectNames = [
-      `1 ${stamp}`,
-      `Mobile ops ${stamp}`,
-      `Research ${stamp}`,
-      `Archive ${stamp}`,
-      `Support ${stamp}`,
-      `QA ${stamp}`,
-      `Release ${stamp}`,
-      `Design ${stamp}`,
-    ];
+  const projectNames = [
+    `1 ${stamp}`,
+    `Mobile ops ${stamp}`,
+    `Research ${stamp}`,
+    `Archive ${stamp}`,
+    `Support ${stamp}`,
+    `QA ${stamp}`,
+    `Release ${stamp}`,
+    `Design ${stamp}`,
+  ];
 
-    for (const name of projectNames) {
-      await request<ProjectSeed>(`/api/organizations/${encodeURIComponent(organizationID)}/projects`, {
+  for (const name of projectNames) {
+    await request<ProjectSeed>(
+      page,
+      `/api/organizations/${encodeURIComponent(organizationID)}/projects`,
+      {
         method: "POST",
         body: JSON.stringify({ name }),
-      });
-    }
+      }
+    );
+  }
 
-    const channelNames = [
-      `a ${stamp}`,
-      `claude ${stamp}`,
-      `codex ${stamp}`,
-      `500 message load test ${stamp.replace(/_/g, "-")}`,
-      `review ${stamp}`,
-      `incident ${stamp}`,
-      `handoff ${stamp}`,
-      `triage ${stamp}`,
-      `deploy ${stamp}`,
-      `research ${stamp}`,
-      `qa ${stamp}`,
-      `design ${stamp}`,
-      `support ${stamp}`,
-      `ops ${stamp}`,
-      `metrics ${stamp}`,
-      `feedback ${stamp}`,
-      `planning ${stamp}`,
-      `archive ${stamp}`,
-    ];
+  const channelNames = [
+    `a ${stamp}`,
+    `claude ${stamp}`,
+    `codex ${stamp}`,
+    `500 message load test ${stamp.replace(/_/g, "-")}`,
+    `review ${stamp}`,
+    `incident ${stamp}`,
+    `handoff ${stamp}`,
+    `triage ${stamp}`,
+    `deploy ${stamp}`,
+    `research ${stamp}`,
+    `qa ${stamp}`,
+    `design ${stamp}`,
+    `support ${stamp}`,
+    `ops ${stamp}`,
+    `metrics ${stamp}`,
+    `feedback ${stamp}`,
+    `planning ${stamp}`,
+    `archive ${stamp}`,
+  ];
 
-    for (const name of channelNames) {
-      await request<ChannelSeed>(`/api/projects/${encodeURIComponent(projectID)}/channels`, {
+  for (const name of channelNames) {
+    await request<ChannelSeed>(
+      page,
+      `/api/projects/${encodeURIComponent(projectID)}/channels`,
+      {
         method: "POST",
         body: JSON.stringify({ name, type: "text" }),
-      });
-    }
+      }
+    );
+  }
 
-    return { projectNames, channelNames };
-  }, { stamp });
+  return { projectNames, channelNames };
+}
+
+async function firstOrganizationID(page: Page): Promise<string> {
+  const organizations = await request<OrganizationSeed[]>(page, "/api/organizations");
+  const organizationID = organizations[0]?.id;
+  if (!organizationID) throw new Error("missing organization");
+  return organizationID;
+}
+
+async function firstProject(page: Page): Promise<ProjectSeed> {
+  const organizationID = await firstOrganizationID(page);
+  const projects = await request<ProjectSeed[]>(
+    page,
+    `/api/organizations/${encodeURIComponent(organizationID)}/projects`
+  );
+  const project = projects[0];
+  if (!project) throw new Error("missing project");
+  return project;
+}
+
+async function firstEnabledAgent(page: Page): Promise<AgentSeed> {
+  const organizationID = await firstOrganizationID(page);
+  const agents = await request<AgentSeed[]>(
+    page,
+    `/api/organizations/${encodeURIComponent(organizationID)}/agents`
+  );
+  const agent = agents.find((item) => item.enabled) ?? agents[0];
+  if (!agent) throw new Error("missing agent");
+  return agent;
+}
+
+function uniqueSuffix(testInfo: TestInfo, separator = "-"): string {
+  return [
+    slug(testInfo.project.name),
+    Date.now().toString(36),
+    Math.random().toString(36).slice(2, 8),
+  ].join(separator);
 }
 
 function slug(value: string) {

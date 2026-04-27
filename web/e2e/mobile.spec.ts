@@ -1,5 +1,5 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { seedDenseNavigation, setLightTheme } from "./helpers";
+import { seedDenseNavigation, setLightTheme, uniqueName } from "./helpers";
 
 const adminToken = "e2e-token";
 const displayName = "Mobile E2E User";
@@ -30,7 +30,7 @@ async function createChannel(page: Page, testInfo: TestInfo, type: "text" | "thr
   const nav = await openNavigation(page);
   await nav.getByRole("button", { name: "Create channel" }).click();
 
-  const channelName = `${type}-${slug(testInfo.project.name)}-${Date.now()}`;
+  const channelName = uniqueName(testInfo, type);
   const channelModal = page.getByRole("dialog", { name: "Create channel" });
   await channelModal.getByLabel("Channel name").fill(channelName);
   await channelModal.getByLabel("Channel type").selectOption(type);
@@ -94,12 +94,13 @@ test("mobile thread channel can create and open a post", async ({ page }, testIn
   await createChannel(page, testInfo, "thread");
 
   await expect(page.getByLabel("Threads")).toBeVisible();
-  await page.getByLabel("Post title").fill(`Mobile post ${slug(testInfo.project.name)}`);
+  const postTitle = uniqueName(testInfo, "Mobile post");
+  await page.getByLabel("Post title").fill(postTitle);
   await page.getByLabel("Post body").fill("thread hello from mobile");
   await page.getByRole("button", { name: "Create post" }).click();
 
-  await expect(page.getByRole("heading", { name: /Mobile post/ })).toBeVisible();
-  await expect(page.getByText("thread hello from mobile", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: postTitle })).toBeVisible();
+  await expect(page.getByLabel("Messages").getByText("thread hello from mobile", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Back to posts" })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 });
@@ -129,31 +130,24 @@ test("mobile navigation keeps fixed header and footer with dense light-mode data
   }));
   expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
 
-  const headerControl = nav.getByRole("button", { name: "Close navigation" });
+  const header = nav.getByTestId("mobile-nav-header");
   const footer = nav.getByTestId("mobile-nav-footer");
-  await expect(headerControl).toBeInViewport({ ratio: 1 });
+  await scrollViewport.evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  const scrolledMetrics = await scrollViewport.evaluate((node) => ({
+    clientHeight: node.clientHeight,
+    maxScrollTop: node.scrollHeight - node.clientHeight,
+    scrollTop: node.scrollTop,
+  }));
+  expect(scrolledMetrics.scrollTop).toBeGreaterThan(0);
+  expect(scrolledMetrics.scrollTop).toBeGreaterThanOrEqual(scrolledMetrics.maxScrollTop - 2);
+
+  await expect(header).toBeInViewport({ ratio: 1 });
+  await expect(header.getByRole("button", { name: "Close navigation" })).toBeInViewport({ ratio: 1 });
   await expect(footer).toBeInViewport({ ratio: 1 });
   await expect(footer.getByRole("button", { name: "User settings" })).toBeInViewport({ ratio: 1 });
   await expect(footer.getByRole("button", { name: "Switch to dark mode" })).toBeInViewport({ ratio: 1 });
   await expect(footer.getByRole("button", { name: "Log out" })).toBeInViewport({ ratio: 1 });
-
-  const headerBefore = await headerControl.boundingBox();
-  const footerBefore = await footer.boundingBox();
-  await scrollViewport.evaluate((node) => {
-    node.scrollTop = node.scrollHeight;
-  });
-  const headerAfter = await headerControl.boundingBox();
-  const footerAfter = await footer.boundingBox();
-  expect(headerBefore).not.toBeNull();
-  expect(headerAfter).not.toBeNull();
-  expect(footerBefore).not.toBeNull();
-  expect(footerAfter).not.toBeNull();
-  expect(Math.abs(headerAfter!.y - headerBefore!.y)).toBeLessThanOrEqual(2);
-  expect(Math.abs(footerAfter!.y - footerBefore!.y)).toBeLessThanOrEqual(2);
-  await expect(footer).toBeInViewport({ ratio: 1 });
   await expectNoHorizontalOverflow(page);
 });
-
-function slug(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-}
