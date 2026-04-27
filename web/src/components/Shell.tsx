@@ -2625,7 +2625,7 @@ function AgentDetailsPanel({
         {/* Settings Tab */}
         <TabsContent value="settings" className="min-h-0 flex-1 overflow-hidden px-4 pb-4">
           <ScrollArea className="h-full">
-            <div className="space-y-4 pr-2">
+            <div className="space-y-4 py-1 pl-1 pr-3">
               {/* Agent Selector */}
               <div className="space-y-2">
                 <Label className="text-xs text-muted-foreground uppercase">Agent</Label>

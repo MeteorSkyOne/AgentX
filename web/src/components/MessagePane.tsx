@@ -47,6 +47,10 @@ interface MessagePaneProps {
   onLoadOlder: () => boolean;
 }
 
+type DisplayProcessItem = ProcessItem & {
+  result?: ProcessItem;
+};
+
 export function MessagePane({
   messages,
   isLoading,
@@ -424,18 +428,19 @@ function StreamingItem({
 
 function ProcessBlock({ items, defaultOpen = true }: { items: ProcessItem[]; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
+  const displayItems = mergeToolProcessItems(items);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground py-1">
         {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         <Brain className="h-3 w-3" />
         <span>Process</span>
-        <span className="text-[10px] text-muted-foreground/70">{items.length}</span>
+        <span className="text-[10px] text-muted-foreground/70">{displayItems.length}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="space-y-2 border-l border-border/60 pl-3 py-1">
-          {items.map((item, index) => (
-            <ProcessRow key={`${item.type}-${item.tool_call_id ?? index}-${index}`} item={item} />
+          {displayItems.map((item, index) => (
+            <ProcessRow key={processItemKey(item, index)} item={item} />
           ))}
         </div>
       </CollapsibleContent>
@@ -443,7 +448,7 @@ function ProcessBlock({ items, defaultOpen = true }: { items: ProcessItem[]; def
   );
 }
 
-function ProcessRow({ item }: { item: ProcessItem }) {
+function ProcessRow({ item }: { item: DisplayProcessItem }) {
   if (item.type === "thinking") {
     return (
       <div className="space-y-1 text-xs text-muted-foreground">
@@ -463,11 +468,15 @@ function ProcessRow({ item }: { item: ProcessItem }) {
   return <ToolProcessRow item={item} />;
 }
 
-function ToolProcessRow({ item }: { item: ProcessItem }) {
-  const isResult = item.type === "tool_result";
-  const [open, setOpen] = useState(!isResult);
+function ToolProcessRow({ item }: { item: DisplayProcessItem }) {
+  const resultItem = item.result ?? (item.type === "tool_result" ? item : undefined);
+  const isResultOnly = item.type === "tool_result" && !item.result;
+  const hasResult = Boolean(resultItem);
+  const status = resultItem?.status ?? item.status;
+  const isError = status === "error";
+  const [open, setOpen] = useState(!hasResult);
   const raw = rawProcessValue(item);
-  const preview = toolPreview(item, isResult);
+  const preview = toolPreview(item);
   return (
     <Collapsible
       open={open}
@@ -479,18 +488,28 @@ function ToolProcessRow({ item }: { item: ProcessItem }) {
         <span
           className={cn(
             "flex h-5 w-5 items-center justify-center rounded-full",
-            isResult ? "bg-emerald-500/10 text-emerald-400" : "bg-blue-500/10 text-blue-400"
+            isError
+              ? "bg-destructive/10 text-destructive"
+              : hasResult
+                ? "bg-emerald-500/10 text-emerald-400"
+                : "bg-blue-500/10 text-blue-400"
           )}
         >
-          {isResult ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Wrench className="h-3.5 w-3.5" />}
+          {isError ? (
+            <CircleAlert className="h-3.5 w-3.5" />
+          ) : hasResult ? (
+            <CheckCircle2 className="h-3.5 w-3.5" />
+          ) : (
+            <Wrench className="h-3.5 w-3.5" />
+          )}
         </span>
         <span className="font-medium text-foreground">
-          {isResult ? "Tool result" : "Tool call"}
+          {item.result ? "Tool" : isResultOnly ? "Tool result" : "Tool call"}
         </span>
         {item.tool_name && <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{item.tool_name}</span>}
-        {item.status && (
-          <span className={cn("rounded px-1.5 py-0.5", item.status === "error" ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground")}>
-            {item.status}
+        {status && (
+          <span className={cn("rounded px-1.5 py-0.5", isError ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground")}>
+            {status}
           </span>
         )}
         {item.tool_call_id && <span className="font-mono text-[10px] text-muted-foreground">{shortID(item.tool_call_id)}</span>}
@@ -546,14 +565,23 @@ interface ToolPreview {
   params: Array<[string, string]>;
 }
 
-function toolPreview(item: ProcessItem, isResult: boolean): ToolPreview {
-  const value = isResult ? item.output : item.input;
-  const raw = item.raw;
-  const command = extractCommand(value) ?? extractCommand(raw);
-  const cwd = extractString(value, "cwd", "workdir", "working_directory") ?? extractString(raw, "cwd", "workdir", "working_directory");
-  const description = extractString(value, "description", "reason") ?? extractString(raw, "description", "reason");
-  const body = isResult ? toolOutputText(value ?? item.text ?? raw) : undefined;
-  const params = previewParams(value, new Set(["command", "cmd", "cwd", "workdir", "working_directory", "description", "reason"]));
+function toolPreview(item: DisplayProcessItem): ToolPreview {
+  const resultItem = item.result ?? (item.type === "tool_result" ? item : undefined);
+  const inputValue = item.type === "tool_result" && !item.result ? item.input : item.input ?? resultItem?.input;
+  const outputValue = resultItem?.output ?? resultItem?.text ?? resultItem?.raw;
+  const inputRaw = item.raw;
+  const resultRaw = resultItem?.raw;
+  const command = extractCommand(inputValue) ?? extractCommand(inputRaw) ?? extractCommand(resultRaw);
+  const cwd =
+    extractString(inputValue, "cwd", "workdir", "working_directory") ??
+    extractString(inputRaw, "cwd", "workdir", "working_directory") ??
+    extractString(resultRaw, "cwd", "workdir", "working_directory");
+  const description =
+    extractString(inputValue, "description", "reason") ??
+    extractString(inputRaw, "description", "reason") ??
+    extractString(resultRaw, "description", "reason");
+  const body = resultItem ? toolOutputText(outputValue) : undefined;
+  const params = previewParams(inputValue, new Set(["command", "cmd", "cwd", "workdir", "working_directory", "description", "reason"]));
 
   return {
     title: description ?? (cwd ? `cwd: ${cwd}` : undefined),
@@ -637,6 +665,72 @@ function shellPart(value: string): string {
   return /^[A-Za-z0-9_/:=.,@%+-]+$/.test(value) ? value : JSON.stringify(value);
 }
 
+function mergeToolProcessItems(items: ProcessItem[]): DisplayProcessItem[] {
+  const merged: DisplayProcessItem[] = [];
+  const toolCallIndexByID = new Map<string, number>();
+
+  for (const item of items) {
+    if (item.type === "tool_call") {
+      merged.push({ ...item });
+      if (item.tool_call_id) {
+        toolCallIndexByID.set(item.tool_call_id, merged.length - 1);
+      }
+      continue;
+    }
+
+    if (item.type === "tool_result") {
+      const matchingIndex = item.tool_call_id
+        ? toolCallIndexByID.get(item.tool_call_id)
+        : findPreviousOpenToolCallIndex(merged, item);
+
+      if (matchingIndex !== undefined) {
+        merged[matchingIndex] = mergeToolProcessPair(merged[matchingIndex], item);
+        continue;
+      }
+    }
+
+    merged.push({ ...item });
+  }
+
+  return merged;
+}
+
+function findPreviousOpenToolCallIndex(items: DisplayProcessItem[], result: ProcessItem): number | undefined {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const candidate = items[index];
+    if (candidate.type !== "tool_call" || candidate.result) {
+      continue;
+    }
+    if (candidate.tool_name && result.tool_name && candidate.tool_name !== result.tool_name) {
+      continue;
+    }
+    return index;
+  }
+  return undefined;
+}
+
+function mergeToolProcessPair(call: DisplayProcessItem, result: ProcessItem): DisplayProcessItem {
+  return {
+    ...call,
+    tool_name: call.tool_name ?? result.tool_name,
+    tool_call_id: call.tool_call_id ?? result.tool_call_id,
+    status: result.status ?? call.status,
+    input: call.input ?? result.input,
+    output: result.output ?? result.text ?? call.output,
+    result
+  };
+}
+
+function processItemKey(item: DisplayProcessItem, index: number): string {
+  if (item.tool_call_id) {
+    return `tool-${item.tool_call_id}`;
+  }
+  if (item.result?.tool_call_id) {
+    return `tool-${item.result.tool_call_id}`;
+  }
+  return `${item.type}-${index}`;
+}
+
 function processFromMetadata(metadata: Message["metadata"]): ProcessItem[] {
   if (metadata?.process && Array.isArray(metadata.process) && metadata.process.length > 0) {
     return metadata.process;
@@ -657,7 +751,17 @@ function processFromStreaming(item: StreamingMessage): ProcessItem[] {
   return [];
 }
 
-function rawProcessValue(item: ProcessItem): unknown {
+function rawProcessValue(item: DisplayProcessItem): unknown {
+  if (item.result) {
+    return {
+      call: rawSingleProcessValue(item),
+      result: rawSingleProcessValue(item.result)
+    };
+  }
+  return rawSingleProcessValue(item);
+}
+
+function rawSingleProcessValue(item: ProcessItem): unknown {
   if (item.raw !== undefined) {
     return item.raw;
   }
