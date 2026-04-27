@@ -95,6 +95,22 @@ test("mobile navigation, messaging, and side panels are usable", async ({ page }
   await expectNoHorizontalOverflow(page);
 });
 
+test("mobile navigation opens project settings", async ({ page }) => {
+  await signInMobile(page);
+
+  const nav = await openNavigation(page);
+  await nav.getByRole("button", { name: "Project settings" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Project settings" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel("Workspace path")).not.toHaveValue("");
+  await expect(nav).toHaveCount(0);
+
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
+});
+
 test("mobile thread channel can create and open a post", async ({ page }, testInfo) => {
   await signInMobile(page);
   await createChannel(page, testInfo, "thread");

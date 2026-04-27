@@ -800,20 +800,36 @@ export function Shell({
                 className="flex h-14 min-w-0 shrink-0 items-center justify-between gap-3 border-b border-border px-4"
                 data-testid="mobile-nav-header"
               >
-                <DialogHeader className="min-w-0 gap-0 text-left">
+                <DialogHeader className="min-w-0 flex-1 gap-0 text-left">
                   <DialogTitle className="truncate">Navigation</DialogTitle>
                   <DialogDescription className="truncate">{project?.name ?? "No project"}</DialogDescription>
                 </DialogHeader>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-10 w-10"
-                  title="Close navigation"
-                  aria-label="Close navigation"
-                  onClick={() => setMobileNavOpen(false)}
-                >
-                  <X className="h-5 w-5" />
-                </Button>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-10 w-10"
+                    title="Project settings"
+                    aria-label="Project settings"
+                    disabled={!project}
+                    onClick={() => {
+                      setMobileNavOpen(false);
+                      openProjectSettings();
+                    }}
+                  >
+                    <Settings className="h-5 w-5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-10 w-10"
+                    title="Close navigation"
+                    aria-label="Close navigation"
+                    onClick={() => setMobileNavOpen(false)}
+                  >
+                    <X className="h-5 w-5" />
+                  </Button>
+                </div>
               </div>
 
               <ScrollArea
