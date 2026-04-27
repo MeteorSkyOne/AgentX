@@ -1,14 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Bot,
   Database,
-  FileText,
   FolderOpen,
   Hash,
   Key,
   Plus,
-  RefreshCw,
   Save,
   Settings,
   Trash2,
@@ -33,7 +31,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import type { Agent, Channel, ConversationAgentContext, Workspace, WorkspaceTreeEntry } from "../../api/types";
+import type { Agent, Channel, ConversationAgentContext, Workspace } from "../../api/types";
+import type { ThemeMode } from "../../theme";
 import {
   AgentAvatar,
   AVATAR_COLORS,
@@ -41,7 +40,7 @@ import {
   getAgentAvatar,
   setAgentAvatar,
 } from "../AgentAvatar";
-import { FileTree } from "../FileTree";
+import { WorkspaceFileBrowser } from "../WorkspaceFileBrowser";
 import type { ShellProps } from "./types";
 import {
   agentKindLabel,
@@ -62,7 +61,8 @@ export function AgentDetailsPanel({
   onWriteWorkspaceFile,
   onDeleteWorkspaceFile,
   onCreateAgentModal,
-  onClose
+  onClose,
+  theme
 }: {
   selectedChannel?: Channel;
   projectWorkspace?: Workspace;
@@ -77,6 +77,7 @@ export function AgentDetailsPanel({
   onDeleteWorkspaceFile: ShellProps["onDeleteWorkspaceFile"];
   onCreateAgentModal: () => void;
   onClose: () => void;
+  theme: ThemeMode;
 }) {
   const [agentID, setAgentID] = useState(selectedAgent?.id ?? "");
   const [name, setName] = useState(selectedAgent?.name ?? "");
@@ -91,22 +92,10 @@ export function AgentDetailsPanel({
   const [avatarEmoji, setAvatarEmoji] = useState("");
   const [avatarColor, setAvatarColor] = useState("");
   const [activeTab, setActiveTab] = useState("settings");
-  const [filePath, setFilePath] = useState(() => defaultAgentInstructionPath(selectedAgent?.kind));
-  const [fileBody, setFileBody] = useState("");
-  const [tree, setTree] = useState<WorkspaceTreeEntry>();
-  const [workspaceTreeLoading, setWorkspaceTreeLoading] = useState(false);
-  const [workspaceTreeError, setWorkspaceTreeError] = useState<string | null>(null);
-  const [fileLoading, setFileLoading] = useState(false);
-  const [fileSaving, setFileSaving] = useState(false);
-  const [fileDeleteConfirmOpen, setFileDeleteConfirmOpen] = useState(false);
-  const [fileDeleting, setFileDeleting] = useState(false);
-  const [workspaceStatus, setWorkspaceStatus] = useState<string | null>(null);
   const [envBody, setEnvBody] = useState("{}");
   const [status, setStatus] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const workspaceTreeRequestRef = useRef(0);
-  const fileRequestRef = useRef(0);
 
   const selected = agents.find((a) => a.id === agentID) ?? selectedAgent;
   const selectedBinding = boundAgents.find((item) => item.agent.id === selected?.id);
@@ -141,7 +130,6 @@ export function AgentDetailsPanel({
     setEnabled(selected.enabled);
     setFastMode(selected.fast_mode);
     setYoloMode(selected.yolo_mode);
-    setFilePath(defaultAgentInstructionPath(selected.kind));
     setEnvBody("{}");
     const av = getAgentAvatar(selected.id);
     setAvatarEmoji(av?.emoji ?? "");
@@ -160,107 +148,12 @@ export function AgentDetailsPanel({
     selected?.yolo_mode
   ]);
 
-  useEffect(() => {
-    workspaceTreeRequestRef.current += 1;
-    fileRequestRef.current += 1;
-    setTree(undefined);
-    setFileBody("");
-    setWorkspaceTreeError(null);
-    setWorkspaceTreeLoading(false);
-    setFileLoading(false);
-    setFileSaving(false);
-    setFileDeleteConfirmOpen(false);
-    setFileDeleting(false);
-    setWorkspaceStatus(null);
-  }, [selectedConfigWorkspaceID]);
-
-  useEffect(() => {
-    if (activeTab === "workspace" && selectedConfigWorkspaceID) {
-      void loadTree({ quiet: true });
-    }
-  }, [activeTab, selectedConfigWorkspaceID]);
 
   async function saveAgent() {
     if (!selected) return;
     await onUpdateAgent(selected.id, { name, description, handle, kind, model, effort, enabled, fast_mode: fastMode, yolo_mode: yoloMode });
     setAgentAvatar(selected.id, avatarEmoji ? { emoji: avatarEmoji, color: avatarColor || agentKindColor(kind) } : null);
     setStatus("Saved");
-  }
-
-  async function loadFile(path = filePath) {
-    const targetPath = path.trim();
-    if (!selectedConfigWorkspaceID || !targetPath) return;
-    const requestID = ++fileRequestRef.current;
-    setFileLoading(true);
-    setFilePath(targetPath);
-    try {
-      const body = await onReadWorkspaceFile(selectedConfigWorkspaceID, targetPath);
-      if (fileRequestRef.current !== requestID) return;
-      setFileBody(body);
-      setWorkspaceStatus("Loaded");
-    } catch (err) {
-      if (fileRequestRef.current !== requestID) return;
-      setWorkspaceStatus(err instanceof Error ? err.message : "Load failed");
-    } finally {
-      if (fileRequestRef.current === requestID) {
-        setFileLoading(false);
-      }
-    }
-  }
-
-  async function loadTree(options: { quiet?: boolean } = {}) {
-    if (!selectedConfigWorkspaceID) return;
-    const requestID = ++workspaceTreeRequestRef.current;
-    setWorkspaceTreeLoading(true);
-    setWorkspaceTreeError(null);
-    try {
-      const nextTree = await onLoadWorkspaceTree(selectedConfigWorkspaceID);
-      if (workspaceTreeRequestRef.current !== requestID) return;
-      setTree(nextTree);
-      if (!options.quiet) setWorkspaceStatus("Tree loaded");
-    } catch (err) {
-      if (workspaceTreeRequestRef.current !== requestID) return;
-      const message = err instanceof Error ? err.message : "Tree load failed";
-      setWorkspaceTreeError(message);
-      if (!options.quiet) setWorkspaceStatus(message);
-    } finally {
-      if (workspaceTreeRequestRef.current === requestID) {
-        setWorkspaceTreeLoading(false);
-      }
-    }
-  }
-
-  async function saveFile() {
-    const targetPath = filePath.trim();
-    if (!selectedConfigWorkspaceID || !targetPath) return;
-    setFileSaving(true);
-    try {
-      await onWriteWorkspaceFile(selectedConfigWorkspaceID, targetPath, fileBody);
-      setFilePath(targetPath);
-      setWorkspaceStatus("Saved");
-      await loadTree({ quiet: true });
-    } catch (err) {
-      setWorkspaceStatus(err instanceof Error ? err.message : "Save failed");
-    } finally {
-      setFileSaving(false);
-    }
-  }
-
-  async function confirmDeleteFile() {
-    const targetPath = filePath.trim();
-    if (!selectedConfigWorkspaceID || !targetPath) return;
-    setFileDeleting(true);
-    try {
-      await onDeleteWorkspaceFile(selectedConfigWorkspaceID, targetPath);
-      setFileBody("");
-      setWorkspaceStatus("Deleted");
-      setFileDeleteConfirmOpen(false);
-      await loadTree({ quiet: true });
-    } catch (err) {
-      setWorkspaceStatus(err instanceof Error ? err.message : "Delete failed");
-    } finally {
-      setFileDeleting(false);
-    }
   }
 
   async function saveEnv() {
@@ -588,73 +481,18 @@ export function AgentDetailsPanel({
         {/* Workspace Tab */}
         <TabsContent value="workspace" className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4">
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
-            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Database className="h-3.5 w-3.5" />
-              <span className="truncate">{selectedBinding?.config_workspace.path ?? selected?.config_workspace_id ?? ""}</span>
-            </div>
-            <div className="flex gap-2">
-              <Input value={filePath} onChange={(e) => setFilePath(e.target.value)} aria-label="File path" className="flex-1 text-xs" />
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1.5"
-                onClick={() => void loadFile()}
-                disabled={fileLoading || !selectedConfigWorkspaceID || !filePath.trim()}
-              >
-                <FileText className="h-3.5 w-3.5" />
-                Open
-              </Button>
-              <Button
-                size="icon-sm"
-                variant="outline"
-                onClick={() => void loadTree()}
-                disabled={workspaceTreeLoading || !selectedConfigWorkspaceID}
-                title="Refresh tree"
-                aria-label="Refresh tree"
-              >
-                <RefreshCw className={cn("h-3.5 w-3.5", workspaceTreeLoading && "animate-spin")} />
-              </Button>
-            </div>
-            <FileTree
-              tree={tree}
-              selectedPath={filePath}
-              loading={workspaceTreeLoading}
-              error={workspaceTreeError}
-              className="h-44 shrink-0"
-              ariaLabel="Agent workspace files"
-              onSelectFile={(path) => void loadFile(path)}
+            <WorkspaceFileBrowser
+              workspaceID={selectedConfigWorkspaceID}
+              workspacePath={selectedBinding?.config_workspace.path ?? selected?.config_workspace_id ?? ""}
+              initialPath={defaultAgentInstructionPath(selected?.kind)}
+              theme={theme}
+              onLoadTree={onLoadWorkspaceTree}
+              onReadFile={onReadWorkspaceFile}
+              onWriteFile={onWriteWorkspaceFile}
+              onDeleteFile={onDeleteWorkspaceFile}
             />
-              <Textarea
-                className="flex-1 resize-none font-mono text-xs"
-                value={fileBody}
-                onChange={(e) => setFileBody(e.target.value)}
-                placeholder="File content..."
-                aria-label="File content"
-              />
-              {workspaceStatus && <p className="text-xs text-muted-foreground">{workspaceStatus}</p>}
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  size="sm"
-                  className="gap-2"
-                  onClick={saveFile}
-                  disabled={fileSaving || !selectedConfigWorkspaceID || !filePath.trim()}
-                >
-                  <Save className="h-4 w-4" />
-                  Save file
-                </Button>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  className="gap-2"
-                  onClick={() => setFileDeleteConfirmOpen(true)}
-                  disabled={fileDeleting || !selectedConfigWorkspaceID || !filePath.trim()}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Delete file
-                </Button>
-              </div>
-            </div>
-          </TabsContent>
+          </div>
+        </TabsContent>
 
         {/* Env Tab */}
         <TabsContent value="env" className="min-h-0 flex-1 overflow-hidden px-4 pb-4">
@@ -705,28 +543,6 @@ export function AgentDetailsPanel({
             Cancel
           </Button>
           <Button variant="destructive" onClick={confirmDeleteAgent} disabled={deleting || !selected}>
-            Delete
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-    <Dialog open={fileDeleteConfirmOpen} onOpenChange={setFileDeleteConfirmOpen}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Delete file?</DialogTitle>
-          <DialogDescription>
-            {filePath.trim() ? `${filePath.trim()} will be removed from this agent workspace.` : "This file will be removed from this agent workspace."}
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setFileDeleteConfirmOpen(false)} disabled={fileDeleting}>
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            onClick={confirmDeleteFile}
-            disabled={fileDeleting || !selectedConfigWorkspaceID || !filePath.trim()}
-          >
             Delete
           </Button>
         </DialogFooter>

@@ -1,5 +1,14 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { seedDenseNavigation, setLightTheme, uniqueName } from "./helpers";
+import {
+  expectMonacoEditorText,
+  firstProject,
+  readWorkspaceFile,
+  seedDenseNavigation,
+  setLightTheme,
+  setMonacoEditorValue,
+  uniqueName,
+  writeWorkspaceFile,
+} from "./helpers";
 
 const adminToken = "e2e-token";
 const displayName = "Mobile E2E User";
@@ -63,11 +72,12 @@ test("mobile navigation, messaging, and side panels are usable", async ({ page }
   await expect(nav).toHaveCount(0);
 
   const composer = page.getByRole("textbox", { name: "Message" });
-  await composer.fill("mobile ping");
+  const messageText = uniqueName(testInfo, "mobile ping");
+  await composer.fill(messageText);
   await page.getByRole("button", { name: "Send" }).click();
   const messages = page.getByLabel("Messages");
-  await expect(messages.getByText("mobile ping", { exact: true })).toBeVisible();
-  await expect(messages.getByText("Echo: mobile ping", { exact: true })).toBeVisible();
+  await expect(messages.getByText(messageText, { exact: true })).toBeVisible();
+  await expect(messages.getByText(`Echo: ${messageText}`, { exact: true })).toBeVisible();
   await expect(composer).toHaveValue("");
   await expectNoHorizontalOverflow(page);
 
@@ -102,6 +112,38 @@ test("mobile thread channel can create and open a post", async ({ page }, testIn
   await expect(page.getByRole("heading", { name: postTitle })).toBeVisible();
   await expect(page.getByLabel("Messages").getByText("thread hello from mobile", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Back to posts" })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+});
+
+test("mobile project files navigates tree editor and back to chat", async ({ page }) => {
+  await signInMobile(page);
+  const project = await firstProject(page);
+  await writeWorkspaceFile(page, project.workspace_id, "docs/mobile.md", "mobile project file");
+
+  await page.getByRole("button", { name: "Project files" }).click();
+  await expect(page.getByRole("button", { name: "Navigation" })).toHaveCount(0);
+  const projectTree = page.getByRole("tree", { name: "Project files" });
+  await expect(projectTree).toBeVisible();
+  await projectTree.getByRole("treeitem", { name: "mobile.md" }).click();
+
+  const editor = page.getByTestId("project-file-editor-pane");
+  await expect(editor).toBeVisible();
+  await expect(page.getByRole("tree", { name: "Project files" })).toHaveCount(0);
+  await expectMonacoEditorText(editor, "mobile project file");
+
+  await setMonacoEditorValue(page, editor, "mobile project file edited");
+  await editor.getByRole("button", { name: "Save file" }).click();
+  await expect(editor.getByText("Saved")).toBeVisible();
+  await expect.poll(() => readWorkspaceFile(page, project.workspace_id, "docs/mobile.md")).toBe("mobile project file edited");
+  await setMonacoEditorValue(page, editor, "");
+  await editor.getByRole("button", { name: "Open" }).click();
+  await expectMonacoEditorText(editor, "mobile project file edited");
+
+  await page.getByRole("button", { name: "Back to files" }).click();
+  await expect(projectTree).toBeVisible();
+  await page.getByRole("button", { name: "Back to chat" }).click();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Navigation" })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 });
 

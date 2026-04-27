@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-dialog": "^1.1.15",
@@ -35,6 +36,7 @@
     "clsx": "^2.1.1",
     "katex": "^0.16.45",
     "lucide-react": "^1.11.0",
+    "monaco-editor": "^0.55.1",
     "postcss": "^8.5.10",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",

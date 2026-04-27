@@ -1,12 +1,13 @@
-import type { Page, TestInfo } from "@playwright/test";
+import { expect, type Locator, type Page, type TestInfo } from "@playwright/test";
 
 interface OrganizationSeed {
   id: string;
 }
 
-interface ProjectSeed {
+export interface ProjectSeed {
   id: string;
   name: string;
+  workspace_id: string;
 }
 
 interface ChannelSeed {
@@ -15,9 +16,11 @@ interface ChannelSeed {
   type: "text" | "thread";
 }
 
-interface AgentSeed {
+export interface AgentSeed {
   id: string;
   enabled: boolean;
+  config_workspace_id: string;
+  default_workspace_id: string;
 }
 
 interface E2ERequestInit {
@@ -36,6 +39,62 @@ export async function setLightTheme(page: Page) {
     localStorage.setItem("agentx.theme", "light");
     document.documentElement.classList.remove("dark");
     document.documentElement.style.colorScheme = "light";
+  });
+}
+
+export async function setMonacoEditorValue(page: Page, scope: Locator, value: string) {
+  const editor = scope.getByTestId("workspace-file-editor");
+  const monacoEditor = editor.locator(".monaco-editor");
+  await expect(monacoEditor).toBeVisible({ timeout: 15_000 });
+  const editorHandle = await editor.elementHandle();
+  const hasEditorHook = editorHandle
+    ? await page
+        .waitForFunction(
+          (node) => {
+            const editorNode = node as HTMLElement & {
+              __agentxSetEditorValue?: (value: string) => void;
+            };
+            return Boolean(editorNode.__agentxSetEditorValue);
+          },
+          editorHandle,
+          { timeout: 5_000 }
+        )
+        .then(() => true)
+        .catch(() => false)
+    : false;
+
+  if (hasEditorHook) {
+    await editor.evaluate((node, nextValue) => {
+      const editorNode = node as HTMLElement & {
+        __agentxSetEditorValue?: (value: string) => void;
+      };
+      editorNode.__agentxSetEditorValue?.(nextValue);
+    }, value);
+    await expect
+      .poll(() =>
+        editor.evaluate((node) => {
+          const editorNode = node as HTMLElement & {
+            __agentxGetEditorValue?: () => string;
+          };
+          return editorNode.__agentxGetEditorValue?.() ?? "";
+        })
+      )
+      .toBe(value);
+    return;
+  }
+
+  await monacoEditor.click();
+  await page.keyboard.press(`${keyboardModifier()}+A`);
+  await page.keyboard.press("Backspace");
+  if (value) {
+    await page.keyboard.insertText(value);
+  }
+}
+
+export async function expectMonacoEditorText(scope: Locator, text: string) {
+  const editor = scope.getByTestId("workspace-file-editor");
+  await expect(editor.locator(".view-line").filter({ hasText: text }).first()).toBeVisible({
+    timeout: 15_000,
   });
 }
 
@@ -191,6 +250,34 @@ export async function seedDenseNavigation(page: Page, testInfo: TestInfo): Promi
   return { projectNames, channelNames };
 }
 
+export function writeWorkspaceFile(
+  page: Page,
+  workspaceID: string,
+  filePath: string,
+  body: string
+): Promise<unknown> {
+  return request(
+    page,
+    `/api/workspaces/${encodeURIComponent(workspaceID)}/files?${new URLSearchParams({ path: filePath }).toString()}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ body }),
+    }
+  );
+}
+
+export async function readWorkspaceFile(
+  page: Page,
+  workspaceID: string,
+  filePath: string
+): Promise<string> {
+  const file = await request<{ body: string }>(
+    page,
+    `/api/workspaces/${encodeURIComponent(workspaceID)}/files?${new URLSearchParams({ path: filePath }).toString()}`
+  );
+  return file.body;
+}
+
 async function firstOrganizationID(page: Page): Promise<string> {
   const organizations = await request<OrganizationSeed[]>(page, "/api/organizations");
   const organizationID = organizations[0]?.id;
@@ -198,7 +285,7 @@ async function firstOrganizationID(page: Page): Promise<string> {
   return organizationID;
 }
 
-async function firstProject(page: Page): Promise<ProjectSeed> {
+export async function firstProject(page: Page): Promise<ProjectSeed> {
   const organizationID = await firstOrganizationID(page);
   const projects = await request<ProjectSeed[]>(
     page,
@@ -209,7 +296,7 @@ async function firstProject(page: Page): Promise<ProjectSeed> {
   return project;
 }
 
-async function firstEnabledAgent(page: Page): Promise<AgentSeed> {
+export async function firstEnabledAgent(page: Page): Promise<AgentSeed> {
   const organizationID = await firstOrganizationID(page);
   const agents = await request<AgentSeed[]>(
     page,
@@ -226,6 +313,10 @@ function uniqueSuffix(testInfo: TestInfo, separator = "-"): string {
     Date.now().toString(36),
     Math.random().toString(36).slice(2, 8),
   ].join(separator);
+}
+
+function keyboardModifier(): "Control" | "Meta" {
+  return process.platform === "darwin" ? "Meta" : "Control";
 }
 
 function slug(value: string) {

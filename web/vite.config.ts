@@ -83,6 +83,9 @@ function cdnImportMapPlugin(): Plugin {
 
 export default defineConfig({
   plugins: [react(), cdnImportMapPlugin()],
+  optimizeDeps: {
+    include: ["monaco-editor"]
+  },
   build: {
     rolldownOptions: {
       external: isCdnExternal
