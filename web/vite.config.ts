@@ -25,6 +25,7 @@ const cdnImports: Record<string, string> = {
   "@radix-ui/react-tooltip": "https://esm.sh/@radix-ui/react-tooltip@1.2.8?bundle&external=react,react-dom",
   "class-variance-authority": "https://esm.sh/class-variance-authority@0.7.1?bundle",
   clsx: "https://esm.sh/clsx@2.1.1?bundle",
+  katex: "https://esm.sh/katex@0.16.45?bundle",
   "lucide-react": "https://esm.sh/lucide-react@1.11.0?bundle&external=react",
   "react-markdown": "https://esm.sh/react-markdown@10.1.0?bundle&external=react",
   "react-resizable-panels": "https://esm.sh/react-resizable-panels@2.1.9?bundle&external=react,react-dom",
@@ -45,7 +46,9 @@ const cdnImports: Record<string, string> = {
   "react-syntax-highlighter/dist/esm/languages/prism/rust": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/rust?bundle",
   "react-syntax-highlighter/dist/esm/languages/prism/markdown": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/markdown?bundle",
   "react-syntax-highlighter/dist/esm/languages/prism/diff": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/diff?bundle",
+  "rehype-katex": "https://esm.sh/rehype-katex@7.0.1?bundle",
   "remark-gfm": "https://esm.sh/remark-gfm@4.0.1?bundle",
+  "remark-math": "https://esm.sh/remark-math@6.0.0?bundle",
   "tailwind-merge": "https://esm.sh/tailwind-merge@3.5.0?bundle"
 };
 

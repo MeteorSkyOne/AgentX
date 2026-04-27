@@ -1,6 +1,8 @@
 import { lazy, memo, Suspense, type ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
+import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 
 const CodeBlock = lazy(() =>
   import("./CodeBlock").then((module) => ({ default: module.CodeBlock }))
@@ -81,7 +83,11 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   text,
 }: Props) {
   return (
-    <Markdown remarkPlugins={[remarkGfm]} components={components}>
+    <Markdown
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeKatex]}
+      components={components}
+    >
       {text}
     </Markdown>
   );
