@@ -52,7 +52,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	cfg := config.FromEnv()
+	cfg, err := config.Load()
+	if err != nil {
+		slog.Error("load config", "error", err)
+		os.Exit(1)
+	}
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		slog.Error("create data dir", "error", err)
 		os.Exit(1)

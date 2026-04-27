@@ -40,7 +40,7 @@ cmd/agentx/main.go (bootstrap)
   → internal/store/       (interface) → sqlite/ (SQLite via modernc.org, Goose migrations)
   → internal/eventbus/    (in-memory pub/sub, filters by org/conversation)
   → internal/runtime/     (interface) → claude/ | codex/ | fake/ (CLI adapters)
-  → internal/config/      (env var config)
+  → internal/config/      (env var + TOML config)
 ```
 
 **Data model**: Organization → Projects → Channels → Threads → Messages. Agents bind to conversations via ConversationBinding and run in Workspaces. Agents have configurable `effort`, `fast_mode`, and `description` fields.
@@ -59,9 +59,9 @@ cmd/agentx/main.go (bootstrap)
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `AGENTX_ADDR` | 127.0.0.1:8080 | Server bind address |
+| `AGENTX_ADDR` | 127.0.0.1:8080 | Server bind address; overrides `config.toml` |
 | `AGENTX_ADMIN_TOKEN` | random | First-run setup token; `dev-token` in dev mode |
-| `AGENTX_DATA_DIR` | ~/.agentx | SQLite storage location |
+| `AGENTX_DATA_DIR` | ~/.agentx | SQLite storage and `config.toml` location |
 | `AGENTX_DEFAULT_AGENT_KIND` | fake | `fake`, `claude`, or `codex` |
 | `AGENTX_CLAUDE_COMMAND` | claude | Path to Claude CLI |
 | `AGENTX_CODEX_COMMAND` | codex | Path to Codex CLI |

@@ -66,7 +66,15 @@ make prod
 
 Production builds embed the generated web assets into the `agentx` binary, so the compiled server can be moved and run without a separate `web/dist` directory.
 
-The production server listens on `127.0.0.1:8080` by default. Set `AGENTX_ADDR` to change it. Set `AGENTX_ADMIN_TOKEN` to use a stable first-run setup token; otherwise the script generates a token for the current run. When initial setup is still pending, the server prints the setup token to stdout only; it is not written to the startup log file.
+The production server listens on `127.0.0.1:8080` by default. On startup, AgentX creates `~/.agentx/config.toml` when it does not exist. Change the listening IP and port there:
+
+```toml
+[server]
+listen_ip = "127.0.0.1"
+listen_port = 8080
+```
+
+Set `AGENTX_ADDR` to override the config file for a single run. Set `AGENTX_ADMIN_TOKEN` to use a stable first-run setup token; otherwise the script generates a token for the current run. When initial setup is still pending, the server prints the setup token to stdout only; it is not written to the startup log file.
 
 Reset the local admin username and password directly against the configured SQLite database:
 

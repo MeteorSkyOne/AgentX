@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -99,5 +100,90 @@ func TestFromEnvOverrides(t *testing.T) {
 	}
 	if cfg.ClaudeAppendSystemText != "be brief" {
 		t.Fatalf("ClaudeAppendSystemText = %q", cfg.ClaudeAppendSystemText)
+	}
+}
+
+func TestLoadCreatesDefaultConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AGENTX_DATA_DIR", dir)
+	t.Setenv("AGENTX_ADDR", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Addr != "127.0.0.1:8080" {
+		t.Fatalf("Addr = %q, want 127.0.0.1:8080", cfg.Addr)
+	}
+
+	body, err := os.ReadFile(filepath.Join(dir, "config.toml"))
+	if err != nil {
+		t.Fatalf("read config file: %v", err)
+	}
+	got := string(body)
+	for _, want := range []string{`[server]`, `listen_ip = "127.0.0.1"`, `listen_port = 8080`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("config file = %q, want it to contain %q", got, want)
+		}
+	}
+}
+
+func TestLoadUsesConfigFileListenAddress(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AGENTX_DATA_DIR", dir)
+	t.Setenv("AGENTX_ADDR", "")
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(`[server]
+listen_ip = "0.0.0.0"
+listen_port = 9090
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Addr != "0.0.0.0:9090" {
+		t.Fatalf("Addr = %q, want 0.0.0.0:9090", cfg.Addr)
+	}
+}
+
+func TestLoadKeepsEnvListenAddressOverride(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AGENTX_DATA_DIR", dir)
+	t.Setenv("AGENTX_ADDR", "127.0.0.1:7777")
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(`[server]
+listen_ip = "0.0.0.0"
+listen_port = 9090
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Addr != "127.0.0.1:7777" {
+		t.Fatalf("Addr = %q, want env override", cfg.Addr)
+	}
+}
+
+func TestLoadRejectsInvalidConfigFileListenPort(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AGENTX_DATA_DIR", dir)
+	t.Setenv("AGENTX_ADDR", "")
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(`[server]
+listen_ip = "127.0.0.1"
+listen_port = 70000
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want invalid port error")
+	}
+	if !strings.Contains(err.Error(), "server.listen_port") {
+		t.Fatalf("Load() error = %q, want server.listen_port", err)
 	}
 }

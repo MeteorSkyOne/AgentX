@@ -3,9 +3,21 @@ package config
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+
+	"github.com/BurntSushi/toml"
+)
+
+const (
+	defaultListenIP   = "127.0.0.1"
+	defaultListenPort = 8080
+	defaultAddr       = "127.0.0.1:8080"
+	configFileName    = "config.toml"
 )
 
 type Config struct {
@@ -26,10 +38,36 @@ type Config struct {
 	ClaudeAppendSystemText string
 }
 
+type fileConfig struct {
+	Server fileServerConfig `toml:"server"`
+}
+
+type fileServerConfig struct {
+	ListenIP   string `toml:"listen_ip"`
+	ListenPort int    `toml:"listen_port"`
+}
+
+func Load() (Config, error) {
+	cfg := FromEnv()
+	configPath := filepath.Join(cfg.DataDir, configFileName)
+	fileCfg, err := loadOrCreateFileConfig(configPath)
+	if err != nil {
+		return Config{}, err
+	}
+	if os.Getenv("AGENTX_ADDR") == "" {
+		addr, err := serverAddrFromFileConfig(fileCfg, configPath)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.Addr = addr
+	}
+	return cfg, nil
+}
+
 func FromEnv() Config {
 	dataDir := getenv("AGENTX_DATA_DIR", defaultDataDir())
 	return Config{
-		Addr:                   getenv("AGENTX_ADDR", "127.0.0.1:8080"),
+		Addr:                   getenv("AGENTX_ADDR", defaultAddr),
 		DataDir:                dataDir,
 		SQLitePath:             getenv("AGENTX_SQLITE_PATH", filepath.Join(dataDir, "agentx.db")),
 		AdminToken:             getenv("AGENTX_ADMIN_TOKEN", randomToken()),
@@ -45,6 +83,55 @@ func FromEnv() Config {
 		ClaudeDisallowedTools:  getenvList("AGENTX_CLAUDE_DISALLOWED_TOOLS"),
 		ClaudeAppendSystemText: getenv("AGENTX_CLAUDE_APPEND_SYSTEM_PROMPT", ""),
 	}
+}
+
+func loadOrCreateFileConfig(path string) (fileConfig, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fileConfig{}, fmt.Errorf("create config dir: %w", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		if !os.IsNotExist(err) {
+			return fileConfig{}, fmt.Errorf("stat config file %s: %w", path, err)
+		}
+		if err := os.WriteFile(path, []byte(defaultConfigFile()), 0o644); err != nil {
+			return fileConfig{}, fmt.Errorf("create config file %s: %w", path, err)
+		}
+	}
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return fileConfig{}, fmt.Errorf("read config file %s: %w", path, err)
+	}
+	var cfg fileConfig
+	if _, err := toml.Decode(string(body), &cfg); err != nil {
+		return fileConfig{}, fmt.Errorf("parse config file %s: %w", path, err)
+	}
+	return cfg, nil
+}
+
+func serverAddrFromFileConfig(cfg fileConfig, path string) (string, error) {
+	listenIP := strings.TrimSpace(cfg.Server.ListenIP)
+	if listenIP == "" {
+		listenIP = defaultListenIP
+	}
+	listenPort := cfg.Server.ListenPort
+	if listenPort == 0 {
+		listenPort = defaultListenPort
+	}
+	if listenPort < 1 || listenPort > 65535 {
+		return "", fmt.Errorf("config file %s: server.listen_port must be between 1 and 65535", path)
+	}
+	return net.JoinHostPort(listenIP, strconv.Itoa(listenPort)), nil
+}
+
+func defaultConfigFile() string {
+	return fmt.Sprintf(`# AgentX configuration.
+# AGENTX_ADDR overrides server.listen_ip and server.listen_port when set.
+
+[server]
+listen_ip = %q
+listen_port = %d
+`, defaultListenIP, defaultListenPort)
 }
 
 func defaultDataDir() string {
