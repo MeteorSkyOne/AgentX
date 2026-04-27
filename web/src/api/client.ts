@@ -1,7 +1,7 @@
 import type {
   AgentRunMetric,
   AuthResponse,
-  BootstrapResponse,
+  AuthStatus,
   Agent,
   AgentChannelContext,
   Channel,
@@ -74,23 +74,35 @@ async function errorMessage(response: Response): Promise<string> {
   }
 }
 
-export function bootstrap(adminToken: string, displayName: string): Promise<BootstrapResponse> {
-  return request<BootstrapResponse>("/api/auth/bootstrap", {
+export function authStatus(): Promise<AuthStatus> {
+  return request<AuthStatus>("/api/auth/status");
+}
+
+export function setupAdmin(payload: {
+  setup_token: string;
+  username: string;
+  password: string;
+  display_name: string;
+}): Promise<AuthResponse> {
+  return request<AuthResponse>("/api/auth/setup", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function login(username: string, password: string): Promise<AuthResponse> {
+  return request<AuthResponse>("/api/auth/login", {
     method: "POST",
     body: JSON.stringify({
-      admin_token: adminToken,
-      display_name: displayName
+      username,
+      password
     })
   });
 }
 
-export function login(adminToken: string, displayName: string): Promise<AuthResponse> {
-  return request<AuthResponse>("/api/auth/login", {
-    method: "POST",
-    body: JSON.stringify({
-      admin_token: adminToken,
-      display_name: displayName
-    })
+export function logout(): Promise<void> {
+  return request<void>("/api/auth/logout", {
+    method: "POST"
   });
 }
 

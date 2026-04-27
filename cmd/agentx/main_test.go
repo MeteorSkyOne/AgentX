@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log"
 	"log/slog"
@@ -13,6 +15,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/meteorsky/agentx/internal/app"
+	"github.com/meteorsky/agentx/internal/eventbus"
+	sqlitestore "github.com/meteorsky/agentx/internal/store/sqlite"
 )
 
 func TestServeHTTPShutsDownWhenContextCanceled(t *testing.T) {
@@ -172,5 +178,64 @@ func TestNewHTTPHandlerUsesAPIWhenWebDistMissing(t *testing.T) {
 	}
 	if body := recorder.Body.String(); body != "/any-path" {
 		t.Fatalf("GET /any-path body = %q, want %q", body, "/any-path")
+	}
+}
+
+func TestRunCLIResetAdminUpdatesPasswordAndClearsSessions(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "agentx.db")
+	t.Setenv("AGENTX_DATA_DIR", dir)
+	t.Setenv("AGENTX_SQLITE_PATH", dbPath)
+
+	st, err := sqlitestore.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := app.New(st, eventbus.New(), app.Options{AdminToken: "secret", DataDir: dir})
+	setup, err := a.SetupAdmin(ctx, app.SetupAdminRequest{
+		SetupToken:  "secret",
+		Username:    "admin",
+		Password:    "old-password-1234",
+		DisplayName: "Admin",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	handled, code := runCLI(
+		ctx,
+		[]string{"auth", "reset-admin", "--username", "reset_admin", "--password-stdin"},
+		strings.NewReader("new-password-1234\n"),
+		&stdout,
+		&stderr,
+	)
+	if !handled || code != 0 {
+		t.Fatalf("runCLI handled=%v code=%d stdout=%q stderr=%q", handled, code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "reset_admin") {
+		t.Fatalf("stdout = %q, want reset username", stdout.String())
+	}
+
+	st, err = sqlitestore.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	a = app.New(st, eventbus.New(), app.Options{DataDir: dir})
+	if _, err := a.UserForToken(ctx, setup.SessionToken); !errors.Is(err, app.ErrUnauthorized) {
+		t.Fatalf("old session error = %v, want %v", err, app.ErrUnauthorized)
+	}
+	login, err := a.Login(ctx, app.LoginRequest{Username: "reset_admin", Password: "new-password-1234"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if login.User.ID != setup.User.ID {
+		t.Fatalf("login user id = %q, want %q", login.User.ID, setup.User.ID)
 	}
 }

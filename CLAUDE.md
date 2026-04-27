@@ -9,12 +9,12 @@ A self-hosted AI coding agent management service. It coordinates organizations, 
 ## Commands
 
 ```bash
-make dev          # Full stack: API (127.0.0.1:8080) + Web UI (127.0.0.1:5173), token=dev-token
+make dev          # Full stack: API (127.0.0.1:8080) + Web UI (127.0.0.1:5173), setup token=dev-token
 make build        # Build Go binary
 make test         # All tests: Go + shell scripts + frontend build + frontend tests
 make run          # Backend only (set AGENTX_ADMIN_TOKEN first)
 make web-build    # Build frontend
-scripts/prod.sh   # Build and run production server (auto-generates bootstrap token)
+scripts/prod.sh   # Build and run production server (auto-generates setup token)
 scripts/dev-worktree.sh <branch>  # Isolated git worktree dev environment per branch
 
 # Go tests
@@ -53,14 +53,14 @@ cmd/agentx/main.go (bootstrap)
 
 **Event flow**: Agent subprocess → Runtime Session → App (publishes to EventBus) → WebSocket handler → Frontend. Events are scoped by organization + conversation type + conversation ID.
 
-**Auth**: Bearer token middleware. Bootstrap with `AGENTX_ADMIN_TOKEN` env var.
+**Auth**: Bearer token middleware. First-run admin setup uses `AGENTX_ADMIN_TOKEN` as the setup token; normal login uses username/password and 30-day hashed API sessions.
 
 ## Key Configuration (env vars)
 
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `AGENTX_ADDR` | 127.0.0.1:8080 | Server bind address |
-| `AGENTX_ADMIN_TOKEN` | random | `dev-token` in dev mode |
+| `AGENTX_ADMIN_TOKEN` | random | First-run setup token; `dev-token` in dev mode |
 | `AGENTX_DATA_DIR` | ~/.agentx | SQLite storage location |
 | `AGENTX_DEFAULT_AGENT_KIND` | fake | `fake`, `claude`, or `codex` |
 | `AGENTX_CLAUDE_COMMAND` | claude | Path to Claude CLI |

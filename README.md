@@ -6,7 +6,7 @@ AgentX is a self-hosted AI coding agent management service for coordinating orga
 
 - Go API server
 - SQLite persistence
-- Bootstrap admin token login
+- First-run admin setup and password login
 - Organization and channel model
 - Message history
 - WebSocket event stream
@@ -23,7 +23,7 @@ Start the full local stack:
 make dev
 ```
 
-This starts the API on `127.0.0.1:8080`, the web client on `127.0.0.1:5173`, and uses the bootstrap token `dev-token`.
+This starts the API on `127.0.0.1:8080`, the web client on `127.0.0.1:5173`, and uses the setup token `dev-token` for the first admin account.
 
 The frontend uses pnpm. If pnpm is not already available, enable Corepack once with `corepack enable`.
 
@@ -35,7 +35,7 @@ AGENTX_ADMIN_TOKEN=dev-token go run ./cmd/agentx
 
 The API listens on `127.0.0.1:8080`.
 
-Choose the default runtime before the first bootstrap:
+Choose the default runtime before the first setup:
 
 ```sh
 AGENTX_ADMIN_TOKEN=dev-token AGENTX_DEFAULT_AGENT_KIND=codex go run ./cmd/agentx
@@ -54,7 +54,7 @@ Run the web client:
 cd web && pnpm install && pnpm run dev
 ```
 
-Open `http://127.0.0.1:5173` and bootstrap with `dev-token`.
+Open `http://127.0.0.1:5173`, set up the admin account with setup token `dev-token`, then sign in with the username and password you chose.
 
 ## Production
 
@@ -64,7 +64,13 @@ Build the web client, compile the Go server, and serve both from one process:
 make prod
 ```
 
-The production server listens on `127.0.0.1:8080` by default. Set `AGENTX_ADDR` to change it. Set `AGENTX_ADMIN_TOKEN` to use a stable bootstrap token; otherwise the script generates and prints a token for the current run.
+The production server listens on `127.0.0.1:8080` by default. Set `AGENTX_ADDR` to change it. Set `AGENTX_ADMIN_TOKEN` to use a stable first-run setup token; otherwise the script generates and prints a token for the current run.
+
+Reset the local admin username and password directly against the configured SQLite database:
+
+```sh
+printf '%s\n' 'new-long-password' | agentx auth reset-admin --username admin --password-stdin
+```
 
 ## Tests
 

@@ -17,6 +17,7 @@ import {
   deleteThread,
   deleteWorkspaceFile,
   getToken,
+  logout as logoutRequest,
   me,
   notificationSettings,
   organizations,
@@ -475,6 +476,14 @@ export default function App() {
     queryClient.clear();
   }
 
+  async function handleLogout() {
+    try {
+      await logoutRequest();
+    } finally {
+      clearSession();
+    }
+  }
+
   function clearConversation() {
     setSelectedChannelID(undefined);
     setActiveConversation(undefined);
@@ -800,7 +809,7 @@ export default function App() {
       onLoadOlderMessages={handleLoadOlderMessages}
       onMessageSent={handleMessageSent}
       onToggleTheme={handleToggleTheme}
-      onLogout={clearSession}
+      onLogout={handleLogout}
     />
   );
 }

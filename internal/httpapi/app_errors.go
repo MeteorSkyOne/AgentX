@@ -11,7 +11,7 @@ import (
 func writeAppError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, app.ErrInvalidInput):
-		writeError(w, http.StatusBadRequest, "invalid input")
+		writeError(w, http.StatusBadRequest, app.InvalidInputMessage(err))
 	case errors.Is(err, sql.ErrNoRows):
 		writeError(w, http.StatusNotFound, "not found")
 	default:

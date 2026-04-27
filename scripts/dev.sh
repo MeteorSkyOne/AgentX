@@ -9,10 +9,10 @@ web_host="${AGENTX_WEB_HOST:-127.0.0.1}"
 web_port="${AGENTX_WEB_PORT:-5173}"
 data_dir="${AGENTX_DATA_DIR:-.agentx}"
 sqlite_path="${AGENTX_SQLITE_PATH:-$data_dir/agentx.db}"
-admin_token="${AGENTX_ADMIN_TOKEN:-dev-token}"
+setup_token="${AGENTX_ADMIN_TOKEN:-dev-token}"
 
 if [[ "${AGENTX_DEV_DRY_RUN:-}" == "1" ]]; then
-  echo "AGENTX_ADMIN_TOKEN=$admin_token"
+  echo "AGENTX_ADMIN_TOKEN=$setup_token"
   echo "AGENTX_ADDR=$backend_addr"
   echo "AGENTX_DATA_DIR=$data_dir"
   echo "AGENTX_SQLITE_PATH=$sqlite_path"
@@ -48,7 +48,7 @@ trap handle_signal INT TERM
 
 echo "Starting AgentX API at http://$backend_addr"
 (
-  export AGENTX_ADMIN_TOKEN="$admin_token"
+  export AGENTX_ADMIN_TOKEN="$setup_token"
   export AGENTX_ADDR="$backend_addr"
   export AGENTX_DATA_DIR="$data_dir"
   export AGENTX_SQLITE_PATH="$sqlite_path"
@@ -63,7 +63,7 @@ echo "Starting AgentX web at http://$web_host:$web_port"
 ) &
 pids+=("$!")
 
-echo "Bootstrap token: $admin_token"
+echo "Setup token: $setup_token"
 echo "Press Ctrl+C to stop both processes."
 
 set +e

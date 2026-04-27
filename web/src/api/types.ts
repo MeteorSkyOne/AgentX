@@ -51,6 +51,7 @@ export interface MessageReference {
 
 export interface User {
   id: string;
+  username?: string;
   display_name: string;
   created_at: string;
 }
@@ -260,6 +261,11 @@ export interface BootstrapResponse {
 export interface AuthResponse {
   session_token: string;
   user: User;
+}
+
+export interface AuthStatus {
+  setup_required: boolean;
+  setup_token_required: boolean;
 }
 
 export interface CreateThreadResponse {

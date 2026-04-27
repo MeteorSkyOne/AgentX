@@ -2,9 +2,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { firstProject, seedDenseNavigation, setLightTheme, setMonacoEditorValue, writeWorkspaceFile } from "./helpers";
-
-const adminToken = "e2e-token";
+import { firstProject, seedDenseNavigation, setLightTheme, setMonacoEditorValue, signIn, writeWorkspaceFile } from "./helpers";
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 
 test.skip(!process.env.AGENTX_CAPTURE_SCREENSHOTS, "Optional diagnostic screenshots are disabled by default.");
@@ -18,9 +16,7 @@ test("captures diagnostic screenshots for AI review", async ({ page }, testInfo)
   await page.goto("/");
   await capture(page, testInfo, "01-login");
 
-  await page.getByLabel("Admin token").fill(adminToken);
-  await page.getByLabel("Display name").fill("Screenshot User");
-  await page.getByRole("button", { name: "Enter" }).click();
+  await signIn(page, "Screenshot User");
   await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
   await clearDefaultChannelMessages(page);
   await page.reload();

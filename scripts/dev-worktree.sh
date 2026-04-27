@@ -66,7 +66,7 @@ web_host="${AGENTX_WEB_HOST:-127.0.0.1}"
 web_port="${AGENTX_WEB_PORT:-5173}"
 data_dir="${AGENTX_DATA_DIR:-.agentx-worktree}"
 sqlite_path="${AGENTX_SQLITE_PATH:-$data_dir/agentx.db}"
-admin_token="${AGENTX_ADMIN_TOKEN:-dev-token}"
+setup_token="${AGENTX_ADMIN_TOKEN:-dev-token}"
 
 if [[ ! -d web/node_modules ]]; then
   echo "Installing web dependencies..."
@@ -79,7 +79,7 @@ trap handle_signal INT TERM
 
 echo "Starting AgentX API at http://$backend_addr"
 (
-  export AGENTX_ADMIN_TOKEN="$admin_token"
+  export AGENTX_ADMIN_TOKEN="$setup_token"
   export AGENTX_ADDR="$backend_addr"
   export AGENTX_DATA_DIR="$data_dir"
   export AGENTX_SQLITE_PATH="$sqlite_path"
@@ -97,7 +97,7 @@ pids+=("$!")
 echo ""
 echo "Branch:          $branch"
 echo "Worktree:        $worktree_dir"
-echo "Bootstrap token: $admin_token"
+echo "Setup token:     $setup_token"
 echo "Press Ctrl+C to stop and clean up."
 
 set +e

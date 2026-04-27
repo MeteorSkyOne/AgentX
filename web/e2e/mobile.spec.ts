@@ -6,19 +6,15 @@ import {
   seedDenseNavigation,
   setLightTheme,
   setMonacoEditorValue,
+  signIn,
   uniqueName,
   writeWorkspaceFile,
 } from "./helpers";
 
-const adminToken = "e2e-token";
 const displayName = "Mobile E2E User";
 
 async function signInMobile(page: Page) {
-  await page.goto("/");
-
-  await page.getByLabel("Admin token").fill(adminToken);
-  await page.getByLabel("Display name").fill(displayName);
-  await page.getByRole("button", { name: "Enter" }).click();
+  await signIn(page, displayName);
 
   await expect(page.getByTestId("mobile-shell")).toBeVisible();
   await expect(page.getByTestId("desktop-shell")).toBeHidden();

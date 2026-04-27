@@ -1,30 +1,21 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import {
   createChannelViaAPI,
+  e2ePassword,
+  e2eSetupToken,
+  e2eUsername,
   expectMonacoEditorText,
   firstEnabledAgent,
   firstProject,
   readWorkspaceFile,
   setMonacoEditorValue,
+  signIn,
   uniqueHandle,
   uniqueName,
   writeWorkspaceFile,
 } from "./helpers";
 
-const adminToken = "e2e-token";
 const displayName = "E2E User";
-
-async function signIn(page: Page, name = displayName) {
-  await page.goto("/");
-
-  await page.getByLabel("Admin token").fill(adminToken);
-  await page.getByLabel("Display name").fill(name);
-  await page.getByRole("button", { name: "Enter" }).click();
-
-  await expect(page.getByRole("button", { name: /general/i })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
-  await expect(page.getByRole("heading", { name: "Fake Agent" })).toBeVisible();
-}
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
@@ -34,16 +25,37 @@ test.beforeEach(async ({ page }) => {
 test("validates login, restores the session, and logs back in", async ({ page }) => {
   await page.evaluate(() => localStorage.setItem("agentx.session_token", "invalid-token"));
   await page.goto("/");
-  await expect(page.getByLabel("Admin token")).toBeVisible();
+  await expect(page.getByLabel("Username")).toBeVisible();
 
-  await expect(page.getByRole("button", { name: "Enter" })).toBeDisabled();
-  await page.getByLabel("Admin token").fill("wrong-token");
-  await page.getByRole("button", { name: "Enter" }).click();
-  await expect(page.getByText("unauthorized")).toBeVisible();
+  if (await page.getByLabel("Setup token").isVisible().catch(() => false)) {
+    await expect(page.getByRole("button", { name: "Set up admin" })).toBeDisabled();
+    await page.getByLabel("Setup token").fill("wrong-token");
+    await page.getByLabel("Username").fill(e2eUsername);
+    await page.getByLabel("Display name").fill(displayName);
+    await page.getByLabel("Password", { exact: true }).fill(e2ePassword);
+    await page.getByLabel("Confirm password").fill(e2ePassword);
+    await page.getByRole("button", { name: "Set up admin" }).click();
+    await expect(page.getByText("unauthorized")).toBeVisible();
 
-  await page.getByLabel("Admin token").fill(adminToken);
-  await page.getByLabel("Display name").fill(displayName);
-  await page.getByRole("button", { name: "Enter" }).click();
+    await page.getByLabel("Setup token").fill(e2eSetupToken);
+    await page.getByLabel("Password", { exact: true }).fill("qwe123");
+    await page.getByLabel("Confirm password").fill("qwe123");
+    await page.getByRole("button", { name: "Set up admin" }).click();
+    await expect(page.getByText("password must be at least 12 bytes")).toBeVisible();
+
+    await page.getByLabel("Password", { exact: true }).fill(e2ePassword);
+    await page.getByLabel("Confirm password").fill(e2ePassword);
+    await page.getByRole("button", { name: "Set up admin" }).click();
+  } else {
+    await expect(page.getByRole("button", { name: "Log in" })).toBeDisabled();
+    await page.getByLabel("Username").fill(e2eUsername);
+    await page.getByLabel("Password", { exact: true }).fill("wrong-password");
+    await page.getByRole("button", { name: "Log in" }).click();
+    await expect(page.getByText("unauthorized")).toBeVisible();
+
+    await page.getByLabel("Password", { exact: true }).fill(e2ePassword);
+    await page.getByRole("button", { name: "Log in" }).click();
+  }
 
   await expect(page.getByRole("heading", { name: "Fake Agent" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Default" })).toBeVisible();
@@ -53,12 +65,13 @@ test("validates login, restores the session, and logs back in", async ({ page })
   await expect(page.getByRole("heading", { name: "Fake Agent" })).toBeVisible();
 
   await page.getByRole("button", { name: "Log out" }).click();
-  await expect(page.getByLabel("Admin token")).toBeVisible();
+  await expect(page.getByLabel("Username")).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem("agentx.session_token"))).toBeNull();
 
-  await page.getByLabel("Admin token").fill(adminToken);
-  await page.getByRole("button", { name: "Enter" }).click();
+  await page.getByLabel("Username").fill(e2eUsername);
+  await page.getByLabel("Password", { exact: true }).fill(e2ePassword);
+  await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "Fake Agent" })).toBeVisible();
 });
 

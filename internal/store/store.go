@@ -47,9 +47,14 @@ type Tx interface {
 type UserStore interface {
 	Create(ctx context.Context, user domain.User) error
 	ByID(ctx context.Context, id string) (domain.User, error)
+	ByUsername(ctx context.Context, username string) (domain.User, error)
 	First(ctx context.Context) (domain.User, error)
-	CreateAPISession(ctx context.Context, token string, userID string) error
-	UserIDByAPISession(ctx context.Context, token string) (string, error)
+	HasPassword(ctx context.Context) (bool, error)
+	SetCredentials(ctx context.Context, userID string, username string, displayName string, passwordHash string, passwordUpdatedAt time.Time) error
+	CreateAPISession(ctx context.Context, tokenHash string, userID string, createdAt time.Time, expiresAt time.Time) error
+	UserIDByAPISessionHash(ctx context.Context, tokenHash string, now time.Time) (string, error)
+	DeleteAPISession(ctx context.Context, tokenHash string) error
+	DeleteAllAPISessions(ctx context.Context) error
 }
 
 type UserPreferencesStore interface {

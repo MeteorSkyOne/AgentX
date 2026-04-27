@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -12,15 +14,35 @@ import (
 	"github.com/meteorsky/agentx/internal/domain"
 	"github.com/meteorsky/agentx/internal/id"
 	"github.com/meteorsky/agentx/internal/store"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var ErrUnauthorized = errors.New("unauthorized")
 
 var ErrAlreadyBootstrapped = errors.New("already bootstrapped")
 
-type BootstrapRequest struct {
-	AdminToken  string `json:"admin_token"`
+const sessionTTL = 30 * 24 * time.Hour
+
+type AuthStatus struct {
+	SetupRequired      bool `json:"setup_required"`
+	SetupTokenRequired bool `json:"setup_token_required"`
+}
+
+type SetupAdminRequest struct {
+	SetupToken  string `json:"setup_token"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
 	DisplayName string `json:"display_name"`
+}
+
+type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type ResetAdminRequest struct {
+	Username string
+	Password string
 }
 
 type BootstrapResult struct {
@@ -40,19 +62,63 @@ type AuthResult struct {
 	User         domain.User `json:"user"`
 }
 
-func (a *App) Bootstrap(ctx context.Context, req BootstrapRequest) (BootstrapResult, error) {
+func (a *App) AuthStatus(ctx context.Context) (AuthStatus, error) {
+	hasPassword, err := a.store.Users().HasPassword(ctx)
+	if err != nil {
+		return AuthStatus{}, err
+	}
+	setupRequired := !hasPassword
+	return AuthStatus{
+		SetupRequired:      setupRequired,
+		SetupTokenRequired: setupRequired,
+	}, nil
+}
+
+func (a *App) SetupAdmin(ctx context.Context, req SetupAdminRequest) (AuthResult, error) {
+	result, err := a.bootstrapAdmin(ctx, req)
+	if err != nil {
+		return AuthResult{}, err
+	}
+	return AuthResult{SessionToken: result.SessionToken, User: result.User}, nil
+}
+
+func (a *App) Bootstrap(ctx context.Context, req SetupAdminRequest) (BootstrapResult, error) {
+	return a.bootstrapAdmin(ctx, req)
+}
+
+func (a *App) bootstrapAdmin(ctx context.Context, req SetupAdminRequest) (BootstrapResult, error) {
 	configuredToken := strings.TrimSpace(a.opts.AdminToken)
-	requestToken := strings.TrimSpace(req.AdminToken)
+	requestToken := strings.TrimSpace(req.SetupToken)
 	if configuredToken == "" || subtle.ConstantTimeCompare([]byte(requestToken), []byte(configuredToken)) != 1 {
 		return BootstrapResult{}, ErrUnauthorized
 	}
+	username, err := normalizeUsername(req.Username)
+	if err != nil {
+		return BootstrapResult{}, err
+	}
+	if err := validatePassword(req.Password); err != nil {
+		return BootstrapResult{}, err
+	}
+	passwordHashBytes, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return BootstrapResult{}, err
+	}
+	passwordHash := string(passwordHashBytes)
 	name := strings.TrimSpace(req.DisplayName)
 	if name == "" {
 		name = "Admin"
 	}
 
 	now := time.Now().UTC()
-	user := domain.User{ID: id.New("usr"), DisplayName: name, CreatedAt: now}
+	passwordUpdatedAt := now
+	user := domain.User{
+		ID:                id.New("usr"),
+		Username:          username,
+		DisplayName:       name,
+		PasswordHash:      passwordHash,
+		PasswordUpdatedAt: &passwordUpdatedAt,
+		CreatedAt:         now,
+	}
 	org := domain.Organization{ID: id.New("org"), Name: "Default", CreatedAt: now}
 	projectWorkspace := domain.Workspace{
 		ID:             id.New("wks"),
@@ -132,19 +198,39 @@ func (a *App) Bootstrap(ctx context.Context, req BootstrapRequest) (BootstrapRes
 		UpdatedAt:        now,
 	}
 	token := id.NewToken()
+	tokenHash := hashSessionToken(token)
+	expiresAt := now.Add(sessionTTL)
+	freshBootstrap := true
 
-	err := a.store.Tx(ctx, func(tx store.Tx) error {
-		bootstrapped, err := tx.Organizations().Any(ctx)
+	err = a.store.Tx(ctx, func(tx store.Tx) error {
+		hasPassword, err := tx.Users().HasPassword(ctx)
 		if err != nil {
 			return err
 		}
-		if bootstrapped {
+		if hasPassword {
 			return ErrAlreadyBootstrapped
 		}
+		existingUser, err := tx.Users().First(ctx)
+		switch {
+		case err == nil:
+			freshBootstrap = false
+			user.ID = existingUser.ID
+			user.CreatedAt = existingUser.CreatedAt
+			if err := tx.Users().SetCredentials(ctx, user.ID, username, name, passwordHash, passwordUpdatedAt); err != nil {
+				return err
+			}
+			user.PasswordHash = passwordHash
+			user.PasswordUpdatedAt = &passwordUpdatedAt
+			return tx.Users().CreateAPISession(ctx, tokenHash, user.ID, now, expiresAt)
+		case errors.Is(err, sql.ErrNoRows):
+		default:
+			return err
+		}
+
 		if err := tx.Users().Create(ctx, user); err != nil {
 			return err
 		}
-		if err := tx.Users().CreateAPISession(ctx, token, user.ID); err != nil {
+		if err := tx.Users().CreateAPISession(ctx, tokenHash, user.ID, now, expiresAt); err != nil {
 			return err
 		}
 		if err := tx.Organizations().Create(ctx, org); err != nil {
@@ -183,6 +269,13 @@ func (a *App) Bootstrap(ctx context.Context, req BootstrapRequest) (BootstrapRes
 		return BootstrapResult{}, err
 	}
 
+	if !freshBootstrap {
+		return BootstrapResult{
+			SessionToken: token,
+			User:         user,
+		}, nil
+	}
+
 	return BootstrapResult{
 		SessionToken:     token,
 		User:             user,
@@ -196,40 +289,90 @@ func (a *App) Bootstrap(ctx context.Context, req BootstrapRequest) (BootstrapRes
 	}, nil
 }
 
-func (a *App) Login(ctx context.Context, req BootstrapRequest) (AuthResult, error) {
-	configuredToken := strings.TrimSpace(a.opts.AdminToken)
-	requestToken := strings.TrimSpace(req.AdminToken)
-	if configuredToken == "" || subtle.ConstantTimeCompare([]byte(requestToken), []byte(configuredToken)) != 1 {
+func (a *App) Login(ctx context.Context, req LoginRequest) (AuthResult, error) {
+	username, err := normalizeUsername(req.Username)
+	if err != nil {
 		return AuthResult{}, ErrUnauthorized
 	}
-
-	bootstrapped, err := a.store.Organizations().Any(ctx)
+	user, err := a.store.Users().ByUsername(ctx, username)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AuthResult{}, ErrUnauthorized
+		}
 		return AuthResult{}, err
 	}
-	if !bootstrapped {
-		result, err := a.Bootstrap(ctx, req)
-		if err == nil {
-			return AuthResult{SessionToken: result.SessionToken, User: result.User}, nil
-		}
-		if !errors.Is(err, ErrAlreadyBootstrapped) {
-			return AuthResult{}, err
-		}
+	if user.PasswordHash == "" {
+		return AuthResult{}, ErrUnauthorized
 	}
-
-	user, err := a.store.Users().First(ctx)
-	if err != nil {
-		return AuthResult{}, err
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		return AuthResult{}, ErrUnauthorized
 	}
+	now := time.Now().UTC()
 	token := id.NewToken()
-	if err := a.store.Users().CreateAPISession(ctx, token, user.ID); err != nil {
+	if err := a.store.Users().CreateAPISession(ctx, hashSessionToken(token), user.ID, now, now.Add(sessionTTL)); err != nil {
 		return AuthResult{}, err
 	}
 	return AuthResult{SessionToken: token, User: user}, nil
 }
 
+func (a *App) Logout(ctx context.Context, token string) error {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return ErrUnauthorized
+	}
+	return a.store.Users().DeleteAPISession(ctx, hashSessionToken(token))
+}
+
+func (a *App) ResetAdmin(ctx context.Context, req ResetAdminRequest) (domain.User, error) {
+	username, err := normalizeUsername(req.Username)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if err := validatePassword(req.Password); err != nil {
+		return domain.User{}, err
+	}
+	passwordHashBytes, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return domain.User{}, err
+	}
+	passwordHash := string(passwordHashBytes)
+	updatedAt := time.Now().UTC()
+	var user domain.User
+
+	err = a.store.Tx(ctx, func(tx store.Tx) error {
+		existing, err := tx.Users().First(ctx)
+		if err != nil {
+			return err
+		}
+		displayName := strings.TrimSpace(existing.DisplayName)
+		if displayName == "" {
+			displayName = "Admin"
+		}
+		if err := tx.Users().SetCredentials(ctx, existing.ID, username, displayName, passwordHash, updatedAt); err != nil {
+			return err
+		}
+		if err := tx.Users().DeleteAllAPISessions(ctx); err != nil {
+			return err
+		}
+		existing.Username = username
+		existing.DisplayName = displayName
+		existing.PasswordHash = passwordHash
+		existing.PasswordUpdatedAt = &updatedAt
+		user = existing
+		return nil
+	})
+	if err != nil {
+		return domain.User{}, err
+	}
+	return user, nil
+}
+
 func (a *App) UserForToken(ctx context.Context, token string) (domain.User, error) {
-	userID, err := a.store.Users().UserIDByAPISession(ctx, token)
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return domain.User{}, ErrUnauthorized
+	}
+	userID, err := a.store.Users().UserIDByAPISessionHash(ctx, hashSessionToken(token), time.Now().UTC())
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.User{}, ErrUnauthorized
@@ -244,6 +387,39 @@ func (a *App) UserForToken(ctx context.Context, token string) (domain.User, erro
 		return domain.User{}, err
 	}
 	return user, nil
+}
+
+func normalizeUsername(value string) (string, error) {
+	username := strings.ToLower(strings.TrimSpace(value))
+	if len(username) < 3 || len(username) > 32 {
+		return "", invalidInput("username must be 3-32 characters")
+	}
+	for _, r := range username {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9':
+		case r == '.', r == '_', r == '-':
+		default:
+			return "", invalidInput("username may only contain lowercase letters, numbers, dots, underscores, or hyphens")
+		}
+	}
+	return username, nil
+}
+
+func validatePassword(password string) error {
+	passwordBytes := len([]byte(password))
+	if passwordBytes < 12 {
+		return invalidInput("password must be at least 12 bytes")
+	}
+	if passwordBytes > 72 {
+		return invalidInput("password must be no more than 72 bytes")
+	}
+	return nil
+}
+
+func hashSessionToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
 
 func defaultHandle(name string, fallback string) string {

@@ -31,7 +31,7 @@ output="$(
 case "$output" in
   *"AGENTX_ADMIN_TOKEN=dev-token"* ) ;;
   * )
-    echo "dry run did not include default admin token" >&2
+    echo "dry run did not include default setup token" >&2
     echo "$output" >&2
     exit 1
     ;;
@@ -63,7 +63,7 @@ prod_output="$(
 case "$prod_output" in
   *"AGENTX_ADMIN_TOKEN=<generated>"* ) ;;
   * )
-    echo "prod dry run did not include generated admin token placeholder" >&2
+    echo "prod dry run did not include generated setup token placeholder" >&2
     echo "$prod_output" >&2
     exit 1
     ;;

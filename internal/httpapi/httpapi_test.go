@@ -22,11 +22,7 @@ import (
 func TestHTTPBootstrapAuthAndMessagesFlow(t *testing.T) {
 	ts := newTestServer(t)
 
-	var bootstrap app.BootstrapResult
-	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	}, http.StatusOK, &bootstrap)
+	bootstrap := setupHTTP(t, ts.URL)
 	if bootstrap.SessionToken == "" {
 		t.Fatal("session_token is empty")
 	}
@@ -77,11 +73,7 @@ func TestHTTPBootstrapAuthAndMessagesFlow(t *testing.T) {
 func TestHTTPAgentCreateAndUpdateRoundTripsEffort(t *testing.T) {
 	ts := newTestServer(t)
 
-	var bootstrap app.BootstrapResult
-	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	}, http.StatusOK, &bootstrap)
+	bootstrap := setupHTTP(t, ts.URL)
 
 	var created domain.Agent
 	postJSON(t, ts.URL+"/api/organizations/"+bootstrap.Organization.ID+"/agents", bootstrap.SessionToken, map[string]any{
@@ -144,11 +136,7 @@ func TestHTTPAgentCreateAndUpdateRoundTripsEffort(t *testing.T) {
 func TestHTTPAgentChannels(t *testing.T) {
 	ts := newTestServer(t)
 
-	var bootstrap app.BootstrapResult
-	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	}, http.StatusOK, &bootstrap)
+	bootstrap := setupHTTP(t, ts.URL)
 
 	var channels []app.AgentChannelContext
 	getJSON(t, ts.URL+"/api/agents/"+bootstrap.Agent.ID+"/channels", bootstrap.SessionToken, http.StatusOK, &channels)
@@ -165,11 +153,7 @@ func TestHTTPAgentChannels(t *testing.T) {
 func TestHTTPSlashCommandErrorsAndSuccess(t *testing.T) {
 	ts := newTestServer(t)
 
-	var bootstrap app.BootstrapResult
-	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	}, http.StatusOK, &bootstrap)
+	bootstrap := setupHTTP(t, ts.URL)
 
 	postJSON(t, ts.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages", bootstrap.SessionToken, map[string]string{
 		"body": "/does-not-exist",
@@ -187,11 +171,7 @@ func TestHTTPSlashCommandErrorsAndSuccess(t *testing.T) {
 func TestHTTPMessagesCanBeUpdatedAndDeleted(t *testing.T) {
 	ts := newTestServer(t)
 
-	var bootstrap app.BootstrapResult
-	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	}, http.StatusOK, &bootstrap)
+	bootstrap := setupHTTP(t, ts.URL)
 
 	var sent domain.Message
 	postJSON(t, ts.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages", bootstrap.SessionToken, map[string]string{
@@ -227,22 +207,55 @@ func TestHTTPMessagesCanBeUpdatedAndDeleted(t *testing.T) {
 	}
 }
 
-func TestHTTPLoginCanResumeAfterBootstrap(t *testing.T) {
+func TestHTTPSetupLoginAndLogout(t *testing.T) {
 	ts := newTestServer(t)
 
+	var status app.AuthStatus
+	getJSON(t, ts.URL+"/api/auth/status", "", http.StatusOK, &status)
+	if !status.SetupRequired || !status.SetupTokenRequired {
+		t.Fatalf("initial status = %#v", status)
+	}
+
+	var setupError errorResponse
+	postJSON(t, ts.URL+"/api/auth/setup", "", app.SetupAdminRequest{
+		SetupToken:  "secret",
+		Username:    "meteorsky",
+		Password:    "qwe123",
+		DisplayName: "Meteorsky",
+	}, http.StatusBadRequest, &setupError)
+	if setupError.Error != "password must be at least 12 bytes" {
+		t.Fatalf("setup error = %q, want password length message", setupError.Error)
+	}
+
 	var first app.AuthResult
-	postJSON(t, ts.URL+"/api/auth/login", "", app.BootstrapRequest{
-		AdminToken:  "secret",
+	postJSON(t, ts.URL+"/api/auth/setup", "", app.SetupAdminRequest{
+		SetupToken:  "secret",
+		Username:    "meteorsky",
+		Password:    "correct-password-123",
 		DisplayName: "Meteorsky",
 	}, http.StatusOK, &first)
 	if first.SessionToken == "" {
 		t.Fatal("first session_token is empty")
 	}
+	getJSON(t, ts.URL+"/api/auth/status", "", http.StatusOK, &status)
+	if status.SetupRequired || status.SetupTokenRequired {
+		t.Fatalf("post-setup status = %#v", status)
+	}
+	postJSON(t, ts.URL+"/api/auth/setup", "", app.SetupAdminRequest{
+		SetupToken:  "secret",
+		Username:    "second",
+		Password:    "correct-password-123",
+		DisplayName: "Second",
+	}, http.StatusConflict, nil)
+	postJSON(t, ts.URL+"/api/auth/login", "", app.LoginRequest{
+		Username: "meteorsky",
+		Password: "wrong-password",
+	}, http.StatusUnauthorized, nil)
 
 	var second app.AuthResult
-	postJSON(t, ts.URL+"/api/auth/login", "", app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Ignored",
+	postJSON(t, ts.URL+"/api/auth/login", "", app.LoginRequest{
+		Username: "METEORSKY",
+		Password: "correct-password-123",
 	}, http.StatusOK, &second)
 	if second.SessionToken == "" || second.SessionToken == first.SessionToken {
 		t.Fatalf("second session_token = %q, first = %q", second.SessionToken, first.SessionToken)
@@ -256,6 +269,9 @@ func TestHTTPLoginCanResumeAfterBootstrap(t *testing.T) {
 	if me.ID != first.User.ID {
 		t.Fatalf("me = %#v, want user id %q", me, first.User.ID)
 	}
+
+	postJSON(t, ts.URL+"/api/auth/logout", second.SessionToken, map[string]any{}, http.StatusNoContent, nil)
+	getJSON(t, ts.URL+"/api/me", second.SessionToken, http.StatusUnauthorized, nil)
 }
 
 func TestHTTPMeRequiresBearerToken(t *testing.T) {
@@ -279,11 +295,7 @@ func TestHTTPMeRequiresBearerToken(t *testing.T) {
 func TestHTTPPreferencesAndMetricsEndpoints(t *testing.T) {
 	ts := newTestServer(t)
 
-	var bootstrap app.BootstrapResult
-	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	}, http.StatusOK, &bootstrap)
+	bootstrap := setupHTTP(t, ts.URL)
 
 	var preferences map[string]bool
 	getJSON(t, ts.URL+"/api/me/preferences", bootstrap.SessionToken, http.StatusOK, &preferences)
@@ -331,11 +343,7 @@ func TestHTTPPreferencesAndMetricsEndpoints(t *testing.T) {
 func TestHTTPSendMessageRejectsUnknownChannelWithoutCreatingOrphan(t *testing.T) {
 	ts := newTestServer(t)
 
-	var bootstrap app.BootstrapResult
-	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	}, http.StatusOK, &bootstrap)
+	bootstrap := setupHTTP(t, ts.URL)
 
 	postJSON(t, ts.URL+"/api/conversations/channel/not-a-real-channel/messages", bootstrap.SessionToken, map[string]string{
 		"body": "orphan",
@@ -347,11 +355,7 @@ func TestHTTPSendMessageRejectsUnknownChannelWithoutCreatingOrphan(t *testing.T)
 func TestHTTPChannelsRejectsOrganizationOutsideAuthenticatedMemberships(t *testing.T) {
 	ts := newTestServer(t)
 
-	var bootstrap app.BootstrapResult
-	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	}, http.StatusOK, &bootstrap)
+	bootstrap := setupHTTP(t, ts.URL)
 
 	getJSON(t, ts.URL+"/api/organizations/not-a-real-org/channels", bootstrap.SessionToken, http.StatusNotFound, nil)
 }
@@ -365,11 +369,7 @@ func TestHTTPNotificationSettingsAuthorizeValidateAndRedactSecret(t *testing.T) 
 	}))
 	defer webhookServer.Close()
 
-	var bootstrap app.BootstrapResult
-	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	}, http.StatusOK, &bootstrap)
+	bootstrap := setupHTTP(t, ts.URL)
 
 	settingsURL := ts.URL + "/api/organizations/" + bootstrap.Organization.ID + "/notification-settings"
 	getJSON(t, settingsURL, "", http.StatusUnauthorized, nil)
@@ -415,11 +415,7 @@ func TestHTTPNotificationSettingsAuthorizeValidateAndRedactSecret(t *testing.T) 
 func TestHTTPWorkspaceFilesRejectTraversalAndRoundTripText(t *testing.T) {
 	ts := newTestServer(t)
 
-	var bootstrap app.BootstrapResult
-	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	}, http.StatusOK, &bootstrap)
+	bootstrap := setupHTTP(t, ts.URL)
 
 	fileURL := ts.URL + "/api/workspaces/" + bootstrap.Workspace.ID + "/files?path=memory.md"
 	putJSON(t, fileURL, bootstrap.SessionToken, map[string]string{"body": "remember this"}, http.StatusOK, nil)
@@ -442,11 +438,7 @@ func TestHTTPWorkspaceFilesRejectTraversalAndRoundTripText(t *testing.T) {
 func TestHTTPWorkspaceMetadataAndProjectWorkspacePathUpdate(t *testing.T) {
 	ts := newTestServer(t)
 
-	var bootstrap app.BootstrapResult
-	postJSON(t, ts.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	}, http.StatusOK, &bootstrap)
+	bootstrap := setupHTTP(t, ts.URL)
 
 	var workspace domain.Workspace
 	getJSON(t, ts.URL+"/api/workspaces/"+bootstrap.ProjectWorkspace.ID, bootstrap.SessionToken, http.StatusOK, &workspace)
@@ -473,11 +465,7 @@ func TestHTTPWorkspaceMetadataAndProjectWorkspacePathUpdate(t *testing.T) {
 func TestHTTPBoundNonChannelConversationsCanSendAndListMessages(t *testing.T) {
 	env := newTestEnv(t)
 
-	var bootstrap app.BootstrapResult
-	postJSON(t, env.server.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	}, http.StatusOK, &bootstrap)
+	bootstrap := setupHTTP(t, env.server.URL)
 
 	for _, conversationType := range []domain.ConversationType{domain.ConversationThread, domain.ConversationDM} {
 		conversationID := string(conversationType) + "-conversation"
@@ -525,11 +513,7 @@ func TestHTTPBoundNonChannelConversationsCanSendAndListMessages(t *testing.T) {
 func TestHTTPSendReplyMessageReturnsResolvedReferenceAndRejectsInvalidTarget(t *testing.T) {
 	env := newTestEnv(t)
 
-	var bootstrap app.BootstrapResult
-	postJSON(t, env.server.URL+"/api/auth/bootstrap", "", app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	}, http.StatusOK, &bootstrap)
+	bootstrap := setupHTTP(t, env.server.URL)
 
 	var original domain.Message
 	postJSON(t, env.server.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages", bootstrap.SessionToken, map[string]string{
@@ -559,13 +543,7 @@ func TestWebSocketReceivesMessageCreated(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	boot, err := env.app.Bootstrap(ctx, app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	boot := setupApp(t, ctx, env.app)
 
 	wsURL := "ws" + strings.TrimPrefix(env.server.URL, "http") + "/api/ws?token=" + boot.SessionToken
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
@@ -608,13 +586,7 @@ func TestWebSocketStreamsMessageHistoryBeforeLiveEvents(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	boot, err := env.app.Bootstrap(ctx, app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	boot := setupApp(t, ctx, env.app)
 
 	for seq := 1; seq <= 60; seq++ {
 		createWebSocketHistoryMessage(t, env, boot.Organization.ID, domain.ConversationChannel, boot.Channel.ID, seq)
@@ -686,13 +658,7 @@ func TestWebSocketHistoryUsesLatestRecentWindow(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	boot, err := env.app.Bootstrap(ctx, app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	boot := setupApp(t, ctx, env.app)
 
 	for seq := 1; seq <= 105; seq++ {
 		createWebSocketHistoryMessage(t, env, boot.Organization.ID, domain.ConversationChannel, boot.Channel.ID, seq)
@@ -761,13 +727,7 @@ func TestWebSocketStreamsHistoryForBoundNonChannelConversations(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	boot, err := env.app.Bootstrap(ctx, app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	boot := setupApp(t, ctx, env.app)
 
 	for index, conversationType := range []domain.ConversationType{domain.ConversationThread, domain.ConversationDM} {
 		t.Run(string(conversationType), func(t *testing.T) {
@@ -818,13 +778,7 @@ func TestWebSocketRejectsUnauthorizedSubscriptions(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	boot, err := env.app.Bootstrap(ctx, app.BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	boot := setupApp(t, ctx, env.app)
 
 	for _, tc := range []struct {
 		name           string
@@ -898,6 +852,72 @@ type testEnv struct {
 	store  *sqlitestore.Store
 	app    *app.App
 	bus    *eventbus.Bus
+}
+
+func setupHTTP(t *testing.T, baseURL string) app.BootstrapResult {
+	t.Helper()
+
+	var auth app.AuthResult
+	postJSON(t, baseURL+"/api/auth/setup", "", app.SetupAdminRequest{
+		SetupToken:  "secret",
+		Username:    "meteorsky",
+		Password:    "correct-password-123",
+		DisplayName: "Meteorsky",
+	}, http.StatusOK, &auth)
+
+	var orgs []domain.Organization
+	getJSON(t, baseURL+"/api/organizations", auth.SessionToken, http.StatusOK, &orgs)
+	if len(orgs) == 0 {
+		t.Fatal("setup did not create an organization")
+	}
+
+	var projects []domain.Project
+	getJSON(t, baseURL+"/api/organizations/"+orgs[0].ID+"/projects", auth.SessionToken, http.StatusOK, &projects)
+	if len(projects) == 0 {
+		t.Fatal("setup did not create a project")
+	}
+
+	var channels []domain.Channel
+	getJSON(t, baseURL+"/api/projects/"+projects[0].ID+"/channels", auth.SessionToken, http.StatusOK, &channels)
+	if len(channels) == 0 {
+		t.Fatal("setup did not create a channel")
+	}
+
+	var agents []domain.Agent
+	getJSON(t, baseURL+"/api/organizations/"+orgs[0].ID+"/agents", auth.SessionToken, http.StatusOK, &agents)
+	if len(agents) == 0 {
+		t.Fatal("setup did not create an agent")
+	}
+
+	var agentWorkspace domain.Workspace
+	getJSON(t, baseURL+"/api/workspaces/"+agents[0].ConfigWorkspaceID, auth.SessionToken, http.StatusOK, &agentWorkspace)
+	var projectWorkspace domain.Workspace
+	getJSON(t, baseURL+"/api/workspaces/"+projects[0].WorkspaceID, auth.SessionToken, http.StatusOK, &projectWorkspace)
+
+	return app.BootstrapResult{
+		SessionToken:     auth.SessionToken,
+		User:             auth.User,
+		Organization:     orgs[0],
+		Project:          projects[0],
+		Channel:          channels[0],
+		Agent:            agents[0],
+		Workspace:        agentWorkspace,
+		ProjectWorkspace: projectWorkspace,
+	}
+}
+
+func setupApp(t *testing.T, ctx context.Context, a *app.App) app.BootstrapResult {
+	t.Helper()
+	boot, err := a.Bootstrap(ctx, app.SetupAdminRequest{
+		SetupToken:  "secret",
+		Username:    "meteorsky",
+		Password:    "correct-password-123",
+		DisplayName: "Meteorsky",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return boot
 }
 
 func newTestServer(t *testing.T) *httptest.Server {

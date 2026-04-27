@@ -47,9 +47,12 @@ const (
 )
 
 type User struct {
-	ID          string    `json:"id"`
-	DisplayName string    `json:"display_name"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID                string     `json:"id"`
+	Username          string     `json:"username,omitempty"`
+	DisplayName       string     `json:"display_name"`
+	PasswordHash      string     `json:"-"`
+	PasswordUpdatedAt *time.Time `json:"-"`
+	CreatedAt         time.Time  `json:"created_at"`
 }
 
 type Organization struct {

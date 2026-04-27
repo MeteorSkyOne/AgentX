@@ -5,32 +5,59 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/meteorsky/agentx/internal/domain"
 	"github.com/meteorsky/agentx/internal/eventbus"
-	"github.com/meteorsky/agentx/internal/store"
 	sqlitestore "github.com/meteorsky/agentx/internal/store/sqlite"
 )
 
-func TestBootstrapCreatesAdminOrgChannelAgentAndWorkspace(t *testing.T) {
+const (
+	testSetupToken = "secret"
+	testUsername   = "meteorsky"
+	testPassword   = "correct-password-123"
+)
+
+func TestAuthStatusReportsSetupRequiredUntilAdminPasswordExists(t *testing.T) {
 	ctx := context.Background()
-	st, err := sqlitestore.Open(ctx, ":memory:")
+	st := newAuthTestStore(t)
+	defer st.Close()
+
+	app := New(st, eventbus.New(), Options{AdminToken: testSetupToken, DataDir: t.TempDir()})
+	status, err := app.AuthStatus(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !status.SetupRequired || !status.SetupTokenRequired {
+		t.Fatalf("status before setup = %#v", status)
+	}
+
+	if _, err := app.SetupAdmin(ctx, setupRequest("Meteorsky")); err != nil {
+		t.Fatal(err)
+	}
+	status, err = app.AuthStatus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.SetupRequired || status.SetupTokenRequired {
+		t.Fatalf("status after setup = %#v", status)
+	}
+}
+
+func TestSetupAdminCreatesAdminOrgChannelAgentAndWorkspace(t *testing.T) {
+	ctx := context.Background()
+	st := newAuthTestStore(t)
 	defer st.Close()
 
-	app := New(st, eventbus.New(), Options{AdminToken: "secret", DataDir: t.TempDir()})
-	result, err := app.Bootstrap(ctx, BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	})
+	app := New(st, eventbus.New(), Options{AdminToken: testSetupToken, DataDir: t.TempDir()})
+	result, err := app.Bootstrap(ctx, setupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.SessionToken == "" {
 		t.Fatal("SessionToken is empty")
 	}
-	if result.User.DisplayName != "Meteorsky" {
+	if result.User.Username != testUsername || result.User.DisplayName != "Meteorsky" || result.User.PasswordHash == "" {
 		t.Fatalf("user = %#v", result.User)
 	}
 	if result.Organization.Name != "Default" {
@@ -47,24 +74,18 @@ func TestBootstrapCreatesAdminOrgChannelAgentAndWorkspace(t *testing.T) {
 	}
 }
 
-func TestBootstrapUsesConfiguredDefaultAgent(t *testing.T) {
+func TestSetupAdminUsesConfiguredDefaultAgent(t *testing.T) {
 	ctx := context.Background()
-	st, err := sqlitestore.Open(ctx, ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := newAuthTestStore(t)
 	defer st.Close()
 
 	app := New(st, eventbus.New(), Options{
-		AdminToken:        "secret",
+		AdminToken:        testSetupToken,
 		DataDir:           t.TempDir(),
 		DefaultAgentKind:  "codex",
 		DefaultAgentModel: "gpt-test",
 	})
-	result, err := app.Bootstrap(ctx, BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	})
+	result, err := app.Bootstrap(ctx, setupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,145 +97,113 @@ func TestBootstrapUsesConfiguredDefaultAgent(t *testing.T) {
 	}
 }
 
-func TestBootstrapRejectsWrongAdminToken(t *testing.T) {
+func TestSetupAdminRejectsWrongSetupToken(t *testing.T) {
 	ctx := context.Background()
-	st, err := sqlitestore.Open(ctx, ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := newAuthTestStore(t)
 	defer st.Close()
 
-	app := New(st, eventbus.New(), Options{AdminToken: "secret", DataDir: t.TempDir()})
-	_, err = app.Bootstrap(ctx, BootstrapRequest{AdminToken: "wrong", DisplayName: "Bad"})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-}
-
-func TestBootstrapRejectsEmptyConfiguredAdminToken(t *testing.T) {
-	ctx := context.Background()
-	st, err := sqlitestore.Open(ctx, ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-
-	app := New(st, eventbus.New(), Options{AdminToken: "", DataDir: t.TempDir()})
-	_, err = app.Bootstrap(ctx, BootstrapRequest{AdminToken: "", DisplayName: "Bad"})
+	app := New(st, eventbus.New(), Options{AdminToken: testSetupToken, DataDir: t.TempDir()})
+	req := setupRequest("Bad")
+	req.SetupToken = "wrong"
+	_, err := app.SetupAdmin(ctx, req)
 	if !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("error = %v, want %v", err, ErrUnauthorized)
 	}
 }
 
-func TestBootstrapRejectsRepeatedBootstrap(t *testing.T) {
+func TestSetupAdminRejectsEmptyConfiguredSetupToken(t *testing.T) {
 	ctx := context.Background()
-	st, err := sqlitestore.Open(ctx, ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := newAuthTestStore(t)
 	defer st.Close()
 
-	app := New(st, eventbus.New(), Options{AdminToken: "secret", DataDir: t.TempDir()})
-	if _, err := app.Bootstrap(ctx, BootstrapRequest{AdminToken: "secret", DisplayName: "First"}); err != nil {
+	app := New(st, eventbus.New(), Options{AdminToken: "", DataDir: t.TempDir()})
+	req := setupRequest("Bad")
+	req.SetupToken = ""
+	_, err := app.SetupAdmin(ctx, req)
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("error = %v, want %v", err, ErrUnauthorized)
+	}
+}
+
+func TestSetupAdminRejectsRepeatedSetup(t *testing.T) {
+	ctx := context.Background()
+	st := newAuthTestStore(t)
+	defer st.Close()
+
+	app := New(st, eventbus.New(), Options{AdminToken: testSetupToken, DataDir: t.TempDir()})
+	if _, err := app.SetupAdmin(ctx, setupRequest("First")); err != nil {
 		t.Fatal(err)
 	}
-	_, err = app.Bootstrap(ctx, BootstrapRequest{AdminToken: "secret", DisplayName: "Second"})
+	_, err := app.SetupAdmin(ctx, setupRequest("Second"))
 	if !errors.Is(err, ErrAlreadyBootstrapped) {
 		t.Fatalf("error = %v, want %v", err, ErrAlreadyBootstrapped)
 	}
 }
 
-func TestUserForTokenReturnsBootstrappedUser(t *testing.T) {
+func TestSetupAdminValidatesUsernameAndPassword(t *testing.T) {
 	ctx := context.Background()
-	st, err := sqlitestore.Open(ctx, ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := newAuthTestStore(t)
 	defer st.Close()
 
-	app := New(st, eventbus.New(), Options{AdminToken: "secret", DataDir: t.TempDir()})
-	result, err := app.Bootstrap(ctx, BootstrapRequest{AdminToken: "secret", DisplayName: "Meteorsky"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	user, err := app.UserForToken(ctx, result.SessionToken)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if user.ID != result.User.ID || user.DisplayName != result.User.DisplayName {
-		t.Fatalf("user = %#v, want %#v", user, result.User)
+	app := New(st, eventbus.New(), Options{AdminToken: testSetupToken, DataDir: t.TempDir()})
+	for _, tc := range []struct {
+		name        string
+		req         SetupAdminRequest
+		wantMessage string
+	}{
+		{
+			name:        "short username",
+			req:         SetupAdminRequest{SetupToken: testSetupToken, Username: "no", Password: testPassword, DisplayName: "Bad"},
+			wantMessage: "username must be 3-32 characters",
+		},
+		{
+			name:        "bad username characters",
+			req:         SetupAdminRequest{SetupToken: testSetupToken, Username: "bad name", Password: testPassword, DisplayName: "Bad"},
+			wantMessage: "username may only contain lowercase letters, numbers, dots, underscores, or hyphens",
+		},
+		{
+			name:        "short password",
+			req:         SetupAdminRequest{SetupToken: testSetupToken, Username: testUsername, Password: "too-short", DisplayName: "Bad"},
+			wantMessage: "password must be at least 12 bytes",
+		},
+		{
+			name:        "long password",
+			req:         SetupAdminRequest{SetupToken: testSetupToken, Username: testUsername, Password: string(make([]byte, 73)), DisplayName: "Bad"},
+			wantMessage: "password must be no more than 72 bytes",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := app.SetupAdmin(ctx, tc.req)
+			if !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("SetupAdmin(%#v) error = %v, want %v", tc.req, err, ErrInvalidInput)
+			}
+			if got := InvalidInputMessage(err); got != tc.wantMessage {
+				t.Fatalf("InvalidInputMessage() = %q, want %q", got, tc.wantMessage)
+			}
+		})
 	}
 }
 
-func TestUserForTokenRejectsInvalidToken(t *testing.T) {
+func TestSetupAdminRejectsConcurrentSetupAttempts(t *testing.T) {
 	ctx := context.Background()
-	st, err := sqlitestore.Open(ctx, ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := newAuthTestStore(t)
 	defer st.Close()
 
-	app := New(st, eventbus.New(), Options{AdminToken: "secret", DataDir: t.TempDir()})
-	if _, err := app.Bootstrap(ctx, BootstrapRequest{AdminToken: "secret", DisplayName: "Meteorsky"}); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = app.UserForToken(ctx, "missing")
-	if !errors.Is(err, ErrUnauthorized) {
-		t.Fatalf("error = %v, want %v", err, ErrUnauthorized)
-	}
-}
-
-func TestUserForTokenPropagatesStoreFailure(t *testing.T) {
-	ctx := context.Background()
-	st, err := sqlitestore.Open(ctx, ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	app := New(st, eventbus.New(), Options{AdminToken: "secret", DataDir: t.TempDir()})
-	result, err := app.Bootstrap(ctx, BootstrapRequest{AdminToken: "secret", DisplayName: "Meteorsky"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = app.UserForToken(ctx, result.SessionToken)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if errors.Is(err, ErrUnauthorized) {
-		t.Fatalf("error = %v, want operational store error", err)
-	}
-}
-
-func TestBootstrapRejectsConcurrentBootstrapAttempts(t *testing.T) {
-	ctx := context.Background()
-	st, err := sqlitestore.Open(ctx, ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
+	app := New(st, eventbus.New(), Options{AdminToken: testSetupToken, DataDir: t.TempDir()})
 
 	const attempts = 8
-	gatedStore := newConcurrentAnyStore(st, attempts)
-	app := New(gatedStore, eventbus.New(), Options{AdminToken: "secret", DataDir: t.TempDir()})
-
 	var wg sync.WaitGroup
-	type bootstrapAttempt struct {
-		result BootstrapResult
+	type setupAttempt struct {
+		result AuthResult
 		err    error
 	}
-	results := make([]bootstrapAttempt, attempts)
+	results := make([]setupAttempt, attempts)
 	for i := range results {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			result, err := app.Bootstrap(ctx, BootstrapRequest{AdminToken: "secret", DisplayName: "Meteorsky"})
-			results[i] = bootstrapAttempt{result: result, err: err}
+			result, err := app.SetupAdmin(ctx, setupRequest("Meteorsky"))
+			results[i] = setupAttempt{result: result, err: err}
 		}(i)
 	}
 	wg.Wait()
@@ -244,47 +233,53 @@ func TestBootstrapRejectsConcurrentBootstrapAttempts(t *testing.T) {
 	}
 }
 
-func TestLoginBootstrapsFirstRun(t *testing.T) {
+func TestSetupAdminCompletesLegacyTokenOnlyDatabase(t *testing.T) {
 	ctx := context.Background()
-	st, err := sqlitestore.Open(ctx, ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := newAuthTestStore(t)
 	defer st.Close()
 
-	app := New(st, eventbus.New(), Options{AdminToken: "secret", DataDir: t.TempDir()})
-	result, err := app.Login(ctx, BootstrapRequest{AdminToken: "secret", DisplayName: "Meteorsky"})
-	if err != nil {
+	now := time.Now().UTC()
+	legacyUser := domain.User{ID: "usr_legacy", DisplayName: "Legacy Admin", CreatedAt: now}
+	org := domain.Organization{ID: "org_legacy", Name: "Legacy Org", CreatedAt: now}
+	if err := st.Users().Create(ctx, legacyUser); err != nil {
 		t.Fatal(err)
 	}
-	if result.SessionToken == "" || result.User.DisplayName != "Meteorsky" {
-		t.Fatalf("login result = %#v", result)
+	if err := st.Organizations().Create(ctx, org); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Organizations().AddMember(ctx, org.ID, legacyUser.ID, domain.RoleOwner); err != nil {
+		t.Fatal(err)
 	}
 
-	orgs, err := app.ListOrganizations(ctx, result.User.ID)
+	app := New(st, eventbus.New(), Options{AdminToken: testSetupToken, DataDir: t.TempDir()})
+	result, err := app.SetupAdmin(ctx, setupRequest("Updated Admin"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(orgs) != 1 {
-		t.Fatalf("organizations = %#v, want one bootstrapped org", orgs)
+	if result.User.ID != legacyUser.ID || result.User.Username != testUsername || result.User.DisplayName != "Updated Admin" {
+		t.Fatalf("result user = %#v, want legacy user with credentials", result.User)
+	}
+	orgs, err := st.Organizations().ListForUser(ctx, legacyUser.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orgs) != 1 || orgs[0].ID != org.ID {
+		t.Fatalf("orgs = %#v, want existing org", orgs)
 	}
 }
 
-func TestLoginCreatesSessionAfterBootstrap(t *testing.T) {
+func TestLoginCreatesSessionAfterSetup(t *testing.T) {
 	ctx := context.Background()
-	st, err := sqlitestore.Open(ctx, ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := newAuthTestStore(t)
 	defer st.Close()
 
-	app := New(st, eventbus.New(), Options{AdminToken: "secret", DataDir: t.TempDir()})
-	first, err := app.Bootstrap(ctx, BootstrapRequest{AdminToken: "secret", DisplayName: "Meteorsky"})
+	app := New(st, eventbus.New(), Options{AdminToken: testSetupToken, DataDir: t.TempDir()})
+	first, err := app.SetupAdmin(ctx, setupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	second, err := app.Login(ctx, BootstrapRequest{AdminToken: "secret", DisplayName: "Ignored"})
+	second, err := app.Login(ctx, LoginRequest{Username: "Meteorsky", Password: testPassword})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,69 +294,170 @@ func TestLoginCreatesSessionAfterBootstrap(t *testing.T) {
 	}
 }
 
-func TestLoginRejectsWrongAdminToken(t *testing.T) {
+func TestLoginRejectsWrongCredentials(t *testing.T) {
 	ctx := context.Background()
-	st, err := sqlitestore.Open(ctx, ":memory:")
+	st := newAuthTestStore(t)
+	defer st.Close()
+
+	app := New(st, eventbus.New(), Options{AdminToken: testSetupToken, DataDir: t.TempDir()})
+	if _, err := app.SetupAdmin(ctx, setupRequest("Meteorsky")); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, req := range []LoginRequest{
+		{Username: testUsername, Password: "wrong-password"},
+		{Username: "missing", Password: testPassword},
+		{Username: "bad name", Password: testPassword},
+	} {
+		if _, err := app.Login(ctx, req); !errors.Is(err, ErrUnauthorized) {
+			t.Fatalf("Login(%#v) error = %v, want %v", req, err, ErrUnauthorized)
+		}
+	}
+}
+
+func TestLogoutInvalidatesSession(t *testing.T) {
+	ctx := context.Background()
+	st := newAuthTestStore(t)
+	defer st.Close()
+
+	app := New(st, eventbus.New(), Options{AdminToken: testSetupToken, DataDir: t.TempDir()})
+	result, err := app.SetupAdmin(ctx, setupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
-
-	app := New(st, eventbus.New(), Options{AdminToken: "secret", DataDir: t.TempDir()})
-	_, err = app.Login(ctx, BootstrapRequest{AdminToken: "wrong", DisplayName: "Bad"})
+	if err := app.Logout(ctx, result.SessionToken); err != nil {
+		t.Fatal(err)
+	}
+	_, err = app.UserForToken(ctx, result.SessionToken)
 	if !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("error = %v, want %v", err, ErrUnauthorized)
 	}
 }
 
-type concurrentAnyStore struct {
-	store.Store
-	waitFor int
-	release chan struct{}
-	once    sync.Once
-	mu      sync.Mutex
-	count   int
-	any     bool
-	err     error
-}
+func TestUserForTokenRejectsExpiredSession(t *testing.T) {
+	ctx := context.Background()
+	st := newAuthTestStore(t)
+	defer st.Close()
 
-func newConcurrentAnyStore(st store.Store, waitFor int) *concurrentAnyStore {
-	return &concurrentAnyStore{
-		Store:   st,
-		waitFor: waitFor,
-		release: make(chan struct{}),
+	app := New(st, eventbus.New(), Options{AdminToken: testSetupToken, DataDir: t.TempDir()})
+	result, err := app.SetupAdmin(ctx, setupRequest("Meteorsky"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiredToken := "expired-token"
+	now := time.Now().UTC()
+	if err := st.Users().CreateAPISession(ctx, hashSessionToken(expiredToken), result.User.ID, now.Add(-2*time.Hour), now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = app.UserForToken(ctx, expiredToken)
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("error = %v, want %v", err, ErrUnauthorized)
 	}
 }
 
-func (s *concurrentAnyStore) Organizations() store.OrganizationStore {
-	return concurrentAnyOrganizationStore{
-		OrganizationStore: s.Store.Organizations(),
-		parent:            s,
+func TestUserForTokenReturnsSetupUser(t *testing.T) {
+	ctx := context.Background()
+	st := newAuthTestStore(t)
+	defer st.Close()
+
+	app := New(st, eventbus.New(), Options{AdminToken: testSetupToken, DataDir: t.TempDir()})
+	result, err := app.SetupAdmin(ctx, setupRequest("Meteorsky"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	user, err := app.UserForToken(ctx, result.SessionToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.ID != result.User.ID || user.Username != testUsername || user.DisplayName != result.User.DisplayName {
+		t.Fatalf("user = %#v, want %#v", user, result.User)
 	}
 }
 
-func (s *concurrentAnyStore) waitUntilAllReady(ctx context.Context) (bool, error) {
-	s.mu.Lock()
-	s.count++
-	if s.count == s.waitFor {
-		s.any, s.err = s.Store.Organizations().Any(ctx)
-		s.once.Do(func() {
-			close(s.release)
-		})
+func TestUserForTokenRejectsInvalidToken(t *testing.T) {
+	ctx := context.Background()
+	st := newAuthTestStore(t)
+	defer st.Close()
+
+	app := New(st, eventbus.New(), Options{AdminToken: testSetupToken, DataDir: t.TempDir()})
+	if _, err := app.SetupAdmin(ctx, setupRequest("Meteorsky")); err != nil {
+		t.Fatal(err)
 	}
-	s.mu.Unlock()
-	<-s.release
-	return s.any, s.err
+
+	_, err := app.UserForToken(ctx, "missing")
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("error = %v, want %v", err, ErrUnauthorized)
+	}
 }
 
-type concurrentAnyOrganizationStore struct {
-	store.OrganizationStore
-	parent *concurrentAnyStore
+func TestUserForTokenPropagatesStoreFailure(t *testing.T) {
+	ctx := context.Background()
+	st := newAuthTestStore(t)
+
+	app := New(st, eventbus.New(), Options{AdminToken: testSetupToken, DataDir: t.TempDir()})
+	result, err := app.SetupAdmin(ctx, setupRequest("Meteorsky"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = app.UserForToken(ctx, result.SessionToken)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("error = %v, want operational store error", err)
+	}
 }
 
-func (s concurrentAnyOrganizationStore) Any(ctx context.Context) (bool, error) {
-	return s.parent.waitUntilAllReady(ctx)
+func TestResetAdminUpdatesCredentialsAndDeletesSessions(t *testing.T) {
+	ctx := context.Background()
+	st := newAuthTestStore(t)
+	defer st.Close()
+
+	app := New(st, eventbus.New(), Options{AdminToken: testSetupToken, DataDir: t.TempDir()})
+	result, err := app.SetupAdmin(ctx, setupRequest("Meteorsky"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resetUser, err := app.ResetAdmin(ctx, ResetAdminRequest{Username: "reset_admin", Password: "new-password-1234"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resetUser.ID != result.User.ID || resetUser.Username != "reset_admin" {
+		t.Fatalf("reset user = %#v", resetUser)
+	}
+	if _, err := app.UserForToken(ctx, result.SessionToken); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("old session error = %v, want %v", err, ErrUnauthorized)
+	}
+	login, err := app.Login(ctx, LoginRequest{Username: "reset_admin", Password: "new-password-1234"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if login.User.ID != result.User.ID {
+		t.Fatalf("login user = %#v, want user id %q", login.User, result.User.ID)
+	}
 }
 
-var _ store.OrganizationStore = concurrentAnyOrganizationStore{}
-var _ store.Store = (*concurrentAnyStore)(nil)
+func setupRequest(displayName string) SetupAdminRequest {
+	return SetupAdminRequest{
+		SetupToken:  testSetupToken,
+		Username:    testUsername,
+		Password:    testPassword,
+		DisplayName: displayName,
+	}
+}
+
+func newAuthTestStore(t *testing.T) *sqlitestore.Store {
+	t.Helper()
+	st, err := sqlitestore.Open(context.Background(), ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st
+}

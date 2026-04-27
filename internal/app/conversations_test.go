@@ -238,10 +238,7 @@ func TestAgentRunStreamsAndPersistsProcessMetadata(t *testing.T) {
 			}},
 		},
 	})
-	bootstrap, err := app.Bootstrap(ctx, BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	})
+	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,10 +355,7 @@ func TestAgentRunPersistsFailedMetric(t *testing.T) {
 			}},
 		},
 	})
-	bootstrap, err := app.Bootstrap(ctx, BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	})
+	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,10 +475,7 @@ func TestAgentMessageWebhookPostsSignedPayload(t *testing.T) {
 			}},
 		},
 	})
-	bootstrap, err := app.Bootstrap(ctx, BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	})
+	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -602,10 +593,7 @@ func TestWebhookTimeoutDoesNotBreakBotMessageCreation(t *testing.T) {
 			}},
 		},
 	})
-	bootstrap, err := app.Bootstrap(ctx, BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	})
+	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -797,10 +785,7 @@ func TestDirectedMessageIsIncludedInLaterAgentContext(t *testing.T) {
 			"capture": capture,
 		},
 	})
-	bootstrap, err := app.Bootstrap(ctx, BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	})
+	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1094,10 +1079,7 @@ func TestSlashNewResetsProviderSessionAndFiltersOldContext(t *testing.T) {
 			"capture": capture,
 		},
 	})
-	bootstrap, err := app.Bootstrap(ctx, BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	})
+	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1191,10 +1173,7 @@ func TestRunAgentRetriesWithoutResumeWhenProviderSessionIsStale(t *testing.T) {
 			"retry-stale": rt,
 		},
 	})
-	bootstrap, err := app.Bootstrap(ctx, BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	})
+	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1251,10 +1230,7 @@ func TestSlashPlanUsesClaudePlanPermissionAndStripsTarget(t *testing.T) {
 			domain.AgentKindClaude: capture,
 		},
 	})
-	bootstrap, err := app.Bootstrap(ctx, BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	})
+	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1312,10 +1288,7 @@ func TestAgentPromptIncludesReplyReferenceOutsideRecentContext(t *testing.T) {
 			domain.AgentKindFake: capture,
 		},
 	})
-	bootstrap, err := app.Bootstrap(ctx, BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	})
+	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1545,10 +1518,7 @@ func newConversationTestApp(t *testing.T, ctx context.Context) (*App, *eventbus.
 
 	bus := eventbus.New()
 	app := New(st, bus, Options{AdminToken: "secret", DataDir: t.TempDir()})
-	bootstrap, err := app.Bootstrap(ctx, BootstrapRequest{
-		AdminToken:  "secret",
-		DisplayName: "Meteorsky",
-	})
+	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1783,6 +1753,15 @@ func (s *capturingSession) Events() <-chan agentruntime.Event {
 
 func stringPtr(value string) *string {
 	return &value
+}
+
+func testSetupRequest(displayName string) SetupAdminRequest {
+	return SetupAdminRequest{
+		SetupToken:  "secret",
+		Username:    "meteorsky",
+		Password:    "correct-password-123",
+		DisplayName: displayName,
+	}
 }
 
 func (s *capturingSession) CurrentSessionID() string {

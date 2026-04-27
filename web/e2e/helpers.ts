@@ -34,6 +34,30 @@ export interface DenseNavigationSeed {
   channelNames: string[];
 }
 
+export const e2eSetupToken = "e2e-token";
+export const e2eUsername = "e2e_admin";
+export const e2ePassword = "e2e-password-1234";
+
+export async function signIn(page: Page, displayName = "E2E User") {
+  await page.goto("/");
+  await expect(page.getByLabel("Username")).toBeVisible();
+
+  if (await page.getByLabel("Setup token").isVisible().catch(() => false)) {
+    await page.getByLabel("Setup token").fill(e2eSetupToken);
+    await page.getByLabel("Username").fill(e2eUsername);
+    await page.getByLabel("Display name").fill(displayName);
+    await page.getByLabel("Password", { exact: true }).fill(e2ePassword);
+    await page.getByLabel("Confirm password").fill(e2ePassword);
+    await page.getByRole("button", { name: "Set up admin" }).click();
+  } else {
+    await page.getByLabel("Username").fill(e2eUsername);
+    await page.getByLabel("Password", { exact: true }).fill(e2ePassword);
+    await page.getByRole("button", { name: "Log in" }).click();
+  }
+
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+}
+
 export async function setLightTheme(page: Page) {
   await page.evaluate(() => {
     localStorage.setItem("agentx.theme", "light");

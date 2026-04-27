@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,6 +32,10 @@ const webDistDir = "web/dist"
 const logDir = "logs"
 
 func main() {
+	if handled, code := runCLI(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr); handled {
+		os.Exit(code)
+	}
+
 	logFile, logPath, err := configureLogging(time.Now())
 	if err != nil {
 		slog.Error("create log file", "error", err)
@@ -98,6 +105,64 @@ func main() {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) (bool, int) {
+	if len(args) == 0 || args[0] != "auth" {
+		return false, 0
+	}
+	if len(args) < 2 || args[1] != "reset-admin" {
+		_, _ = fmt.Fprintln(stderr, "usage: agentx auth reset-admin --username <name> --password-stdin")
+		return true, 2
+	}
+
+	fs := flag.NewFlagSet("agentx auth reset-admin", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	username := fs.String("username", "", "admin username")
+	passwordStdin := fs.Bool("password-stdin", false, "read password from stdin")
+	if err := fs.Parse(args[2:]); err != nil {
+		return true, 2
+	}
+	if strings.TrimSpace(*username) == "" || !*passwordStdin || fs.NArg() != 0 {
+		_, _ = fmt.Fprintln(stderr, "usage: agentx auth reset-admin --username <name> --password-stdin")
+		return true, 2
+	}
+
+	passwordBytes, err := io.ReadAll(stdin)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "read password: %v\n", err)
+		return true, 1
+	}
+	password := strings.TrimSuffix(string(passwordBytes), "\n")
+	password = strings.TrimSuffix(password, "\r")
+
+	cfg := config.FromEnv()
+	st, err := sqlitestore.Open(ctx, cfg.SQLitePath)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "open sqlite: %v\n", err)
+		return true, 1
+	}
+	defer func() {
+		if err := st.Close(); err != nil {
+			_, _ = fmt.Fprintf(stderr, "close sqlite: %v\n", err)
+		}
+	}()
+
+	a := app.New(st, eventbus.New(), app.Options{DataDir: cfg.DataDir})
+	user, err := a.ResetAdmin(ctx, app.ResetAdminRequest{Username: *username, Password: password})
+	if err != nil {
+		switch {
+		case errors.Is(err, app.ErrInvalidInput):
+			_, _ = fmt.Fprintln(stderr, "invalid username or password")
+		case errors.Is(err, sql.ErrNoRows):
+			_, _ = fmt.Fprintln(stderr, "no admin user exists; run initial setup in the web UI")
+		default:
+			_, _ = fmt.Fprintf(stderr, "reset admin: %v\n", err)
+		}
+		return true, 1
+	}
+	_, _ = fmt.Fprintf(stdout, "admin credentials reset for %s\n", user.Username)
+	return true, 0
 }
 
 func runHTTPServer(ctx context.Context, server *http.Server) error {

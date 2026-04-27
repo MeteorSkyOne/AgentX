@@ -7,7 +7,7 @@ cd "$repo_root"
 backend_addr="${AGENTX_ADDR:-127.0.0.1:8080}"
 bin_dir="${AGENTX_BIN_DIR:-bin}"
 binary="$bin_dir/agentx"
-admin_token="${AGENTX_ADMIN_TOKEN:-}"
+setup_token="${AGENTX_ADMIN_TOKEN:-}"
 
 generate_token() {
   if command -v openssl >/dev/null 2>&1; then
@@ -17,8 +17,8 @@ generate_token() {
   od -An -N24 -tx1 /dev/urandom | tr -d ' \n'
 }
 
-if [[ -z "$admin_token" ]]; then
-  admin_token="$(generate_token)"
+if [[ -z "$setup_token" ]]; then
+  setup_token="$(generate_token)"
 fi
 
 if [[ "${AGENTX_PROD_DRY_RUN:-}" == "1" ]]; then
@@ -48,9 +48,9 @@ mkdir -p "$bin_dir"
 go build -o "$binary" ./cmd/agentx
 
 echo "Starting AgentX production server at http://$backend_addr"
-echo "Bootstrap token: $admin_token"
+echo "Setup token: $setup_token"
 echo "Press Ctrl+C to stop."
 
-export AGENTX_ADMIN_TOKEN="$admin_token"
+export AGENTX_ADMIN_TOKEN="$setup_token"
 export AGENTX_ADDR="$backend_addr"
 exec "$binary"

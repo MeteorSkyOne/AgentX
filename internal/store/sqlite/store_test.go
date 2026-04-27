@@ -463,6 +463,83 @@ func TestUserPreferencesDefaultTableUpsert(t *testing.T) {
 	}
 }
 
+func TestUsersEnforceUniqueUsernameAndCredentialRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	defer st.Close()
+
+	now := time.Date(2026, 4, 25, 10, 0, 0, 0, time.UTC)
+	passwordUpdatedAt := now.Add(time.Minute)
+	user := domain.User{
+		ID:                "usr_auth",
+		Username:          "admin",
+		DisplayName:       "Admin",
+		PasswordHash:      "$2a$10$hash",
+		PasswordUpdatedAt: &passwordUpdatedAt,
+		CreatedAt:         now,
+	}
+	if err := st.Users().Create(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Users().Create(ctx, domain.User{
+		ID:          "usr_auth_duplicate",
+		Username:    "admin",
+		DisplayName: "Duplicate",
+		CreatedAt:   now,
+	}); err == nil {
+		t.Fatal("Create user with duplicate username succeeded")
+	}
+
+	got, err := st.Users().ByUsername(ctx, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != user.ID || got.PasswordHash != user.PasswordHash || got.PasswordUpdatedAt == nil || !got.PasswordUpdatedAt.Equal(passwordUpdatedAt) {
+		t.Fatalf("user = %#v, want credential fields from %#v", got, user)
+	}
+	hasPassword, err := st.Users().HasPassword(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasPassword {
+		t.Fatal("HasPassword = false, want true")
+	}
+}
+
+func TestAPISessionsUseTokenHashAndExpiration(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	defer st.Close()
+
+	now := time.Date(2026, 4, 25, 10, 0, 0, 0, time.UTC)
+	user := domain.User{ID: "usr_session", DisplayName: "Session", CreatedAt: now}
+	if err := st.Users().Create(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Users().CreateAPISession(ctx, "token-hash", user.ID, now, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Users().UserIDByAPISessionHash(ctx, "raw-token", now); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("raw token lookup error = %v, want sql.ErrNoRows", err)
+	}
+	userID, err := st.Users().UserIDByAPISessionHash(ctx, "token-hash", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if userID != user.ID {
+		t.Fatalf("userID = %q, want %q", userID, user.ID)
+	}
+	if _, err := st.Users().UserIDByAPISessionHash(ctx, "token-hash", now.Add(2*time.Hour)); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expired lookup error = %v, want sql.ErrNoRows", err)
+	}
+	if err := st.Users().DeleteAPISession(ctx, "token-hash"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Users().UserIDByAPISessionHash(ctx, "token-hash", now); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("deleted lookup error = %v, want sql.ErrNoRows", err)
+	}
+}
+
 func TestMetricsQueriesFilterByScopeAndProvider(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
