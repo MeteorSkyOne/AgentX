@@ -1,5 +1,15 @@
 import { expect, test, type Page } from "@playwright/test";
-import { createChannelViaAPI, uniqueHandle, uniqueName } from "./helpers";
+import {
+  createChannelViaAPI,
+  expectMonacoEditorText,
+  firstEnabledAgent,
+  firstProject,
+  readWorkspaceFile,
+  setMonacoEditorValue,
+  uniqueHandle,
+  uniqueName,
+  writeWorkspaceFile,
+} from "./helpers";
 
 const adminToken = "e2e-token";
 const displayName = "E2E User";
@@ -110,6 +120,66 @@ test("opens and closes the bound agent details panel", async ({ page }) => {
   await expect(page.getByLabel("Agent details")).toHaveCount(0);
 });
 
+test("desktop project files opens project editor and persists changes", async ({ page }) => {
+  await signIn(page);
+  const project = await firstProject(page);
+  await writeWorkspaceFile(page, project.workspace_id, "src/app.ts", "export const value = 1;");
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+
+  await page.getByRole("button", { name: "Project files" }).click();
+  const projectTree = page.getByRole("tree", { name: "Project files" });
+  await expect(projectTree).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create channel" })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Message" })).toHaveCount(0);
+
+  await projectTree.getByRole("treeitem", { name: "app.ts" }).click();
+  const editor = page.getByTestId("project-file-editor-pane");
+  await expect(editor).toBeVisible();
+  await expect(editor.getByText("src/app.ts")).toBeVisible();
+  await expectMonacoEditorText(editor, "export const value = 1;");
+
+  await setMonacoEditorValue(page, editor, "export const value = 2;");
+  await editor.getByRole("button", { name: "Save file" }).click();
+  await expect(editor.getByText("Saved")).toBeVisible();
+  await expect.poll(() => readWorkspaceFile(page, project.workspace_id, "src/app.ts")).toBe("export const value = 2;");
+
+  await setMonacoEditorValue(page, editor, "");
+  await editor.getByRole("button", { name: "Open" }).click();
+  await expect(editor.getByText("Loaded")).toBeVisible();
+  await expectMonacoEditorText(editor, "export const value = 2;");
+
+  await page.getByRole("button", { name: "Project files" }).click();
+  await expect(page.getByRole("button", { name: "Create channel" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+});
+
+test("agent files tab remains scoped to the agent workspace", async ({ page }) => {
+  await signIn(page);
+  const project = await firstProject(page);
+  const agent = await firstEnabledAgent(page);
+  await writeWorkspaceFile(page, project.workspace_id, "memory.md", "project memory");
+  await writeWorkspaceFile(page, agent.config_workspace_id, "memory.md", "agent memory");
+
+  await page.getByRole("button", { name: "Project files" }).click();
+  const projectTree = page.getByRole("tree", { name: "Project files" });
+  await expect(projectTree).toBeVisible();
+  const projectEditor = page.getByTestId("project-file-editor-pane");
+  await projectEditor.getByLabel("File path").fill("memory.md");
+  await projectEditor.getByRole("button", { name: "Open" }).click();
+  await expectMonacoEditorText(projectEditor, "project memory");
+  await page.getByRole("button", { name: "Project files" }).click();
+
+  await page.getByRole("button", { name: "Agent settings" }).click();
+  const panel = page.getByLabel("Agent details");
+  await panel.getByRole("tab", { name: /Files/ }).click();
+  await expect(panel.getByLabel("Workspace", { exact: true })).toHaveCount(0);
+  await panel.getByLabel("File path").fill("memory.md");
+  await panel.getByRole("button", { name: "Open" }).click();
+  await expectMonacoEditorText(panel, "agent memory");
+  await expect(panel.getByTestId("workspace-file-editor")).not.toContainText("project memory");
+});
+
 test("manages projects, channel agents, threads, and workspace files", async ({ page }) => {
   await signIn(page);
   const projectName = uniqueName(test.info(), "Ops");
@@ -173,11 +243,11 @@ test("manages projects, channel agents, threads, and workspace files", async ({ 
   await panel.getByLabel("Agent", { exact: true }).selectOption({ label: `${agentName} (@${agentHandle})` });
   await panel.getByRole("tab", { name: /Files/ }).click();
   await panel.getByLabel("File path").fill("memory.md");
-  await panel.getByLabel("File content").fill("memory from e2e");
+  await setMonacoEditorValue(page, panel, "memory from e2e");
   await panel.getByRole("button", { name: "Save file" }).click();
-  await panel.getByLabel("File content").fill("");
+  await setMonacoEditorValue(page, panel, "");
   await panel.getByRole("button", { name: "Open" }).click();
-  await expect(panel.getByLabel("File content")).toHaveValue("memory from e2e");
+  await expectMonacoEditorText(panel, "memory from e2e");
   await page.getByRole("button", { name: "Agent settings" }).click();
 
   // Create a thread/forum channel

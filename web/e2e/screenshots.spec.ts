@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { seedDenseNavigation, setLightTheme } from "./helpers";
+import { firstProject, seedDenseNavigation, setLightTheme, setMonacoEditorValue, writeWorkspaceFile } from "./helpers";
 
 const adminToken = "e2e-token";
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -26,6 +26,24 @@ test("captures diagnostic screenshots for AI review", async ({ page }, testInfo)
   await page.reload();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
   await capture(page, testInfo, "02-shell-ready");
+
+  const project = await firstProject(page);
+  await writeWorkspaceFile(page, project.workspace_id, "docs/screenshot.md", "screenshot project workspace note");
+  await page.getByRole("button", { name: "Project files" }).click();
+  const projectTree = page.getByRole("tree", { name: "Project files" });
+  await expect(projectTree).toBeVisible();
+  await capture(page, testInfo, testInfo.project.name.startsWith("mobile") ? "07-mobile-project-files" : "07-project-files");
+  await projectTree.getByRole("treeitem", { name: "screenshot.md" }).click();
+  await expect(page.getByTestId("project-file-editor-pane")).toBeVisible();
+  await capture(page, testInfo, testInfo.project.name.startsWith("mobile") ? "08-mobile-project-file-editor" : "08-project-file-editor");
+  if (testInfo.project.name.startsWith("mobile")) {
+    await page.getByRole("button", { name: "Back to files" }).click();
+    await page.getByRole("button", { name: "Back to chat" }).click();
+    await capture(page, testInfo, "09-mobile-restored-chat");
+  } else {
+    await page.getByRole("button", { name: "Project files" }).click();
+    await capture(page, testInfo, "09-restored-chat");
+  }
 
   if (testInfo.project.name.startsWith("mobile")) {
     await page.getByRole("button", { name: "Navigation" }).click();
@@ -57,8 +75,22 @@ test("captures diagnostic screenshots for AI review", async ({ page }, testInfo)
   await page.getByLabel("Channel members").getByRole("button", { name: "Close members" }).click();
 
   await page.getByRole("button", { name: "Agent settings" }).click();
-  await expect(page.getByLabel("Agent details")).toBeVisible();
+  const agentPanel = page.getByLabel("Agent details");
+  await expect(agentPanel).toBeVisible();
   await capture(page, testInfo, "06-agent-panel");
+
+  await agentPanel.getByRole("tab", { name: /Files/ }).click();
+  await agentPanel.getByLabel("File path").fill("screenshot-memory.md");
+  await setMonacoEditorValue(page, agentPanel, "screenshot workspace note");
+  await agentPanel.getByRole("button", { name: "Save file" }).click();
+  await expect(agentPanel.getByText("Saved")).toBeVisible();
+  await capture(page, testInfo, "10-agent-files-workspace");
+
+  if (testInfo.project.name.startsWith("mobile")) {
+    await agentPanel.getByRole("button", { name: "File tree" }).click();
+    await expect(page.getByRole("dialog", { name: "Workspace file tree" })).toBeVisible();
+    await capture(page, testInfo, "11-mobile-agent-file-tree-drawer");
+  }
 });
 
 async function capture(page: Page, testInfo: TestInfo, name: string) {

@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Bot,
   ChevronDown,
+  FolderOpen,
   Hash,
   LogOut,
   Menu,
@@ -63,6 +64,11 @@ import { AgentDetailsPanel } from "./shell/AgentDetailsPanel";
 import { AgentsSidebar } from "./shell/AgentsSidebar";
 import { ConversationPanel } from "./shell/ConversationPanel";
 import { MembersPanel } from "./shell/MembersPanel";
+import {
+  useWorkspaceFileBrowser,
+  WorkspaceFileEditorPane,
+  WorkspaceFileTreePane,
+} from "./WorkspaceFileBrowser";
 import type { ShellProps } from "./shell/types";
 import {
   agentToneColor,
@@ -130,6 +136,8 @@ export function Shell({
   const [agentPanelOpen, setAgentPanelOpen] = useState(false);
   const [focusedAgentID, setFocusedAgentID] = useState("");
   const [membersPanelOpen, setMembersPanelOpen] = useState(false);
+  const [projectFilesOpen, setProjectFilesOpen] = useState(false);
+  const [mobileProjectFilesView, setMobileProjectFilesView] = useState<"tree" | "editor">("tree");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [mobileAgentPanelOpen, setMobileAgentPanelOpen] = useState(false);
   const [mobileMembersPanelOpen, setMobileMembersPanelOpen] = useState(false);
@@ -183,6 +191,14 @@ export function Shell({
   const selectedAgent =
     agents.find((agent) => agent.id === focusedAgentID) ?? boundAgents[0]?.agent ?? activeAgents[0];
   const activeThread = conversationContext?.thread;
+  const projectFilesController = useWorkspaceFileBrowser({
+    workspaceID: projectWorkspace?.id,
+    workspacePath: projectWorkspace?.path,
+    onLoadTree: onLoadWorkspaceTree,
+    onReadFile: onReadWorkspaceFile,
+    onWriteFile: onWriteWorkspaceFile,
+    onDeleteFile: onDeleteWorkspaceFile,
+  });
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 767px)");
@@ -202,6 +218,10 @@ export function Shell({
       setMobileMembersPanelOpen(false);
     }
   }, [isMobileLayout]);
+
+  useEffect(() => {
+    setMobileProjectFilesView("tree");
+  }, [project?.id, projectWorkspace?.id]);
 
   useEffect(() => {
     setAgentPanelOpen(false);
@@ -391,6 +411,40 @@ export function Shell({
     };
   }
 
+  function openProjectFiles() {
+    if (!projectWorkspace?.id) return;
+    blurActiveElement();
+    setAgentPanelOpen(false);
+    setMembersPanelOpen(false);
+    setMobileNavOpen(false);
+    setMobileAgentPanelOpen(false);
+    setMobileMembersPanelOpen(false);
+    setMobileProjectFilesView("tree");
+    setProjectFilesOpen(true);
+    void projectFilesController.loadTree({ quiet: true });
+  }
+
+  function toggleProjectFiles() {
+    if (projectFilesOpen) {
+      blurActiveElement();
+      setProjectFilesOpen(false);
+      setMobileProjectFilesView("tree");
+      setAgentPanelOpen(false);
+      setMembersPanelOpen(false);
+      return;
+    }
+    openProjectFiles();
+  }
+
+  function handleMobileProjectFilesBack() {
+    if (mobileProjectFilesView === "editor") {
+      setMobileProjectFilesView("tree");
+      return;
+    }
+    setProjectFilesOpen(false);
+    setMobileProjectFilesView("tree");
+  }
+
   function selectMobileProject(projectID: string) {
     setMobileNavOpen(false);
     onSelectProject(projectID);
@@ -509,17 +563,31 @@ export function Shell({
       {isMobileLayout ? (
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background" data-testid="mobile-shell">
         <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-11 w-11"
-            title="Navigation"
-            aria-label="Navigation"
-            onClick={() => setMobileNavOpen(true)}
-          >
-            <Menu className="h-5 w-5" />
-          </Button>
-          {selectedChannel?.type === "thread" && activeThread ? (
+          {projectFilesOpen ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-11 w-11"
+              title={mobileProjectFilesView === "editor" ? "Back to files" : "Back to chat"}
+              aria-label={mobileProjectFilesView === "editor" ? "Back to files" : "Back to chat"}
+              onClick={handleMobileProjectFilesBack}
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+          ) : null}
+          {!projectFilesOpen ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-11 w-11"
+              title="Navigation"
+              aria-label="Navigation"
+              onClick={() => setMobileNavOpen(true)}
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+          ) : null}
+          {!projectFilesOpen && selectedChannel?.type === "thread" && activeThread ? (
             <Button
               variant="ghost"
               size="icon"
@@ -532,32 +600,50 @@ export function Shell({
             </Button>
           ) : null}
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-sm font-semibold">{title}</h1>
-            <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
+            <h1 className="truncate text-sm font-semibold">{projectFilesOpen ? "Project files" : title}</h1>
+            <p className="truncate text-xs text-muted-foreground">
+              {projectFilesOpen ? projectWorkspace?.path ?? "No workspace" : subtitle}
+            </p>
           </div>
           <Button
             variant="ghost"
             size="icon"
-            className="h-11 w-11"
-            title="Members"
-            aria-label="Members"
-            onClick={() => setMobileMembersPanelOpen(true)}
+            className={cn("h-11 w-11", projectFilesOpen && "bg-accent")}
+            title="Project files"
+            aria-label="Project files"
+            aria-pressed={projectFilesOpen}
+            disabled={!projectWorkspace?.id}
+            onClick={toggleProjectFiles}
           >
-            <UserRound className="h-5 w-5" />
+            <FolderOpen className="h-5 w-5" />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-11 w-11"
-            title="Agent settings"
-            aria-label="Agent settings"
-            onClick={() => setMobileAgentPanelOpen(true)}
-          >
-            <Settings className="h-5 w-5" />
-          </Button>
+          {!projectFilesOpen ? (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-11 w-11"
+                title="Members"
+                aria-label="Members"
+                onClick={() => setMobileMembersPanelOpen(true)}
+              >
+                <UserRound className="h-5 w-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-11 w-11"
+                title="Agent settings"
+                aria-label="Agent settings"
+                onClick={() => setMobileAgentPanelOpen(true)}
+              >
+                <Settings className="h-5 w-5" />
+              </Button>
+            </>
+          ) : null}
         </div>
 
-        {activeThread && (
+        {!projectFilesOpen && activeThread && (
           <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
             {activeConversation && (
               <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
@@ -595,26 +681,45 @@ export function Shell({
           </div>
         )}
 
-        <ConversationPanel
-          selectedChannel={selectedChannel}
-          activeThread={activeThread}
-          threads={threads}
-          messages={messages}
-          messagesLoading={messagesLoading}
-          olderMessagesLoading={olderMessagesLoading}
-          hasOlderMessages={hasOlderMessages}
-          streaming={streaming}
-          boundAgents={boundAgents}
-          composerConversation={composerConversation}
-          onSelectThread={onSelectThread}
-          onCreateThread={onCreateThread}
-          onUpdateThread={onUpdateThread}
-          onDeleteThread={onDeleteThread}
-          onUpdateMessage={onUpdateMessage}
-          onDeleteMessage={onDeleteMessage}
-          onLoadOlderMessages={onLoadOlderMessages}
-          onMessageSent={onMessageSent}
-        />
+        {projectFilesOpen ? (
+          mobileProjectFilesView === "tree" ? (
+            <WorkspaceFileTreePane
+              controller={projectFilesController}
+              title="Project files"
+              ariaLabel="Project files"
+              className="min-h-0 flex-1"
+              onFileSelected={() => setMobileProjectFilesView("editor")}
+            />
+          ) : (
+            <WorkspaceFileEditorPane
+              controller={projectFilesController}
+              theme={theme}
+              contentAriaLabel="Project file editor"
+              className="min-h-0 flex-1"
+            />
+          )
+        ) : (
+          <ConversationPanel
+            selectedChannel={selectedChannel}
+            activeThread={activeThread}
+            threads={threads}
+            messages={messages}
+            messagesLoading={messagesLoading}
+            olderMessagesLoading={olderMessagesLoading}
+            hasOlderMessages={hasOlderMessages}
+            streaming={streaming}
+            boundAgents={boundAgents}
+            composerConversation={composerConversation}
+            onSelectThread={onSelectThread}
+            onCreateThread={onCreateThread}
+            onUpdateThread={onUpdateThread}
+            onDeleteThread={onDeleteThread}
+            onUpdateMessage={onUpdateMessage}
+            onDeleteMessage={onDeleteMessage}
+            onLoadOlderMessages={onLoadOlderMessages}
+            onMessageSent={onMessageSent}
+          />
+        )}
 
         <Dialog open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
           <DialogContent
@@ -819,6 +924,7 @@ export function Shell({
               onDeleteWorkspaceFile={onDeleteWorkspaceFile}
               onCreateAgentModal={() => setAgentDraftOpen(true)}
               onClose={() => setMobileAgentPanelOpen(false)}
+              theme={theme}
             />
           </DialogContent>
         </Dialog>
@@ -936,6 +1042,13 @@ export function Shell({
       <ResizablePanelGroup direction="horizontal" className="flex-1">
         {/* Channel Sidebar */}
         <ResizablePanel defaultSize={18} minSize={15} maxSize={25}>
+          {projectFilesOpen ? (
+            <WorkspaceFileTreePane
+              controller={projectFilesController}
+              title="Project files"
+              ariaLabel="Project files"
+            />
+          ) : (
           <div className="flex h-full min-h-0 flex-col bg-sidebar">
             {/* Workspace Header */}
             <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
@@ -1005,12 +1118,33 @@ export function Shell({
               </Button>
             </div>
           </div>
+          )}
         </ResizablePanel>
 
         <ResizableHandle withHandle />
 
         {/* Message Area */}
-        <ResizablePanel defaultSize={agentPanelOpen ? 55 : membersPanelOpen ? 62 : 82}>
+        <ResizablePanel defaultSize={projectFilesOpen ? 82 : agentPanelOpen ? 37 : membersPanelOpen ? 62 : 82}>
+          {projectFilesOpen ? (
+            <WorkspaceFileEditorPane
+              controller={projectFilesController}
+              theme={theme}
+              contentAriaLabel="Project file editor"
+              toolbarEnd={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 bg-accent"
+                  title="Close project files"
+                  aria-label="Project files"
+                  aria-pressed="true"
+                  onClick={toggleProjectFiles}
+                >
+                  <FolderOpen className="h-4 w-4" />
+                </Button>
+              }
+            />
+          ) : (
           <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
             {/* Channel Header */}
             <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
@@ -1078,6 +1212,18 @@ export function Shell({
                 <Button
                   variant="ghost"
                   size="icon"
+                  className="h-8 w-8"
+                  title="Project files"
+                  aria-label="Project files"
+                  aria-pressed="false"
+                  disabled={!projectWorkspace?.id}
+                  onClick={toggleProjectFiles}
+                >
+                  <FolderOpen className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
                   className={cn("h-8 w-8", membersPanelOpen && "bg-accent")}
                   title="Members"
                   aria-label="Members"
@@ -1122,10 +1268,11 @@ export function Shell({
               onMessageSent={onMessageSent}
             />
           </div>
+          )}
         </ResizablePanel>
 
         {/* Members Panel */}
-        {membersPanelOpen && !agentPanelOpen && (
+        {membersPanelOpen && !agentPanelOpen && !projectFilesOpen && (
           <>
             <ResizableHandle withHandle />
             <ResizablePanel defaultSize={20} minSize={15} maxSize={30}>
@@ -1142,10 +1289,10 @@ export function Shell({
         )}
 
         {/* Agent Panel */}
-        {agentPanelOpen && (
+        {agentPanelOpen && !projectFilesOpen && (
           <>
             <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={27} minSize={20} maxSize={35}>
+            <ResizablePanel defaultSize={45} minSize={32} maxSize={60}>
               <AgentDetailsPanel
                 selectedChannel={selectedChannel}
                 projectWorkspace={projectWorkspace}
@@ -1161,6 +1308,7 @@ export function Shell({
                 onDeleteWorkspaceFile={onDeleteWorkspaceFile}
                 onCreateAgentModal={() => setAgentDraftOpen(true)}
                 onClose={() => setAgentPanelOpen(false)}
+                theme={theme}
               />
             </ResizablePanel>
           </>
