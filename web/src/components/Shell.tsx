@@ -271,12 +271,6 @@ export function Shell({
     notificationSettings?.webhook_url
   ]);
 
-  useEffect(() => {
-    if (projectEditOpen && !projectEditWorkspacePath && projectWorkspace?.path) {
-      setProjectEditWorkspacePath(projectWorkspace.path);
-    }
-  }, [projectEditOpen, projectEditWorkspacePath, projectWorkspace?.path]);
-
   async function submitProject() {
     const name = projectName.trim();
     if (!name) return;

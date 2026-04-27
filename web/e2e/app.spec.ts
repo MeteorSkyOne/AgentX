@@ -120,6 +120,21 @@ test("opens and closes the bound agent details panel", async ({ page }) => {
   await expect(page.getByLabel("Agent details")).toHaveCount(0);
 });
 
+test("keeps an empty project workspace path draft while editing", async ({ page }) => {
+  await signIn(page);
+
+  await page.getByRole("button", { name: "Project settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Project settings" });
+  const workspacePath = dialog.getByLabel("Workspace path");
+  await expect(workspacePath).not.toHaveValue("");
+
+  await workspacePath.fill("");
+  await expect(workspacePath).toHaveValue("");
+  await expect(dialog.getByRole("button", { name: "Save" })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+});
+
 test("desktop project files opens project editor and persists changes", async ({ page }) => {
   await signIn(page);
   const project = await firstProject(page);
