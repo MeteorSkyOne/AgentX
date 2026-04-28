@@ -25,7 +25,7 @@ const LazyWorkspaceFileEditor = lazy(() =>
 );
 
 export interface WorkspaceFileBrowserActions {
-  onLoadTree: (workspaceID: string) => Promise<WorkspaceTreeEntry>;
+  onLoadTree: (workspaceID: string, path?: string) => Promise<WorkspaceTreeEntry>;
   onReadFile: (workspaceID: string, path: string) => Promise<string>;
   onWriteFile: (workspaceID: string, path: string, body: string) => Promise<void>;
   onDeleteFile: (workspaceID: string, path: string) => Promise<void>;
@@ -53,8 +53,11 @@ export interface WorkspaceFileBrowserController {
   filePath: string;
   fileBody: string;
   tree?: WorkspaceTreeEntry;
+  workspaceTreeResetKey: number;
   workspaceTreeLoading: boolean;
   workspaceTreeError: string | null;
+  directoryLoadingPaths: ReadonlySet<string>;
+  directoryLoadErrors: Record<string, string | null | undefined>;
   fileLoading: boolean;
   fileLoadError: string | null;
   fileSaving: boolean;
@@ -67,6 +70,7 @@ export interface WorkspaceFileBrowserController {
   setFilePath: (path: string) => void;
   setFileBody: (body: string) => void;
   loadTree: (options?: { quiet?: boolean }) => Promise<void>;
+  loadDirectory: (path: string, options?: { quiet?: boolean; force?: boolean }) => Promise<void>;
   loadFile: (path?: string, options?: WorkspaceFileOpenOptions) => Promise<void>;
   saveFile: () => Promise<void>;
   deleteFile: () => Promise<void>;
@@ -84,8 +88,11 @@ export function useWorkspaceFileBrowser({
   const [filePath, setFilePath] = useState(initialPath);
   const [fileBody, setFileBody] = useState("");
   const [tree, setTree] = useState<WorkspaceTreeEntry>();
+  const [workspaceTreeResetKey, setWorkspaceTreeResetKey] = useState(0);
   const [workspaceTreeLoading, setWorkspaceTreeLoading] = useState(false);
   const [workspaceTreeError, setWorkspaceTreeError] = useState<string | null>(null);
+  const [directoryLoadingPaths, setDirectoryLoadingPaths] = useState<Set<string>>(() => new Set());
+  const [directoryLoadErrors, setDirectoryLoadErrors] = useState<Record<string, string | null | undefined>>({});
   const [fileLoading, setFileLoading] = useState(false);
   const [fileLoadError, setFileLoadError] = useState<string | null>(null);
   const [fileSaving, setFileSaving] = useState(false);
@@ -94,6 +101,7 @@ export function useWorkspaceFileBrowser({
   const [fileOpenPosition, setFileOpenPosition] = useState<WorkspaceFilePosition>();
   const [fileOpenRequestID, setFileOpenRequestID] = useState(0);
   const workspaceTreeRequestRef = useRef(0);
+  const directoryRequestRef = useRef<Record<string, number>>({});
   const fileRequestRef = useRef(0);
 
   const trimmedPath = filePath.trim();
@@ -103,12 +111,16 @@ export function useWorkspaceFileBrowser({
     async (options: { quiet?: boolean } = {}) => {
       if (!workspaceID) return;
       const requestID = ++workspaceTreeRequestRef.current;
+      directoryRequestRef.current = {};
       setWorkspaceTreeLoading(true);
       setWorkspaceTreeError(null);
+      setDirectoryLoadingPaths(new Set());
+      setDirectoryLoadErrors({});
       try {
         const nextTree = await onLoadTree(workspaceID);
         if (workspaceTreeRequestRef.current !== requestID) return;
         setTree(nextTree);
+        setWorkspaceTreeResetKey((current) => current + 1);
         if (!options.quiet) setWorkspaceStatus("Tree loaded");
       } catch (err) {
         if (workspaceTreeRequestRef.current !== requestID) return;
@@ -122,6 +134,69 @@ export function useWorkspaceFileBrowser({
       }
     },
     [onLoadTree, workspaceID]
+  );
+
+  const loadDirectory = useCallback(
+    async (path: string, options: { quiet?: boolean; force?: boolean } = {}) => {
+      const targetPath = normalizeWorkspaceTreePath(path);
+      if (!workspaceID || !targetPath) return;
+      if (!options.force && workspaceTreeDirectoryLoaded(tree, targetPath)) return;
+
+      const requestID = (directoryRequestRef.current[targetPath] ?? 0) + 1;
+      const treeRequestID = workspaceTreeRequestRef.current;
+      directoryRequestRef.current[targetPath] = requestID;
+      setDirectoryLoadingPaths((current) => new Set(current).add(targetPath));
+      setDirectoryLoadErrors((current) => {
+        const next = { ...current };
+        delete next[targetPath];
+        return next;
+      });
+
+      try {
+        const nextTree = await onLoadTree(workspaceID, targetPath);
+        if (
+          workspaceTreeRequestRef.current !== treeRequestID ||
+          directoryRequestRef.current[targetPath] !== requestID
+        ) {
+          return;
+        }
+        setTree((current) => mergeWorkspaceTreeEntry(current, nextTree));
+        if (!options.quiet) setWorkspaceStatus("Tree loaded");
+      } catch (err) {
+        if (
+          workspaceTreeRequestRef.current !== treeRequestID ||
+          directoryRequestRef.current[targetPath] !== requestID
+        ) {
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Directory load failed";
+        setDirectoryLoadErrors((current) => ({ ...current, [targetPath]: message }));
+        if (!options.quiet) setWorkspaceStatus(message);
+      } finally {
+        if (directoryRequestRef.current[targetPath] === requestID) {
+          setDirectoryLoadingPaths((current) => {
+            const next = new Set(current);
+            next.delete(targetPath);
+            return next;
+          });
+        }
+      }
+    },
+    [onLoadTree, tree, workspaceID]
+  );
+
+  const refreshTreeForFilePath = useCallback(
+    async (path: string) => {
+      const parentPath = parentWorkspaceDirectoryPath(path);
+      if (!parentPath) {
+        await loadTree({ quiet: true });
+        return;
+      }
+      if (workspaceTreeDirectoryLoaded(tree, parentPath)) {
+        await loadDirectory(parentPath, { quiet: true, force: true });
+      }
+    },
+    [loadDirectory, loadTree, tree]
   );
 
   const loadFile = useCallback(
@@ -164,13 +239,13 @@ export function useWorkspaceFileBrowser({
       setFilePath(targetPath);
       setFileLoadError(null);
       setWorkspaceStatus("Saved");
-      await loadTree({ quiet: true });
+      await refreshTreeForFilePath(targetPath);
     } catch (err) {
       setWorkspaceStatus(err instanceof Error ? err.message : "Save failed");
     } finally {
       setFileSaving(false);
     }
-  }, [fileBody, filePath, loadTree, onWriteFile, workspaceID]);
+  }, [fileBody, filePath, onWriteFile, refreshTreeForFilePath, workspaceID]);
 
   const deleteFile = useCallback(async () => {
     const targetPath = filePath.trim();
@@ -181,21 +256,25 @@ export function useWorkspaceFileBrowser({
       setFileBody("");
       setFileLoadError(null);
       setWorkspaceStatus("Deleted");
-      await loadTree({ quiet: true });
+      await refreshTreeForFilePath(targetPath);
     } catch (err) {
       setWorkspaceStatus(err instanceof Error ? err.message : "Delete failed");
     } finally {
       setFileDeleting(false);
     }
-  }, [filePath, loadTree, onDeleteFile, workspaceID]);
+  }, [filePath, onDeleteFile, refreshTreeForFilePath, workspaceID]);
 
   useEffect(() => {
     workspaceTreeRequestRef.current += 1;
+    directoryRequestRef.current = {};
     fileRequestRef.current += 1;
     setTree(undefined);
+    setWorkspaceTreeResetKey((current) => current + 1);
     setFilePath(initialPath);
     setFileBody("");
     setWorkspaceTreeError(null);
+    setDirectoryLoadingPaths(new Set());
+    setDirectoryLoadErrors({});
     setFileLoadError(null);
     setWorkspaceTreeLoading(false);
     setFileLoading(false);
@@ -218,8 +297,11 @@ export function useWorkspaceFileBrowser({
     filePath,
     fileBody,
     tree,
+    workspaceTreeResetKey,
     workspaceTreeLoading,
     workspaceTreeError,
+    directoryLoadingPaths,
+    directoryLoadErrors,
     fileLoading,
     fileLoadError,
     fileSaving,
@@ -232,6 +314,7 @@ export function useWorkspaceFileBrowser({
     setFilePath,
     setFileBody,
     loadTree,
+    loadDirectory,
     loadFile,
     saveFile,
     deleteFile,
@@ -246,6 +329,61 @@ function normalizeWorkspaceFilePosition(
     lineNumber: position.lineNumber,
     column: position.column && position.column > 0 ? position.column : 1,
   };
+}
+
+function normalizeWorkspaceTreePath(path: string): string {
+  const normalized = path.trim().replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
+  return normalized === "." ? "" : normalized;
+}
+
+function parentWorkspaceDirectoryPath(path: string): string {
+  const normalized = normalizeWorkspaceTreePath(path);
+  const slashIndex = normalized.lastIndexOf("/");
+  return slashIndex === -1 ? "" : normalized.slice(0, slashIndex);
+}
+
+function workspaceTreeDirectoryLoaded(tree: WorkspaceTreeEntry | undefined, path: string): boolean {
+  const entry = findWorkspaceTreeEntry(tree, path);
+  return entry?.type === "directory" && Boolean(entry.children_loaded);
+}
+
+function findWorkspaceTreeEntry(
+  entry: WorkspaceTreeEntry | undefined,
+  path: string
+): WorkspaceTreeEntry | undefined {
+  if (!entry) return undefined;
+  if (entry.path === path) return entry;
+  for (const child of entry.children ?? []) {
+    if (child.path === path || path.startsWith(`${child.path}/`)) {
+      const match = findWorkspaceTreeEntry(child, path);
+      if (match) return match;
+    }
+  }
+  return undefined;
+}
+
+function mergeWorkspaceTreeEntry(
+  current: WorkspaceTreeEntry | undefined,
+  nextEntry: WorkspaceTreeEntry
+): WorkspaceTreeEntry {
+  if (!current || current.path === nextEntry.path) return nextEntry;
+  if (current.type !== "directory" || !current.children?.length) return current;
+
+  let changed = false;
+  const children = current.children.map((child) => {
+    if (child.path === nextEntry.path) {
+      changed = true;
+      return nextEntry;
+    }
+    if (nextEntry.path.startsWith(`${child.path}/`)) {
+      const merged = mergeWorkspaceTreeEntry(child, nextEntry);
+      if (merged !== child) changed = true;
+      return merged;
+    }
+    return child;
+  });
+
+  return changed ? { ...current, children } : current;
 }
 
 export function WorkspaceFileTreePane({
@@ -313,6 +451,10 @@ export function WorkspaceFileTree({
       error={controller.workspaceTreeError}
       className={cn("min-h-0", className)}
       ariaLabel={ariaLabel}
+      resetKey={controller.workspaceTreeResetKey}
+      directoryLoadingPaths={controller.directoryLoadingPaths}
+      directoryErrors={controller.directoryLoadErrors}
+      onLoadDirectory={(path) => void controller.loadDirectory(path)}
       onSelectFile={(path) => {
         void controller.loadFile(path);
         onFileSelected?.();

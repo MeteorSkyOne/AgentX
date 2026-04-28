@@ -9,6 +9,8 @@ export interface FileTreeEntry {
   name: string;
   path: string;
   type: "directory" | "file";
+  has_children?: boolean;
+  children_loaded?: boolean;
   children?: FileTreeEntry[];
 }
 
@@ -24,24 +26,16 @@ interface FileTreeProps {
   className?: string;
   ariaLabel?: string;
   emptyLabel?: string;
+  resetKey?: string | number;
+  directoryLoadingPaths?: ReadonlySet<string>;
+  directoryErrors?: Record<string, string | null | undefined>;
   onSelectFile: (path: string, entry: FileTreeEntry) => void;
+  onLoadDirectory?: (path: string, entry: FileTreeEntry) => void;
 }
 
 export function defaultOpenDirectoryPaths(tree?: FileTreeEntry): string[] {
-  if (!tree) return [];
-  const paths: string[] = [];
-
-  function visit(entry: FileTreeEntry) {
-    if (entry.type === "directory" && entry.path && entry.children?.length) {
-      paths.push(entry.path);
-    }
-    for (const child of entry.children ?? []) {
-      visit(child);
-    }
-  }
-
-  visit(tree);
-  return paths;
+  void tree;
+  return [];
 }
 
 export function visibleFileTreeRows(tree: FileTreeEntry, openPaths: ReadonlySet<string>): FileTreeRow[] {
@@ -79,26 +73,33 @@ export function FileTree({
   className,
   ariaLabel = "Files",
   emptyLabel = "empty",
-  onSelectFile
+  resetKey,
+  directoryLoadingPaths,
+  directoryErrors,
+  onSelectFile,
+  onLoadDirectory
 }: FileTreeProps) {
   const [openPaths, setOpenPaths] = useState<Set<string>>(() => new Set(defaultOpenDirectoryPaths(tree)));
 
   useEffect(() => {
     setOpenPaths(new Set(defaultOpenDirectoryPaths(tree)));
-  }, [tree]);
+  }, [resetKey, tree?.path]);
 
   const hasRows = useMemo(() => fileTreeHasRows(tree), [tree]);
 
-  function setDirectoryOpen(path: string, open: boolean) {
+  function setDirectoryOpen(entry: FileTreeEntry, open: boolean) {
     setOpenPaths((current) => {
       const next = new Set(current);
       if (open) {
-        next.add(path);
+        next.add(entry.path);
       } else {
-        next.delete(path);
+        next.delete(entry.path);
       }
       return next;
     });
+    if (open && entry.type === "directory" && directoryCanExpand(entry) && !directoryIsLoaded(entry)) {
+      onLoadDirectory?.(entry.path, entry);
+    }
   }
 
   return (
@@ -132,24 +133,28 @@ export function FileTree({
 
   function renderDirectory(entry: FileTreeEntry, depth: number) {
     const children = entry.children ?? [];
-    const hasChildren = children.length > 0;
+    const canExpand = directoryCanExpand(entry);
+    const loaded = directoryIsLoaded(entry);
+    const loading = directoryLoadingPaths?.has(entry.path) ?? false;
+    const directoryError = directoryErrors?.[entry.path] ?? null;
     const open = openPaths.has(entry.path);
 
     return (
       <Collapsible
         key={entry.path}
         open={open}
-        onOpenChange={(nextOpen) => setDirectoryOpen(entry.path, nextOpen)}
+        onOpenChange={(nextOpen) => setDirectoryOpen(entry, nextOpen)}
       >
-        <CollapsibleTrigger asChild disabled={!hasChildren}>
+        <CollapsibleTrigger asChild disabled={!canExpand && !loading}>
           <button
             className="flex h-7 w-full items-center gap-1.5 rounded px-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
             style={{ paddingLeft: `${depth * 14 + 6}px` }}
             type="button"
             role="treeitem"
-            aria-expanded={hasChildren ? open : undefined}
+            aria-expanded={canExpand || loading ? open : undefined}
+            aria-busy={loading || undefined}
           >
-            {hasChildren ? (
+            {canExpand || loading ? (
               open ? (
                 <ChevronDown className="h-3.5 w-3.5 shrink-0" />
               ) : (
@@ -166,8 +171,24 @@ export function FileTree({
             <span className="truncate">{entry.name}</span>
           </button>
         </CollapsibleTrigger>
-        {hasChildren && (
+        {(canExpand || loading || directoryError) && (
           <CollapsibleContent role="group">
+            {open && loading && !loaded && children.length === 0 && (
+              <p
+                className="h-7 truncate px-1.5 text-xs text-muted-foreground"
+                style={{ paddingLeft: `${(depth + 1) * 14 + 27}px` }}
+              >
+                Loading...
+              </p>
+            )}
+            {open && directoryError && (
+              <p
+                className="h-7 truncate px-1.5 text-xs text-destructive"
+                style={{ paddingLeft: `${(depth + 1) * 14 + 27}px` }}
+              >
+                {directoryError}
+              </p>
+            )}
             {children.map((child) => renderEntries(child, depth + 1))}
           </CollapsibleContent>
         )}
@@ -198,4 +219,12 @@ export function FileTree({
       </button>
     );
   }
+}
+
+function directoryCanExpand(entry: FileTreeEntry): boolean {
+  return entry.type === "directory" && (entry.has_children || Boolean(entry.children?.length));
+}
+
+function directoryIsLoaded(entry: FileTreeEntry): boolean {
+  return entry.type === "directory" && (entry.children_loaded || Boolean(entry.children?.length));
 }

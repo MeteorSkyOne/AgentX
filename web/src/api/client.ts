@@ -373,8 +373,15 @@ export function setChannelAgents(
   );
 }
 
-export function workspaceTree(workspaceID: string): Promise<WorkspaceTreeEntry> {
-  return request<WorkspaceTreeEntry>(`/api/workspaces/${encodeURIComponent(workspaceID)}/tree`);
+export function workspaceTree(workspaceID: string, path = ""): Promise<WorkspaceTreeEntry> {
+  const params = new URLSearchParams();
+  if (path.trim()) {
+    params.set("path", path.trim());
+  }
+  const query = params.toString();
+  return request<WorkspaceTreeEntry>(
+    `/api/workspaces/${encodeURIComponent(workspaceID)}/tree${query ? `?${query}` : ""}`
+  );
 }
 
 export function workspaceFile(workspaceID: string, path: string): Promise<WorkspaceFile> {

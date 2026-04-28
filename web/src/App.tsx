@@ -752,8 +752,8 @@ export default function App() {
     return file.body;
   }
 
-  async function handleLoadWorkspaceTree(workspaceID: string): Promise<WorkspaceTreeEntry> {
-    return workspaceTree(workspaceID);
+  async function handleLoadWorkspaceTree(workspaceID: string, path?: string): Promise<WorkspaceTreeEntry> {
+    return workspaceTree(workspaceID, path);
   }
 
   async function handleWriteWorkspaceFile(workspaceID: string, path: string, body: string) {

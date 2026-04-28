@@ -14,10 +14,12 @@ import (
 )
 
 type workspaceTreeEntry struct {
-	Name     string               `json:"name"`
-	Path     string               `json:"path"`
-	Type     string               `json:"type"`
-	Children []workspaceTreeEntry `json:"children,omitempty"`
+	Name           string               `json:"name"`
+	Path           string               `json:"path"`
+	Type           string               `json:"type"`
+	HasChildren    bool                 `json:"has_children,omitempty"`
+	ChildrenLoaded bool                 `json:"children_loaded,omitempty"`
+	Children       []workspaceTreeEntry `json:"children,omitempty"`
 }
 
 type workspaceFileResponse struct {
@@ -73,8 +75,22 @@ func (s *Server) handleWorkspaceTree(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	tree, err := buildWorkspaceTree(root, root, 4)
+	relPath := r.URL.Query().Get("path")
+	target, err := safeWorkspacePath(workspace.Path, relPath)
 	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+	tree, err := buildWorkspaceTree(root, target)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, http.StatusNotFound, "directory not found")
+			return
+		}
+		if errors.Is(err, errWorkspaceTreePathNotDirectory) {
+			writeError(w, http.StatusBadRequest, "path is not a directory")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
@@ -245,7 +261,9 @@ func safeWorkspacePath(root string, relPath string) (string, error) {
 	return targetAbs, nil
 }
 
-func buildWorkspaceTree(root string, current string, maxDepth int) (workspaceTreeEntry, error) {
+var errWorkspaceTreePathNotDirectory = errors.New("workspace tree path is not a directory")
+
+func buildWorkspaceTree(root string, current string) (workspaceTreeEntry, error) {
 	rel, err := filepath.Rel(root, current)
 	if err != nil {
 		return workspaceTreeEntry{}, err
@@ -266,12 +284,10 @@ func buildWorkspaceTree(root string, current string, maxDepth int) (workspaceTre
 		entry.Name = ""
 	}
 	if !info.IsDir() {
-		return entry, nil
+		return workspaceTreeEntry{}, errWorkspaceTreePathNotDirectory
 	}
 	entry.Type = "directory"
-	if maxDepth <= 0 {
-		return entry, nil
-	}
+	entry.ChildrenLoaded = true
 	children, err := os.ReadDir(current)
 	if err != nil {
 		return entry, nil
@@ -286,11 +302,50 @@ func buildWorkspaceTree(root string, current string, maxDepth int) (workspaceTre
 		if strings.HasPrefix(child.Name(), ".") {
 			continue
 		}
-		childEntry, err := buildWorkspaceTree(root, filepath.Join(current, child.Name()), maxDepth-1)
+		childEntry, err := buildWorkspaceTreeChild(root, filepath.Join(current, child.Name()))
 		if err != nil {
 			continue
 		}
 		entry.Children = append(entry.Children, childEntry)
 	}
+	entry.HasChildren = len(entry.Children) > 0
 	return entry, nil
+}
+
+func buildWorkspaceTreeChild(root string, current string) (workspaceTreeEntry, error) {
+	rel, err := filepath.Rel(root, current)
+	if err != nil {
+		return workspaceTreeEntry{}, err
+	}
+	if rel == "." {
+		rel = ""
+	}
+	info, err := os.Stat(current)
+	if err != nil {
+		return workspaceTreeEntry{}, err
+	}
+	entry := workspaceTreeEntry{
+		Name: info.Name(),
+		Path: filepath.ToSlash(rel),
+		Type: "file",
+	}
+	if !info.IsDir() {
+		return entry, nil
+	}
+	entry.Type = "directory"
+	entry.HasChildren = workspaceDirectoryHasVisibleChildren(current)
+	return entry, nil
+}
+
+func workspaceDirectoryHasVisibleChildren(path string) bool {
+	children, err := os.ReadDir(path)
+	if err != nil {
+		return false
+	}
+	for _, child := range children {
+		if !strings.HasPrefix(child.Name(), ".") {
+			return true
+		}
+	}
+	return false
 }

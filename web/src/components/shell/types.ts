@@ -125,7 +125,7 @@ export interface ShellProps {
   onUpdateServerSettings: (payload: ServerSettingsUpdatePayload) => Promise<ServerSettings>;
   onUpdateUserPreferences: (payload: UserPreferences) => Promise<UserPreferences>;
   onTestNotificationSettings: () => Promise<void>;
-  onLoadWorkspaceTree: (workspaceID: string) => Promise<WorkspaceTreeEntry>;
+  onLoadWorkspaceTree: (workspaceID: string, path?: string) => Promise<WorkspaceTreeEntry>;
   onReadWorkspaceFile: (workspaceID: string, path: string) => Promise<string>;
   onWriteWorkspaceFile: (workspaceID: string, path: string, body: string) => Promise<void>;
   onDeleteWorkspaceFile: (workspaceID: string, path: string) => Promise<void>;

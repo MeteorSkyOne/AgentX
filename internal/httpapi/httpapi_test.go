@@ -637,6 +637,59 @@ func TestHTTPWorkspaceFilesRejectTraversalAndRoundTripText(t *testing.T) {
 	getJSON(t, fileURL, bootstrap.SessionToken, http.StatusNotFound, nil)
 }
 
+func TestHTTPWorkspaceTreeLazyLoadsDirectories(t *testing.T) {
+	ts := newTestServer(t)
+
+	bootstrap := setupHTTP(t, ts.URL)
+	workspacePath := filepath.Join(t.TempDir(), "tree-workspace")
+	var project domain.Project
+	postJSON(t, ts.URL+"/api/organizations/"+bootstrap.Organization.ID+"/projects", bootstrap.SessionToken, map[string]string{
+		"name":           "Tree Workspace",
+		"workspace_path": workspacePath,
+	}, http.StatusOK, &project)
+
+	var workspace domain.Workspace
+	getJSON(t, ts.URL+"/api/workspaces/"+project.WorkspaceID, bootstrap.SessionToken, http.StatusOK, &workspace)
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "README.md"), "readme")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "src", "main.go"), "package main")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "src", "components", "App.tsx"), "export {}")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, ".hidden", "secret.txt"), "hidden")
+
+	treeURL := ts.URL + "/api/workspaces/" + workspace.ID + "/tree"
+	var root workspaceTreeEntry
+	getJSON(t, treeURL, bootstrap.SessionToken, http.StatusOK, &root)
+	if root.Name != "" || root.Path != "" || root.Type != "directory" || !root.ChildrenLoaded || !root.HasChildren {
+		t.Fatalf("root tree = %#v", root)
+	}
+	if got := workspaceTreeChildPaths(root); strings.Join(got, ",") != "src,README.md" {
+		t.Fatalf("root children = %#v, want src and README.md", got)
+	}
+	if len(root.Children[0].Children) != 0 || !root.Children[0].HasChildren || root.Children[0].ChildrenLoaded {
+		t.Fatalf("root src child should be an unloaded expandable directory: %#v", root.Children[0])
+	}
+
+	var src workspaceTreeEntry
+	getJSON(t, treeURL+"?path=src", bootstrap.SessionToken, http.StatusOK, &src)
+	if src.Path != "src" || src.Name != "src" || src.Type != "directory" || !src.ChildrenLoaded {
+		t.Fatalf("src tree = %#v", src)
+	}
+	if got := workspaceTreeChildPaths(src); strings.Join(got, ",") != "src/components,src/main.go" {
+		t.Fatalf("src children = %#v, want components and main.go", got)
+	}
+	if len(src.Children[0].Children) != 0 || !src.Children[0].HasChildren || src.Children[0].ChildrenLoaded {
+		t.Fatalf("components child should be an unloaded expandable directory: %#v", src.Children[0])
+	}
+
+	var components workspaceTreeEntry
+	getJSON(t, treeURL+"?path=src/components", bootstrap.SessionToken, http.StatusOK, &components)
+	if got := workspaceTreeChildPaths(components); strings.Join(got, ",") != "src/components/App.tsx" {
+		t.Fatalf("components children = %#v, want App.tsx", got)
+	}
+
+	getJSON(t, treeURL+"?path=README.md", bootstrap.SessionToken, http.StatusBadRequest, nil)
+	getJSON(t, treeURL+"?path=../secret", bootstrap.SessionToken, http.StatusBadRequest, nil)
+}
+
 func TestHTTPWorkspaceMetadataAndProjectWorkspacePathUpdate(t *testing.T) {
 	ts := newTestServer(t)
 
@@ -676,6 +729,14 @@ func TestHTTPWorkspaceMetadataAndProjectWorkspacePathUpdate(t *testing.T) {
 	if workspace.Path != nextPath {
 		t.Fatalf("workspace path = %q, want %q", workspace.Path, nextPath)
 	}
+}
+
+func workspaceTreeChildPaths(entry workspaceTreeEntry) []string {
+	paths := make([]string, 0, len(entry.Children))
+	for _, child := range entry.Children {
+		paths = append(paths, child.Path)
+	}
+	return paths
 }
 
 func TestHTTPBoundNonChannelConversationsCanSendAndListMessages(t *testing.T) {

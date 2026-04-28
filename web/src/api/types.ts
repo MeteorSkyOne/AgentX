@@ -379,6 +379,8 @@ export interface WorkspaceTreeEntry {
   name: string;
   path: string;
   type: "directory" | "file";
+  has_children?: boolean;
+  children_loaded?: boolean;
   children?: WorkspaceTreeEntry[];
 }
 
