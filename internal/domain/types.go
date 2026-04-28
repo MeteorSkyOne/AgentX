@@ -95,6 +95,8 @@ type Channel struct {
 	ProjectID      string      `json:"project_id"`
 	Type           ChannelType `json:"type"`
 	Name           string      `json:"name"`
+	TeamMaxBatches int         `json:"team_max_batches"`
+	TeamMaxRuns    int         `json:"team_max_runs"`
 	CreatedAt      time.Time   `json:"created_at"`
 	UpdatedAt      time.Time   `json:"updated_at"`
 	ArchivedAt     *time.Time  `json:"archived_at,omitempty"`

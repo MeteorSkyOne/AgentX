@@ -12,6 +12,7 @@ import type {
   Project,
   ServerSettings,
   ServerSettingsUpdatePayload,
+  TeamMetadata,
   Thread,
   User,
   UserPreferences,
@@ -35,6 +36,7 @@ export interface StreamingMessage {
   thinking?: string;
   process?: ProcessItem[];
   error?: string;
+  team?: TeamMetadata;
 }
 
 export interface ComposerConversation {
@@ -79,8 +81,16 @@ export interface ShellProps {
   ) => Promise<Project>;
   onDeleteProject: (project: Project) => Promise<void>;
   onSelectChannel: (channel: Channel) => void;
-  onCreateChannel: (name: string, type: Channel["type"]) => Promise<Channel>;
-  onUpdateChannel: (channelID: string, name: string) => Promise<Channel>;
+  onCreateChannel: (
+    name: string,
+    type: Channel["type"],
+    budget?: Pick<Channel, "team_max_batches" | "team_max_runs">
+  ) => Promise<Channel>;
+  onUpdateChannel: (
+    channelID: string,
+    name: string,
+    budget?: Pick<Channel, "team_max_batches" | "team_max_runs">
+  ) => Promise<Channel>;
   onDeleteChannel: (channel: Channel) => Promise<void>;
   onSelectThread: (thread: Thread) => void;
   onCreateThread: (title: string, body: string) => Promise<CreateThreadResponse>;

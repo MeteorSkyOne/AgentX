@@ -4,12 +4,15 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/meteorsky/agentx/internal/app"
 	"github.com/meteorsky/agentx/internal/domain"
 )
 
 type channelRequest struct {
-	Name string             `json:"name"`
-	Type domain.ChannelType `json:"type"`
+	Name           string             `json:"name"`
+	Type           domain.ChannelType `json:"type"`
+	TeamMaxBatches *int               `json:"team_max_batches"`
+	TeamMaxRuns    *int               `json:"team_max_runs"`
 }
 
 func (s *Server) handleProjectChannels(w http.ResponseWriter, r *http.Request) {
@@ -55,7 +58,10 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "malformed JSON")
 		return
 	}
-	channel, err := s.app.CreateChannel(r.Context(), project.ID, req.Name, req.Type)
+	channel, err := s.app.CreateChannel(r.Context(), project.ID, req.Name, req.Type, app.ChannelTeamBudgetUpdate{
+		MaxBatches: req.TeamMaxBatches,
+		MaxRuns:    req.TeamMaxRuns,
+	})
 	if err != nil {
 		writeAppError(w, err)
 		return
@@ -83,7 +89,10 @@ func (s *Server) handleUpdateChannel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "malformed JSON")
 		return
 	}
-	updated, err := s.app.UpdateChannel(r.Context(), channel.ID, req.Name, req.Type)
+	updated, err := s.app.UpdateChannel(r.Context(), channel.ID, req.Name, req.Type, app.ChannelTeamBudgetUpdate{
+		MaxBatches: req.TeamMaxBatches,
+		MaxRuns:    req.TeamMaxRuns,
+	})
 	if err != nil {
 		writeAppError(w, err)
 		return

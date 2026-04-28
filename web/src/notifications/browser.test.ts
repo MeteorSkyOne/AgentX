@@ -16,6 +16,9 @@ describe("browser notifications", () => {
 
     expect(shouldShowBrowserNotification(message("bot"), runtime)).toBe(true);
     expect(shouldShowBrowserNotification(message("user"), runtime)).toBe(false);
+    expect(shouldShowBrowserNotification(teamMessage("discussion"), runtime)).toBe(false);
+    expect(shouldShowBrowserNotification(teamMessage("leader"), runtime)).toBe(false);
+    expect(shouldShowBrowserNotification(teamMessage("summary"), runtime)).toBe(true);
     expect(
       shouldShowBrowserNotification(message("bot"), {
         Notification: notificationClass("granted"),
@@ -104,5 +107,21 @@ function message(senderType: Message["sender_type"]): Message {
     kind: "text",
     body: "Reply text",
     created_at: "2026-04-25T10:00:00Z"
+  };
+}
+
+function teamMessage(phase: "leader" | "discussion" | "summary"): Message {
+  return {
+    ...message("bot"),
+    id: `msg_team_${phase}`,
+    metadata: {
+      team: {
+        session_id: "team_1",
+        root_message_id: "msg_root",
+        leader_agent_id: "agt_1",
+        phase,
+        turn: 1
+      }
+    }
   };
 }

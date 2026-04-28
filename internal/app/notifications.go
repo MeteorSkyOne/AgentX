@@ -127,11 +127,31 @@ func (a *App) TestNotificationSettings(ctx context.Context, orgID string) error 
 }
 
 func (a *App) notifyAgentMessageCreated(ctx context.Context, title string, message domain.Message) {
+	if isTeamDiscussionMessage(message) {
+		return
+	}
 	go func() {
 		if err := a.deliverAgentMessageWebhook(ctx, title, message); err != nil {
 			log.Printf("agentx webhook delivery failed org=%s message=%s: %v", message.OrganizationID, message.ID, err)
 		}
 	}()
+}
+
+func isTeamDiscussionMessage(message domain.Message) bool {
+	team, ok := message.Metadata["team"]
+	if !ok {
+		return false
+	}
+	switch value := team.(type) {
+	case domain.TeamMetadata:
+		return value.SessionID != "" && value.Phase != "summary"
+	case map[string]any:
+		sessionID, _ := value["session_id"].(string)
+		phase, _ := value["phase"].(string)
+		return sessionID != "" && phase != "summary"
+	default:
+		return false
+	}
 }
 
 func (a *App) deliverAgentMessageWebhook(ctx context.Context, title string, message domain.Message) error {

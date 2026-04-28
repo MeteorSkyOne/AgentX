@@ -177,6 +177,8 @@ export function Shell({
   const [channelDraftOpen, setChannelDraftOpen] = useState(false);
   const [channelName, setChannelName] = useState("");
   const [channelType, setChannelType] = useState<Channel["type"]>("text");
+  const [channelTeamMaxBatches, setChannelTeamMaxBatches] = useState("6");
+  const [channelTeamMaxRuns, setChannelTeamMaxRuns] = useState("12");
   const [agentDraftOpen, setAgentDraftOpen] = useState(false);
   const [newAgentName, setNewAgentName] = useState("");
   const [newAgentDescription, setNewAgentDescription] = useState("");
@@ -654,9 +656,16 @@ export function Shell({
   async function submitChannel() {
     const name = channelName.trim();
     if (!name) return;
-    const created = await onCreateChannel(name, channelType);
+    const teamMaxBatches = Number.parseInt(channelTeamMaxBatches, 10);
+    const teamMaxRuns = Number.parseInt(channelTeamMaxRuns, 10);
+    const created = await onCreateChannel(name, channelType, {
+      team_max_batches: teamMaxBatches,
+      team_max_runs: teamMaxRuns,
+    });
     setChannelName("");
     setChannelType("text");
+    setChannelTeamMaxBatches("6");
+    setChannelTeamMaxRuns("12");
     setChannelDraftOpen(false);
     onSelectChannel(created);
   }
@@ -2076,10 +2085,53 @@ export function Shell({
                 <option value="thread">Forum</option>
               </Select>
             </div>
+            <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3">
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Team discussion budget</p>
+                <p className="text-xs leading-5 text-muted-foreground">
+                  Used when a message mentions agents. The first mentioned agent leads each round, and agent runs cap total sequential replies before the final answer.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="channel-team-batches">Discussion rounds</Label>
+                  <Input
+                    id="channel-team-batches"
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={channelTeamMaxBatches}
+                    onChange={(e) => setChannelTeamMaxBatches(e.target.value)}
+                    aria-label="Team discussion rounds"
+                    title="Maximum leader-led discussion rounds before the final answer."
+                  />
+                  <p className="text-[11px] leading-4 text-muted-foreground">1-20 handoff rounds.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="channel-team-runs">Agent run budget</Label>
+                  <Input
+                    id="channel-team-runs"
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={channelTeamMaxRuns}
+                    onChange={(e) => setChannelTeamMaxRuns(e.target.value)}
+                    aria-label="Team agent run budget"
+                    title="Maximum sequential agent replies across the leader-led discussion."
+                  />
+                  <p className="text-[11px] leading-4 text-muted-foreground">1-50 discussion replies.</p>
+                </div>
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setChannelDraftOpen(false)}>Cancel</Button>
-            <Button onClick={submitChannel} disabled={!channelName.trim()}>Create</Button>
+            <Button
+              onClick={submitChannel}
+              disabled={!channelName.trim() || !channelTeamMaxBatches.trim() || !channelTeamMaxRuns.trim()}
+            >
+              Create
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

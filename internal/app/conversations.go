@@ -168,9 +168,7 @@ func (a *App) SendMessage(ctx context.Context, req SendMessageRequest) (domain.M
 		return domain.Message{}, err
 	}
 
-	for _, agent := range targetAgentsForBody(agents, message.Body) {
-		go a.runAgentForMessage(context.WithoutCancel(ctx), message, agent)
-	}
+	a.dispatchAgentRunsForMessage(context.WithoutCancel(ctx), message, scope, agents)
 
 	return message, nil
 }

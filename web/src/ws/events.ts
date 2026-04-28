@@ -1,4 +1,4 @@
-import type { ConversationType, Message, ProcessItem } from "../api/types";
+import type { ConversationType, Message, ProcessItem, TeamMetadata } from "../api/types";
 
 interface BaseEvent {
   id: string;
@@ -57,6 +57,7 @@ export interface AgentRunStartedEvent extends BaseEvent {
   payload: {
     run_id: string;
     agent_id: string;
+    team?: TeamMetadata;
   };
 }
 
@@ -68,6 +69,7 @@ export interface AgentOutputDeltaEvent extends BaseEvent {
     text: string;
     thinking?: string;
     process?: ProcessItem[];
+    team?: TeamMetadata;
   };
 }
 
@@ -76,6 +78,7 @@ export interface AgentRunCompletedEvent extends BaseEvent {
   payload: {
     run_id: string;
     agent_id: string;
+    team?: TeamMetadata;
   };
 }
 
@@ -83,7 +86,9 @@ export interface AgentRunFailedEvent extends BaseEvent {
   type: "AgentRunFailed";
   payload: {
     run_id: string;
+    agent_id?: string;
     error: string;
+    team?: TeamMetadata;
   };
 }
 

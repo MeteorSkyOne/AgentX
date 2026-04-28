@@ -14,6 +14,15 @@ import (
 	"github.com/meteorsky/agentx/internal/store"
 )
 
+const (
+	DefaultChannelTeamMaxBatches = 6
+	DefaultChannelTeamMaxRuns    = 12
+	MinChannelTeamMaxBatches     = 1
+	MaxChannelTeamMaxBatches     = 20
+	MinChannelTeamMaxRuns        = 1
+	MaxChannelTeamMaxRuns        = 50
+)
+
 func (a *App) Project(ctx context.Context, id string) (domain.Project, error) {
 	return a.store.Projects().ByID(ctx, id)
 }
@@ -112,7 +121,12 @@ func (a *App) Channel(ctx context.Context, id string) (domain.Channel, error) {
 	return a.store.Channels().ByID(ctx, id)
 }
 
-func (a *App) CreateChannel(ctx context.Context, projectID string, name string, channelType domain.ChannelType) (domain.Channel, error) {
+type ChannelTeamBudgetUpdate struct {
+	MaxBatches *int
+	MaxRuns    *int
+}
+
+func (a *App) CreateChannel(ctx context.Context, projectID string, name string, channelType domain.ChannelType, budgetUpdates ...ChannelTeamBudgetUpdate) (domain.Channel, error) {
 	project, err := a.store.Projects().ByID(ctx, projectID)
 	if err != nil {
 		return domain.Channel{}, err
@@ -134,8 +148,13 @@ func (a *App) CreateChannel(ctx context.Context, projectID string, name string, 
 		ProjectID:      project.ID,
 		Type:           channelType,
 		Name:           name,
+		TeamMaxBatches: DefaultChannelTeamMaxBatches,
+		TeamMaxRuns:    DefaultChannelTeamMaxRuns,
 		CreatedAt:      now,
 		UpdatedAt:      now,
+	}
+	if err := applyChannelTeamBudget(&channel, optionalChannelTeamBudgetUpdate(budgetUpdates)); err != nil {
+		return domain.Channel{}, err
 	}
 	if err := a.store.Channels().Create(ctx, channel); err != nil {
 		return domain.Channel{}, err
@@ -143,7 +162,7 @@ func (a *App) CreateChannel(ctx context.Context, projectID string, name string, 
 	return channel, nil
 }
 
-func (a *App) UpdateChannel(ctx context.Context, channelID string, name string, channelType domain.ChannelType) (domain.Channel, error) {
+func (a *App) UpdateChannel(ctx context.Context, channelID string, name string, channelType domain.ChannelType, budgetUpdates ...ChannelTeamBudgetUpdate) (domain.Channel, error) {
 	channel, err := a.store.Channels().ByID(ctx, channelID)
 	if err != nil {
 		return domain.Channel{}, err
@@ -161,10 +180,49 @@ func (a *App) UpdateChannel(ctx context.Context, channelID string, name string, 
 	channel.Name = name
 	channel.Type = channelType
 	channel.UpdatedAt = time.Now().UTC()
+	if err := applyChannelTeamBudget(&channel, optionalChannelTeamBudgetUpdate(budgetUpdates)); err != nil {
+		return domain.Channel{}, err
+	}
 	if err := a.store.Channels().Update(ctx, channel); err != nil {
 		return domain.Channel{}, err
 	}
 	return channel, nil
+}
+
+func optionalChannelTeamBudgetUpdate(updates []ChannelTeamBudgetUpdate) ChannelTeamBudgetUpdate {
+	if len(updates) == 0 {
+		return ChannelTeamBudgetUpdate{}
+	}
+	return updates[0]
+}
+
+func applyChannelTeamBudget(channel *domain.Channel, update ChannelTeamBudgetUpdate) error {
+	if channel.TeamMaxBatches <= 0 {
+		channel.TeamMaxBatches = DefaultChannelTeamMaxBatches
+	}
+	if channel.TeamMaxRuns <= 0 {
+		channel.TeamMaxRuns = DefaultChannelTeamMaxRuns
+	}
+	if update.MaxBatches != nil {
+		channel.TeamMaxBatches = *update.MaxBatches
+	}
+	if update.MaxRuns != nil {
+		channel.TeamMaxRuns = *update.MaxRuns
+	}
+	return validateChannelTeamBudget(channel.TeamMaxBatches, channel.TeamMaxRuns)
+}
+
+func validateChannelTeamBudget(maxBatches int, maxRuns int) error {
+	if maxBatches < MinChannelTeamMaxBatches || maxBatches > MaxChannelTeamMaxBatches {
+		return invalidInput("team max batches must be between 1 and 20")
+	}
+	if maxRuns < MinChannelTeamMaxRuns || maxRuns > MaxChannelTeamMaxRuns {
+		return invalidInput("team max runs must be between 1 and 50")
+	}
+	if maxRuns < maxBatches {
+		return invalidInput("team max runs must be greater than or equal to team max batches")
+	}
+	return nil
 }
 
 func (a *App) ArchiveChannel(ctx context.Context, channelID string) error {
@@ -235,9 +293,7 @@ func (a *App) CreateThread(ctx context.Context, userID string, channelID string,
 	scope, err := a.conversationScope(ctx, domain.ConversationThread, thread.ID)
 	if err == nil {
 		if agents, resolveErr := a.conversationAgents(ctx, scope); resolveErr == nil {
-			for _, agent := range targetAgentsForBody(agents, message.Body) {
-				go a.runAgentForMessage(context.WithoutCancel(ctx), message, agent)
-			}
+			a.dispatchAgentRunsForMessage(context.WithoutCancel(ctx), message, scope, agents)
 		}
 	}
 

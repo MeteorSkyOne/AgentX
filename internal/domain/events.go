@@ -59,14 +59,27 @@ type AgentOutputDeltaPayload struct {
 	Text     string        `json:"text"`
 	Thinking string        `json:"thinking,omitempty"`
 	Process  []ProcessItem `json:"process,omitempty"`
+	Team     *TeamMetadata `json:"team,omitempty"`
 }
 
 type AgentRunPayload struct {
-	RunID   string `json:"run_id"`
-	AgentID string `json:"agent_id"`
+	RunID   string        `json:"run_id"`
+	AgentID string        `json:"agent_id"`
+	Team    *TeamMetadata `json:"team,omitempty"`
 }
 
 type AgentRunFailedPayload struct {
-	RunID string `json:"run_id"`
-	Error string `json:"error"`
+	RunID   string        `json:"run_id"`
+	AgentID string        `json:"agent_id,omitempty"`
+	Error   string        `json:"error"`
+	Team    *TeamMetadata `json:"team,omitempty"`
+}
+
+type TeamMetadata struct {
+	SessionID       string `json:"session_id"`
+	RootMessageID   string `json:"root_message_id"`
+	LeaderAgentID   string `json:"leader_agent_id"`
+	Phase           string `json:"phase"`
+	Turn            int    `json:"turn"`
+	SourceMessageID string `json:"source_message_id,omitempty"`
 }

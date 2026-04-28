@@ -25,7 +25,11 @@ interface ChannelListProps {
   onSelect: (channel: Channel) => void;
   onOpenMetrics?: () => void;
   onCreate: () => void;
-  onUpdate: (channelID: string, name: string) => Promise<Channel>;
+  onUpdate: (
+    channelID: string,
+    name: string,
+    budget?: Pick<Channel, "team_max_batches" | "team_max_runs">
+  ) => Promise<Channel>;
   onDelete: (channel: Channel) => Promise<void>;
 }
 
@@ -33,6 +37,8 @@ export function ChannelList({ channels, selectedChannelID, metricsActive = false
   const [open, setOpen] = useState(true);
   const [editingID, setEditingID] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
+  const [draftBatches, setDraftBatches] = useState("6");
+  const [draftRuns, setDraftRuns] = useState("12");
   const [pendingID, setPendingID] = useState<string | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Channel | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,16 +46,27 @@ export function ChannelList({ channels, selectedChannelID, metricsActive = false
   function beginEdit(channel: Channel) {
     setEditingID(channel.id);
     setDraftName(channel.name);
+    setDraftBatches(String(channel.team_max_batches || 6));
+    setDraftRuns(String(channel.team_max_runs || 12));
     setError(null);
   }
 
   async function save(channel: Channel) {
     const name = draftName.trim();
     if (!name) return;
+    const teamMaxBatches = Number.parseInt(draftBatches, 10);
+    const teamMaxRuns = Number.parseInt(draftRuns, 10);
+    if (!Number.isFinite(teamMaxBatches) || !Number.isFinite(teamMaxRuns)) {
+      setError("Team budget must use whole numbers");
+      return;
+    }
     setPendingID(channel.id);
     setError(null);
     try {
-      await onUpdate(channel.id, name);
+      await onUpdate(channel.id, name, {
+        team_max_batches: teamMaxBatches,
+        team_max_runs: teamMaxRuns
+      });
       setEditingID(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Update channel failed");
@@ -114,7 +131,7 @@ export function ChannelList({ channels, selectedChannelID, metricsActive = false
             )}
           >
             {editingID === channel.id ? (
-              <>
+              <div className="min-w-0 flex-1 space-y-2 px-1 py-1">
                 <Input
                   value={draftName}
                   onChange={(e) => setDraftName(e.target.value)}
@@ -126,29 +143,69 @@ export function ChannelList({ channels, selectedChannelID, metricsActive = false
                   className="h-9 flex-1 px-2 text-sm md:h-7"
                   autoFocus
                 />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9 md:h-7 md:w-7"
-                  title="Save channel"
-                  aria-label="Save channel"
-                  disabled={pendingID === channel.id || !draftName.trim()}
-                  onClick={() => save(channel)}
-                >
-                  <Check className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9 md:h-7 md:w-7"
-                  title="Cancel"
-                  aria-label="Cancel"
-                  disabled={pendingID === channel.id}
-                  onClick={() => setEditingID(null)}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </>
+                <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto] items-end gap-1">
+                  <div className="min-w-0 space-y-1">
+                    <label
+                      htmlFor={`channel-${channel.id}-team-rounds`}
+                      className="block truncate text-[10px] font-medium text-muted-foreground"
+                    >
+                      Rounds
+                    </label>
+                    <Input
+                      id={`channel-${channel.id}-team-rounds`}
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={draftBatches}
+                      onChange={(e) => setDraftBatches(e.target.value)}
+                      aria-label="Team discussion rounds"
+                      title="Maximum leader-led discussion rounds before the final answer."
+                      className="h-8 px-2 text-xs"
+                    />
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <label
+                      htmlFor={`channel-${channel.id}-team-runs`}
+                      className="block truncate text-[10px] font-medium text-muted-foreground"
+                    >
+                      Agent runs
+                    </label>
+                    <Input
+                      id={`channel-${channel.id}-team-runs`}
+                      type="number"
+                      min={1}
+                      max={50}
+                      value={draftRuns}
+                      onChange={(e) => setDraftRuns(e.target.value)}
+                      aria-label="Team agent run budget"
+                      title="Maximum sequential agent replies across the leader-led discussion."
+                      className="h-8 px-2 text-xs"
+                    />
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    title="Save channel"
+                    aria-label="Save channel"
+                    disabled={pendingID === channel.id || !draftName.trim()}
+                    onClick={() => save(channel)}
+                  >
+                    <Check className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    title="Cancel"
+                    aria-label="Cancel"
+                    disabled={pendingID === channel.id}
+                    onClick={() => setEditingID(null)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
             ) : (
               <>
                 <button

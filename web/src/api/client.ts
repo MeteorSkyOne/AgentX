@@ -233,17 +233,18 @@ export function projectMetrics(
 export function createChannel(
   projectID: string,
   name: string,
-  type: Channel["type"]
+  type: Channel["type"],
+  budget?: Pick<Channel, "team_max_batches" | "team_max_runs">
 ): Promise<Channel> {
   return request<Channel>(`/api/projects/${encodeURIComponent(projectID)}/channels`, {
     method: "POST",
-    body: JSON.stringify({ name, type })
+    body: JSON.stringify({ name, type, ...budget })
   });
 }
 
 export function updateChannel(
   channelID: string,
-  payload: { name: string; type?: Channel["type"] }
+  payload: { name: string; type?: Channel["type"]; team_max_batches?: number; team_max_runs?: number }
 ): Promise<Channel> {
   return request<Channel>(`/api/channels/${encodeURIComponent(channelID)}`, {
     method: "PATCH",
