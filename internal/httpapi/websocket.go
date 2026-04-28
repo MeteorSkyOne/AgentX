@@ -161,6 +161,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
+			event = redactEventProcessDetails(event)
 			if err := writeWebSocketJSON(ctx, conn, event); err != nil {
 				_ = conn.Close(websocket.StatusInternalError, "failed to marshal event")
 				return
@@ -247,7 +248,7 @@ func (s *Server) streamWebSocketMessageHistory(ctx context.Context, conn *websoc
 			ConversationType: conversationType,
 			ConversationID:   conversationID,
 			Payload: domain.MessageHistoryChunkPayload{
-				Messages: messages[start:end],
+				Messages: redactMessagesProcessDetails(messages[start:end]),
 			},
 			CreatedAt: time.Now().UTC(),
 		}); err != nil {

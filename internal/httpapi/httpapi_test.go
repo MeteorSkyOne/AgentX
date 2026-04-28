@@ -215,6 +215,71 @@ func TestHTTPMessagesCanBeUpdatedAndDeleted(t *testing.T) {
 	}
 }
 
+func TestHTTPMessageProcessDetailsAreLazyLoaded(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	bootstrap := setupApp(t, ctx, env.app)
+
+	message := lazyProcessTestMessage(bootstrap.Organization.ID, bootstrap.Channel.ID)
+	if err := env.store.Messages().Create(ctx, message); err != nil {
+		t.Fatal(err)
+	}
+
+	var messages []domain.Message
+	getJSON(t, env.server.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages", bootstrap.SessionToken, http.StatusOK, &messages)
+	var listed domain.Message
+	for _, item := range messages {
+		if item.ID == message.ID {
+			listed = item
+			break
+		}
+	}
+	if listed.ID == "" {
+		t.Fatalf("messages = %#v, want %q", messages, message.ID)
+	}
+	process, ok := listed.Metadata["process"].([]any)
+	if !ok || len(process) != 2 {
+		t.Fatalf("listed process = %#v", listed.Metadata["process"])
+	}
+	call, ok := process[0].(map[string]any)
+	if !ok {
+		t.Fatalf("listed call = %#v", process[0])
+	}
+	if call["process_index"] != float64(0) || call["has_detail"] != true || call["tool_name"] != "Bash" {
+		t.Fatalf("listed call meta = %#v", call)
+	}
+	if _, ok := call["input"]; ok {
+		t.Fatalf("listed call leaked input: %#v", call)
+	}
+	if _, ok := call["raw"]; ok {
+		t.Fatalf("listed call leaked raw: %#v", call)
+	}
+	result, ok := process[1].(map[string]any)
+	if !ok {
+		t.Fatalf("listed result = %#v", process[1])
+	}
+	if result["process_index"] != float64(1) || result["has_detail"] != true || result["status"] != "completed" {
+		t.Fatalf("listed result meta = %#v", result)
+	}
+	if _, ok := result["output"]; ok {
+		t.Fatalf("listed result leaked output: %#v", result)
+	}
+
+	var detail messageProcessItemDetail
+	getJSON(t, env.server.URL+"/api/messages/"+message.ID+"/process-items/0", bootstrap.SessionToken, http.StatusOK, &detail)
+	input, ok := detail.Item["input"].(map[string]any)
+	if !ok || input["command"] != "pnpm test" {
+		t.Fatalf("detail input = %#v", detail.Item["input"])
+	}
+	if detail.Result == nil || detail.Result["output"] != "tests passed" {
+		t.Fatalf("detail result = %#v", detail.Result)
+	}
+
+	getJSON(t, env.server.URL+"/api/messages/"+message.ID+"/process-items/not-a-number", bootstrap.SessionToken, http.StatusBadRequest, nil)
+	getJSON(t, env.server.URL+"/api/messages/"+message.ID+"/process-items/99", bootstrap.SessionToken, http.StatusNotFound, nil)
+	getJSON(t, env.server.URL+"/api/messages/"+message.ID+"/process-items/0", "", http.StatusUnauthorized, nil)
+}
+
 func TestHTTPSetupLoginAndLogout(t *testing.T) {
 	ts := newTestServer(t)
 
@@ -802,6 +867,103 @@ func TestWebSocketReceivesMessageCreated(t *testing.T) {
 	}
 }
 
+func TestWebSocketRedactsMessageCreatedProcessDetails(t *testing.T) {
+	env := newTestEnv(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	boot := setupApp(t, ctx, env.app)
+
+	wsURL := "ws" + strings.TrimPrefix(env.server.URL, "http") + "/api/ws?token=" + boot.SessionToken
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	err = conn.Write(ctx, websocket.MessageText, []byte(`{"type":"subscribe","organization_id":"`+boot.Organization.ID+`","conversation_type":"channel","conversation_id":"`+boot.Channel.ID+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireWebSocketSubscribed(t, ctx, conn)
+	requireWebSocketHistoryCompleted(t, ctx, conn, false)
+
+	message := lazyProcessTestMessage(boot.Organization.ID, boot.Channel.ID)
+	env.bus.Publish(domain.Event{
+		ID:               id.New("evt"),
+		Type:             domain.EventMessageCreated,
+		OrganizationID:   boot.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   boot.Channel.ID,
+		Payload:          domain.MessageCreatedPayload{Message: message},
+		CreatedAt:        message.CreatedAt,
+	})
+
+	frame := requireWebSocketEventType(t, ctx, conn, domain.EventMessageCreated)
+	var payload domain.MessageCreatedPayload
+	unmarshalWebSocketPayload(t, frame, &payload)
+	process, ok := payload.Message.Metadata["process"].([]any)
+	if !ok || len(process) != 2 {
+		t.Fatalf("created process = %#v", payload.Message.Metadata["process"])
+	}
+	call := process[0].(map[string]any)
+	if call["process_index"] != float64(0) || call["has_detail"] != true {
+		t.Fatalf("created call meta = %#v", call)
+	}
+	if _, ok := call["input"]; ok {
+		t.Fatalf("created event leaked input: %#v", call)
+	}
+	result := process[1].(map[string]any)
+	if _, ok := result["output"]; ok {
+		t.Fatalf("created event leaked output: %#v", result)
+	}
+}
+
+func TestWebSocketHistoryRedactsProcessDetails(t *testing.T) {
+	env := newTestEnv(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	boot := setupApp(t, ctx, env.app)
+	message := lazyProcessTestMessage(boot.Organization.ID, boot.Channel.ID)
+	if err := env.store.Messages().Create(ctx, message); err != nil {
+		t.Fatal(err)
+	}
+
+	wsURL := "ws" + strings.TrimPrefix(env.server.URL, "http") + "/api/ws?token=" + boot.SessionToken
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	err = conn.Write(ctx, websocket.MessageText, []byte(`{"type":"subscribe","organization_id":"`+boot.Organization.ID+`","conversation_type":"channel","conversation_id":"`+boot.Channel.ID+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireWebSocketSubscribed(t, ctx, conn)
+	requireWebSocketEventType(t, ctx, conn, domain.EventMessageHistoryStarted)
+	frame := requireWebSocketEventType(t, ctx, conn, domain.EventMessageHistoryChunk)
+	var payload domain.MessageHistoryChunkPayload
+	unmarshalWebSocketPayload(t, frame, &payload)
+	if len(payload.Messages) != 1 {
+		t.Fatalf("history messages = %#v", payload.Messages)
+	}
+	process, ok := payload.Messages[0].Metadata["process"].([]any)
+	if !ok || len(process) != 2 {
+		t.Fatalf("history process = %#v", payload.Messages[0].Metadata["process"])
+	}
+	call := process[0].(map[string]any)
+	if _, ok := call["input"]; ok {
+		t.Fatalf("history leaked input: %#v", call)
+	}
+	result := process[1].(map[string]any)
+	if _, ok := result["output"]; ok {
+		t.Fatalf("history leaked output: %#v", result)
+	}
+	requireWebSocketEventType(t, ctx, conn, domain.EventMessageHistoryCompleted)
+}
+
 func TestWebSocketStreamsMessageHistoryBeforeLiveEvents(t *testing.T) {
 	env := newTestEnv(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -1281,6 +1443,38 @@ func webSocketHistoryMessage(organizationID string, conversationType domain.Conv
 		Kind:             domain.MessageText,
 		Body:             fmt.Sprintf("history %03d", seq),
 		CreatedAt:        time.Date(2026, 4, 25, 10, 0, 0, 0, time.UTC).Add(time.Duration(seq) * time.Second),
+	}
+}
+
+func lazyProcessTestMessage(organizationID string, conversationID string) domain.Message {
+	return domain.Message{
+		ID:               "msg_lazy_process",
+		OrganizationID:   organizationID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   conversationID,
+		SenderType:       domain.SenderBot,
+		SenderID:         "bot_lazy_process",
+		Kind:             domain.MessageText,
+		Body:             "done",
+		Metadata: map[string]any{
+			"process": []domain.ProcessItem{
+				{
+					Type:       "tool_call",
+					ToolName:   "Bash",
+					ToolCallID: "call_1",
+					Input:      map[string]any{"command": "pnpm test"},
+					Raw:        map[string]any{"type": "tool_use"},
+				},
+				{
+					Type:       "tool_result",
+					ToolCallID: "call_1",
+					Status:     "completed",
+					Output:     "tests passed",
+					Raw:        map[string]any{"type": "tool_result"},
+				},
+			},
+		},
+		CreatedAt: time.Date(2026, 4, 25, 10, 0, 0, 0, time.UTC),
 	}
 }
 

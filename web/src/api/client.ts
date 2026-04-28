@@ -11,6 +11,7 @@ import type {
   ConversationType,
   CreateThreadResponse,
   Message,
+  MessageProcessItemDetail,
   MetricsProvider,
   NotificationSettings,
   Organization,
@@ -494,6 +495,15 @@ export function deleteMessage(messageID: string): Promise<void> {
   return request<void>(`/api/messages/${encodeURIComponent(messageID)}`, {
     method: "DELETE"
   });
+}
+
+export function fetchMessageProcessItem(
+  messageID: string,
+  index: number
+): Promise<MessageProcessItemDetail> {
+  return request<MessageProcessItemDetail>(
+    `/api/messages/${encodeURIComponent(messageID)}/process-items/${encodeURIComponent(String(index))}`
+  );
 }
 
 type MetricsOptions = {

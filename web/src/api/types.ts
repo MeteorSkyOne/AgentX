@@ -19,6 +19,13 @@ export interface ProcessItem {
   output?: JsonValue;
   raw?: JsonValue;
   created_at?: string;
+  process_index?: number;
+  has_detail?: boolean;
+}
+
+export interface MessageProcessItemDetail {
+  item: ProcessItem;
+  result?: ProcessItem;
 }
 
 export interface MessageMetricsSummary {

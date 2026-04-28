@@ -20,8 +20,16 @@ import {
   Wrench
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { fetchAttachmentBlob } from "../api/client";
-import type { ConversationAgentContext, Message, MessageAttachment, MessageReference, ProcessItem, UserPreferences } from "../api/types";
+import { fetchAttachmentBlob, fetchMessageProcessItem } from "../api/client";
+import type {
+  ConversationAgentContext,
+  Message,
+  MessageAttachment,
+  MessageProcessItemDetail,
+  MessageReference,
+  ProcessItem,
+  UserPreferences
+} from "../api/types";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -480,7 +488,7 @@ function ConversationMessageItem({
             </div>
           )}
         </div>
-        {process.length > 0 && <ProcessBlock items={process} defaultOpen={false} />}
+        {process.length > 0 && <ProcessBlock items={process} defaultOpen={false} messageID={message.id} />}
         {message.reply_to && (
           <MessageReferencePreview
             reference={message.reply_to}
@@ -1174,7 +1182,15 @@ function StreamingItem({
   );
 }
 
-function ProcessBlock({ items, defaultOpen = true }: { items: ProcessItem[]; defaultOpen?: boolean }) {
+function ProcessBlock({
+  items,
+  defaultOpen = true,
+  messageID,
+}: {
+  items: ProcessItem[];
+  defaultOpen?: boolean;
+  messageID?: string;
+}) {
   const [open, setOpen] = useState(defaultOpen);
   const displayItems = mergeToolProcessItems(items);
   return (
@@ -1188,7 +1204,7 @@ function ProcessBlock({ items, defaultOpen = true }: { items: ProcessItem[]; def
       <CollapsibleContent>
         <div className="space-y-2 border-l border-border/60 pl-3 py-1">
           {displayItems.map((item, index) => (
-            <ProcessRow key={processItemKey(item, index)} item={item} />
+            <ProcessRow key={processItemKey(item, index)} item={item} messageID={messageID} />
           ))}
         </div>
       </CollapsibleContent>
@@ -1196,7 +1212,7 @@ function ProcessBlock({ items, defaultOpen = true }: { items: ProcessItem[]; def
   );
 }
 
-function ProcessRow({ item }: { item: DisplayProcessItem }) {
+function ProcessRow({ item, messageID }: { item: DisplayProcessItem; messageID?: string }) {
   if (item.type === "thinking") {
     return (
       <div className="space-y-1 text-xs text-muted-foreground">
@@ -1213,18 +1229,64 @@ function ProcessRow({ item }: { item: DisplayProcessItem }) {
     );
   }
 
-  return <ToolProcessRow item={item} />;
+  return <ToolProcessRow item={item} messageID={messageID} />;
 }
 
-function ToolProcessRow({ item }: { item: DisplayProcessItem }) {
-  const resultItem = item.result ?? (item.type === "tool_result" ? item : undefined);
-  const isResultOnly = item.type === "tool_result" && !item.result;
+function ToolProcessRow({ item, messageID }: { item: DisplayProcessItem; messageID?: string }) {
+  const [detail, setDetail] = useState<DisplayProcessItem | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const canLazyLoad =
+    Boolean(messageID) && item.has_detail === true && typeof item.process_index === "number";
+  const activeItem = detail ?? item;
+  const resultItem = activeItem.result ?? (activeItem.type === "tool_result" ? activeItem : undefined);
+  const isResultOnly = activeItem.type === "tool_result" && !activeItem.result;
   const hasResult = Boolean(resultItem);
-  const status = resultItem?.status ?? item.status;
+  const status = resultItem?.status ?? activeItem.status;
   const isError = status === "error";
-  const [open, setOpen] = useState(!hasResult);
-  const raw = rawProcessValue(item);
-  const preview = toolPreview(item);
+  const [open, setOpen] = useState(!hasResult && !canLazyLoad);
+  const raw = rawProcessValue(activeItem);
+  const preview = toolPreview(activeItem);
+
+  useEffect(() => {
+    setDetail(null);
+    setDetailError(null);
+    setDetailLoading(false);
+  }, [messageID, item.process_index]);
+
+  useEffect(() => {
+    if (!open || !canLazyLoad || detail || detailLoading || detailError) {
+      return;
+    }
+    let cancelled = false;
+    setDetailLoading(true);
+    fetchMessageProcessItem(messageID!, item.process_index!)
+      .then((loaded) => {
+        if (!cancelled) {
+          setDetail(displayProcessItemFromDetail(loaded));
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setDetailError(err instanceof Error ? err.message : "Tool details failed");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setDetailLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canLazyLoad, detail, detailError, item.process_index, messageID, open]);
+
+  function retryDetailLoad() {
+    setDetailError(null);
+    setDetail(null);
+    setOpen(true);
+  }
+
   return (
     <Collapsible
       open={open}
@@ -1252,17 +1314,36 @@ function ToolProcessRow({ item }: { item: DisplayProcessItem }) {
           )}
         </span>
         <span className="font-medium text-foreground">
-          {item.result ? "Tool" : isResultOnly ? "Tool result" : "Tool call"}
+          {activeItem.result ? "Tool" : isResultOnly ? "Tool result" : "Tool call"}
         </span>
-        {item.tool_name && <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{item.tool_name}</span>}
+        {activeItem.tool_name && <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{activeItem.tool_name}</span>}
         {status && (
           <span className={cn("rounded px-1.5 py-0.5", isError ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground")}>
             {status}
           </span>
         )}
-        {item.tool_call_id && <span className="font-mono text-[10px] text-muted-foreground">{shortID(item.tool_call_id)}</span>}
+        {activeItem.tool_call_id && <span className="font-mono text-[10px] text-muted-foreground">{shortID(activeItem.tool_call_id)}</span>}
       </CollapsibleTrigger>
       <CollapsibleContent className="space-y-2 pt-2">
+        {detailLoading && (
+          <div className="rounded-md bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+            Loading tool details...
+          </div>
+        )}
+        {detailError && (
+          <div className="flex flex-wrap items-center gap-2 rounded-md bg-destructive/10 px-3 py-2 text-[11px] text-destructive">
+            <span>{detailError}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-[11px]"
+              onClick={retryDetailLoad}
+            >
+              Retry
+            </Button>
+          </div>
+        )}
         {preview.title && <div className="font-medium text-muted-foreground">{preview.title}</div>}
         {preview.command && (
           <ScrollArea orientation="horizontal" className="rounded-md bg-sidebar/80">
@@ -1469,12 +1550,23 @@ function mergeToolProcessPair(call: DisplayProcessItem, result: ProcessItem): Di
   };
 }
 
+function displayProcessItemFromDetail(detail: MessageProcessItemDetail): DisplayProcessItem {
+  const item: DisplayProcessItem = { ...detail.item };
+  if (!detail.result) {
+    return item;
+  }
+  return mergeToolProcessPair(item, detail.result);
+}
+
 function processItemKey(item: DisplayProcessItem, index: number): string {
   if (item.tool_call_id) {
     return `tool-${item.tool_call_id}`;
   }
   if (item.result?.tool_call_id) {
     return `tool-${item.result.tool_call_id}`;
+  }
+  if (typeof item.process_index === "number") {
+    return `${item.type}-${item.process_index}`;
   }
   return `${item.type}-${index}`;
 }

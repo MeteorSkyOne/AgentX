@@ -98,7 +98,7 @@ func (s *Server) handleListMessages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	writeJSON(w, http.StatusOK, messages)
+	writeJSON(w, http.StatusOK, redactMessagesProcessDetails(messages))
 }
 
 func (s *Server) handleConversationContext(w http.ResponseWriter, r *http.Request) {
@@ -192,7 +192,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, message)
+	writeJSON(w, http.StatusOK, redactMessageProcessDetails(message))
 }
 
 func (s *Server) readSendMessageRequest(w http.ResponseWriter, r *http.Request) (sendMessageRequest, []app.AttachmentUpload, error) {
@@ -335,7 +335,37 @@ func (s *Server) handleUpdateMessage(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, updated)
+	writeJSON(w, http.StatusOK, redactMessageProcessDetails(updated))
+}
+
+func (s *Server) handleMessageProcessItem(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	message, ok, err := s.authorizedMessage(r, userID, chi.URLParam(r, "messageID"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+
+	index, ok := parseProcessIndex(chi.URLParam(r, "index"))
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid process item index")
+		return
+	}
+	detail, ok := messageProcessDetail(message, index)
+	if !ok {
+		writeError(w, http.StatusNotFound, "process item not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
 }
 
 func (s *Server) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {

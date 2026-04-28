@@ -3,8 +3,14 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import type { ConversationAgentContext, Message } from "@/api/types";
+import type { ConversationAgentContext, Message, ProcessItem } from "@/api/types";
 import type { WorkspacePathTarget } from "@/lib/workspacePaths";
+import { fetchMessageProcessItem } from "../api/client";
+
+vi.mock("../api/client", () => ({
+  fetchAttachmentBlob: vi.fn(),
+  fetchMessageProcessItem: vi.fn(),
+}));
 
 vi.mock("./MarkdownRenderer", async () => {
   const React = await import("react");
@@ -66,6 +72,7 @@ beforeAll(() => {
 });
 
 afterEach(() => {
+  vi.clearAllMocks();
   for (const { root, container } of mountedRoots.splice(0)) {
     act(() => root.unmount());
     container.remove();
@@ -137,6 +144,106 @@ describe("MessagePane workspace links", () => {
   });
 });
 
+describe("MessagePane process details", () => {
+  it("loads persisted tool details only when a tool row is opened", async () => {
+    const fetchProcess = vi.mocked(fetchMessageProcessItem);
+    fetchProcess.mockResolvedValueOnce({
+      item: {
+        type: "tool_call",
+        tool_name: "Bash",
+        tool_call_id: "call_1",
+        input: { command: "pnpm test" },
+        raw: { type: "tool_use" },
+      },
+      result: {
+        type: "tool_result",
+        tool_call_id: "call_1",
+        output: "tests passed",
+        raw: { type: "tool_result" },
+      },
+    });
+
+    const { container } = await renderMessagePane({
+      messages: [
+        message({
+          id: "msg-bot",
+          sender_type: "bot",
+          sender_id: "bot-1",
+          metadata: {
+            process: [
+              {
+                type: "tool_call",
+                tool_name: "Bash",
+                tool_call_id: "call_1",
+                process_index: 0,
+                has_detail: true,
+              },
+              {
+                type: "tool_result",
+                tool_call_id: "call_1",
+                status: "completed",
+                process_index: 1,
+                has_detail: true,
+              },
+            ],
+          },
+        }),
+      ],
+      streaming: [],
+      onOpenWorkspacePath: () => undefined,
+    });
+
+    expect(container.textContent).not.toContain("pnpm test");
+    expect(fetchProcess).not.toHaveBeenCalled();
+
+    click(buttonWithText(container, "Process"));
+    await clickAsync(buttonWithText(container, "Tool"));
+
+    expect(fetchProcess).toHaveBeenCalledTimes(1);
+    expect(fetchProcess).toHaveBeenCalledWith("msg-bot", 0);
+    expect(container.textContent).toContain("pnpm test");
+    expect(container.textContent).toContain("tests passed");
+
+    click(buttonWithText(container, "Tool"));
+    await clickAsync(buttonWithText(container, "Tool"));
+    expect(fetchProcess).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses streaming tool details without lazy requests", async () => {
+    const fetchProcess = vi.mocked(fetchMessageProcessItem);
+    const { container } = await renderMessagePane({
+      messages: [],
+      streaming: [
+        {
+          runID: "run-1",
+          agentID: "agent-1",
+          text: "working",
+          process: [
+            {
+              type: "tool_call",
+              tool_name: "Bash",
+              tool_call_id: "call_1",
+              input: { command: "go test ./..." },
+            },
+            {
+              type: "tool_result",
+              tool_call_id: "call_1",
+              output: "ok",
+            },
+          ],
+        },
+      ],
+      onOpenWorkspacePath: () => undefined,
+    });
+
+    click(buttonWithText(container, "Tool"));
+
+    expect(fetchProcess).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("go test ./...");
+    expect(container.textContent).toContain("ok");
+  });
+});
+
 describe("isTextAttachmentPreviewSupported", () => {
   it("previews text attachments in the readonly editor", () => {
     expect(
@@ -202,6 +309,7 @@ async function renderMessagePane({
     agentID?: string;
     text: string;
     error?: string;
+    process?: ProcessItem[];
   }>;
   onOpenWorkspacePath: (target: WorkspacePathTarget) => void;
 }): Promise<{ container: HTMLDivElement }> {
@@ -248,6 +356,21 @@ function click(element: HTMLElement) {
   act(() => {
     element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
   });
+}
+
+async function clickAsync(element: HTMLElement) {
+  await act(async () => {
+    element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await Promise.resolve();
+  });
+}
+
+function buttonWithText(container: HTMLElement, text: string): HTMLButtonElement {
+  const button = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((item) =>
+    item.textContent?.includes(text)
+  );
+  expect(button).toBeTruthy();
+  return button!;
 }
 
 function message(overrides: Partial<Message> = {}): Message {
