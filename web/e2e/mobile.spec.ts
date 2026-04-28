@@ -95,6 +95,29 @@ test("mobile navigation, messaging, and side panels are usable", async ({ page }
   await expectNoHorizontalOverflow(page);
 });
 
+test("mobile messages can be copied", async ({ page, context }, testInfo) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await signInMobile(page);
+
+  const messageKey = uniqueName(testInfo, "copy markdown");
+  const messageText = [
+    messageKey,
+    "",
+    "Keep **raw markdown** when copied.",
+  ].join("\n");
+
+  const composer = page.getByRole("textbox", { name: "Message" });
+  await composer.fill(messageText);
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const messages = page.getByLabel("Messages");
+  const row = messages.locator("[data-message-id]").filter({ hasText: "You" }).filter({ hasText: messageKey }).last();
+  await expect(row.getByTestId("message-body")).toBeVisible();
+  await row.getByRole("button", { name: "Copy message" }).click();
+  await expect(row.getByRole("button", { name: "Message copied" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(messageText);
+});
+
 test("mobile messages keep wide markdown content accessible", async ({ page }) => {
   await signInMobile(page);
 

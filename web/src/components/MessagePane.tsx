@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  Copy,
   MessageSquare,
   Pencil,
   Reply,
@@ -216,6 +217,35 @@ function MarkdownFallback({ text }: { text: string }) {
   return <p className="whitespace-pre-wrap">{text}</p>;
 }
 
+async function copyTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Fall back for browsers or test environments that block async clipboard writes.
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-9999px";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  try {
+    if (!document.execCommand("copy")) {
+      throw new Error("Copy message failed");
+    }
+  } finally {
+    textarea.remove();
+  }
+}
+
 interface MessageItemProps {
   message: Message;
   agentName?: string;
@@ -253,7 +283,9 @@ function ConversationMessageItem({
   const [editing, setEditing] = useState(false);
   const [draftBody, setDraftBody] = useState(message.body);
   const [pending, setPending] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const copyTimerRef = useRef<number | null>(null);
   const isBot = message.sender_type === "bot";
   const isSystem = message.sender_type === "system";
   const label = isBot ? agentName ?? "Agent" : isSystem ? "System" : "You";
@@ -265,7 +297,31 @@ function ConversationMessageItem({
     if (!editing) {
       setDraftBody(message.body);
     }
+    setCopied(false);
   }, [editing, message.body, message.id]);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
+
+  async function copyMessage() {
+    setError(null);
+    try {
+      await copyTextToClipboard(message.body);
+      setCopied(true);
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => setCopied(false), 1500);
+    } catch (err) {
+      setCopied(false);
+      setError(err instanceof Error ? err.message : "Copy message failed");
+    }
+  }
 
   async function save() {
     const body = draftBody.trim();
@@ -331,6 +387,21 @@ function ConversationMessageItem({
                 onClick={() => onReplyMessage(message)}
               >
                 <Reply className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                title={copied ? "Copied" : "Copy message"}
+                aria-label={copied ? "Message copied" : "Copy message"}
+                disabled={pending}
+                onClick={copyMessage}
+              >
+                {copied ? (
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
               </Button>
               <Button
                 variant="ghost"
