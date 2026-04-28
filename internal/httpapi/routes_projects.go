@@ -7,8 +7,9 @@ import (
 	"github.com/meteorsky/agentx/internal/app"
 )
 
-type namedRequest struct {
-	Name string `json:"name"`
+type projectCreateRequest struct {
+	Name          string `json:"name"`
+	WorkspacePath string `json:"workspace_path"`
 }
 
 type projectUpdateRequest struct {
@@ -52,12 +53,15 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "organization not found")
 		return
 	}
-	var req namedRequest
+	var req projectCreateRequest
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "malformed JSON")
 		return
 	}
-	project, err := s.app.CreateProject(r.Context(), userID, orgID, req.Name)
+	project, err := s.app.CreateProject(r.Context(), userID, orgID, app.ProjectCreateRequest{
+		Name:          req.Name,
+		WorkspacePath: req.WorkspacePath,
+	})
 	if err != nil {
 		writeAppError(w, err)
 		return

@@ -165,6 +165,9 @@ export function Shell({
       : false
   );
   const [projectName, setProjectName] = useState("");
+  const [projectWorkspacePath, setProjectWorkspacePath] = useState("");
+  const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
+  const [projectCreatePending, setProjectCreatePending] = useState(false);
   const [projectDraftOpen, setProjectDraftOpen] = useState(false);
   const [projectEditOpen, setProjectEditOpen] = useState(false);
   const [projectEditName, setProjectEditName] = useState("");
@@ -355,10 +358,23 @@ export function Shell({
   async function submitProject() {
     const name = projectName.trim();
     if (!name) return;
-    const created = await onCreateProject(name);
-    setProjectName("");
-    setProjectDraftOpen(false);
-    onSelectProject(created.id);
+    const workspacePath = projectWorkspacePath.trim();
+    setProjectCreateError(null);
+    setProjectCreatePending(true);
+    try {
+      const created = await onCreateProject({
+        name,
+        ...(workspacePath ? { workspace_path: workspacePath } : {}),
+      });
+      setProjectName("");
+      setProjectWorkspacePath("");
+      setProjectDraftOpen(false);
+      onSelectProject(created.id);
+    } catch (err) {
+      setProjectCreateError(err instanceof Error ? err.message : "Create project failed");
+    } finally {
+      setProjectCreatePending(false);
+    }
   }
 
   async function submitProjectEdit() {
@@ -419,6 +435,7 @@ export function Shell({
 
   function openCreateProject() {
     blurActiveElement();
+    setProjectCreateError(null);
     setProjectDraftOpen(true);
   }
 
@@ -2027,7 +2044,13 @@ export function Shell({
       </Dialog>
 
       {/* Create Project Modal */}
-      <Dialog open={projectDraftOpen} onOpenChange={setProjectDraftOpen}>
+      <Dialog
+        open={projectDraftOpen}
+        onOpenChange={(open) => {
+          setProjectDraftOpen(open);
+          if (!open) setProjectCreateError(null);
+        }}
+      >
         <DialogContent onOpenAutoFocus={(event) => event.preventDefault()}>
           <DialogHeader>
             <DialogTitle>Create project</DialogTitle>
@@ -2042,13 +2065,33 @@ export function Shell({
                 onChange={(e) => setProjectName(e.target.value)}
                 placeholder="My Project"
                 aria-label="Project name"
-                onKeyDown={(e) => { if (e.key === "Enter") submitProject(); }}
+                onKeyDown={(e) => { if (e.key === "Enter") void submitProject(); }}
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="project-workspace">Workspace path</Label>
+              <Input
+                id="project-workspace"
+                value={projectWorkspacePath}
+                onChange={(e) => setProjectWorkspacePath(e.target.value)}
+                placeholder="Default workspace"
+                aria-label="Workspace path"
+                onKeyDown={(e) => { if (e.key === "Enter") void submitProject(); }}
+              />
+            </div>
+            {projectCreateError && <p className="text-sm text-destructive">{projectCreateError}</p>}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setProjectDraftOpen(false)}>Cancel</Button>
-            <Button onClick={submitProject} disabled={!projectName.trim()}>Save</Button>
+            <Button
+              variant="outline"
+              onClick={() => setProjectDraftOpen(false)}
+              disabled={projectCreatePending}
+            >
+              Cancel
+            </Button>
+            <Button onClick={submitProject} disabled={!projectName.trim() || projectCreatePending}>
+              Save
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

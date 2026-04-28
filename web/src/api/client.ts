@@ -190,10 +190,13 @@ export function projects(orgID: string): Promise<Project[]> {
   return request<Project[]>(`/api/organizations/${encodeURIComponent(orgID)}/projects`);
 }
 
-export function createProject(orgID: string, name: string): Promise<Project> {
+export function createProject(
+  orgID: string,
+  payload: { name: string; workspace_path?: string }
+): Promise<Project> {
   return request<Project>(`/api/organizations/${encodeURIComponent(orgID)}/projects`, {
     method: "POST",
-    body: JSON.stringify({ name })
+    body: JSON.stringify(payload)
   });
 }
 

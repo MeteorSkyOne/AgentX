@@ -648,6 +648,20 @@ func TestHTTPWorkspaceMetadataAndProjectWorkspacePathUpdate(t *testing.T) {
 		t.Fatalf("workspace = %#v, want project workspace %#v", workspace, bootstrap.ProjectWorkspace)
 	}
 
+	customPath := filepath.Join(t.TempDir(), "custom-project")
+	var created domain.Project
+	postJSON(t, ts.URL+"/api/organizations/"+bootstrap.Organization.ID+"/projects", bootstrap.SessionToken, map[string]string{
+		"name":           "Custom Workspace Project",
+		"workspace_path": customPath,
+	}, http.StatusOK, &created)
+	getJSON(t, ts.URL+"/api/workspaces/"+created.WorkspaceID, bootstrap.SessionToken, http.StatusOK, &workspace)
+	if workspace.Path != customPath {
+		t.Fatalf("created workspace path = %q, want %q", workspace.Path, customPath)
+	}
+	if info, err := os.Stat(customPath); err != nil || !info.IsDir() {
+		t.Fatalf("created workspace dir stat = %#v, %v; want directory", info, err)
+	}
+
 	nextPath := bootstrap.ProjectWorkspace.Path + "-next"
 	var project domain.Project
 	patchJSON(t, ts.URL+"/api/projects/"+bootstrap.Project.ID, bootstrap.SessionToken, map[string]string{

@@ -576,8 +576,8 @@ export default function App() {
     }
   }
 
-  async function handleCreateProject(name: string): Promise<Project> {
-    const created = await createProject(selectedOrganizationID as string, name);
+  async function handleCreateProject(payload: { name: string; workspace_path?: string }): Promise<Project> {
+    const created = await createProject(selectedOrganizationID as string, payload);
     await queryClient.invalidateQueries({ queryKey: ["projects", selectedOrganizationID] });
     return created;
   }

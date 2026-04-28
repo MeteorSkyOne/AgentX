@@ -74,7 +74,7 @@ export interface ShellProps {
   preferencesLoading: boolean;
   theme: ThemeMode;
   onSelectProject: (projectID: string) => void;
-  onCreateProject: (name: string) => Promise<Project>;
+  onCreateProject: (payload: { name: string; workspace_path?: string }) => Promise<Project>;
   onUpdateProject: (
     projectID: string,
     payload: { name?: string; workspace_path?: string }

@@ -31,25 +31,35 @@ func (a *App) ListProjects(ctx context.Context, orgID string) ([]domain.Project,
 	return a.store.Projects().ListByOrganization(ctx, orgID)
 }
 
-func (a *App) CreateProject(ctx context.Context, userID string, orgID string, name string) (domain.Project, error) {
-	name = strings.TrimSpace(name)
+type ProjectCreateRequest struct {
+	Name          string
+	WorkspacePath string
+}
+
+func (a *App) CreateProject(ctx context.Context, userID string, orgID string, req ProjectCreateRequest) (domain.Project, error) {
+	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		return domain.Project{}, ErrInvalidInput
 	}
 
 	now := time.Now().UTC()
+	projectID := id.New("prj")
+	workspacePath := strings.TrimSpace(req.WorkspacePath)
+	if workspacePath == "" {
+		workspacePath = filepath.Join(a.opts.DataDir, "projects", projectID)
+	}
 	workspace := domain.Workspace{
 		ID:             id.New("wks"),
 		OrganizationID: orgID,
 		Type:           "project",
 		Name:           name + " Workspace",
-		Path:           filepath.Join(a.opts.DataDir, "projects", id.New("prjdir")),
+		Path:           workspacePath,
 		CreatedBy:      userID,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
 	project := domain.Project{
-		ID:             id.New("prj"),
+		ID:             projectID,
 		OrganizationID: orgID,
 		Name:           name,
 		WorkspaceID:    workspace.ID,
@@ -57,7 +67,6 @@ func (a *App) CreateProject(ctx context.Context, userID string, orgID string, na
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	workspace.Path = filepath.Join(a.opts.DataDir, "projects", project.ID)
 
 	err := a.store.Tx(ctx, func(tx store.Tx) error {
 		if err := tx.Workspaces().Create(ctx, workspace); err != nil {
