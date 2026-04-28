@@ -1,5 +1,6 @@
 import type { Agent, Channel, ConversationAgentContext, Thread, Workspace } from "../../api/types";
 import type { BrowserNotificationPermission } from "../../notifications/browser";
+import type { SocketConnectionStatus } from "../../ws/useConversationSocket";
 
 export const AGENT_EFFORT_OPTIONS = ["low", "medium", "high", "xhigh"] as const;
 
@@ -63,6 +64,24 @@ export function browserPermissionLabel(permission: BrowserNotificationPermission
       return "Unsupported";
     default:
       return "Not enabled";
+  }
+}
+
+export function conversationActivityLabel(
+  connectionStatus: SocketConnectionStatus,
+  hasStreamingMessages: boolean
+): string {
+  switch (connectionStatus) {
+    case "connected":
+      return hasStreamingMessages ? "running" : "ready";
+    case "connecting":
+      return "connecting";
+    case "reconnecting":
+      return "reconnecting";
+    case "disconnected":
+      return "offline";
+    case "idle":
+      return "offline";
   }
 }
 

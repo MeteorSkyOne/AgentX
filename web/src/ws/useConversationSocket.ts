@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getToken } from "../api/client";
 import type { ConversationType } from "../api/types";
 import type { AgentXEvent, SocketEvent } from "./events";
@@ -8,14 +8,27 @@ const maxReconnectAttempts = 5;
 const baseReconnectDelayMS = 300;
 const maxReconnectDelayMS = 5000;
 
+export type SocketConnectionStatus =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "disconnected";
+
+interface ConversationSocketState {
+  connectionStatus: SocketConnectionStatus;
+  loadOlderMessages: (before: string) => boolean;
+}
+
 export function useConversationSocket(
   organizationID: string | undefined,
   conversationType: ConversationType | undefined,
   conversationID: string | undefined,
   onEvent: (event: AgentXEvent) => void
-): (before: string) => boolean {
+): ConversationSocketState {
   const onEventRef = useRef(onEvent);
   const socketRef = useRef<WebSocket | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<SocketConnectionStatus>("idle");
   const token = getToken();
 
   useEffect(() => {
@@ -24,6 +37,7 @@ export function useConversationSocket(
 
   useEffect(() => {
     if (!organizationID || !conversationType || !conversationID || !token) {
+      setConnectionStatus("idle");
       return;
     }
 
@@ -40,10 +54,16 @@ export function useConversationSocket(
         return;
       }
 
+      setConnectionStatus(reconnectAttempts > 0 ? "reconnecting" : "connecting");
       const activeSocket = new WebSocket(url);
       socketRef.current = activeSocket;
 
       activeSocket.addEventListener("open", () => {
+        if (stopped || socketRef.current !== activeSocket) {
+          return;
+        }
+        reconnectAttempts = 0;
+        setConnectionStatus("connected");
         activeSocket.send(
           JSON.stringify({
             type: "subscribe",
@@ -55,6 +75,9 @@ export function useConversationSocket(
       });
 
       activeSocket.addEventListener("message", (message) => {
+        if (socketRef.current !== activeSocket) {
+          return;
+        }
         try {
           const event = JSON.parse(message.data as string) as SocketEvent;
           if (isAgentXEvent(event)) {
@@ -65,15 +88,27 @@ export function useConversationSocket(
         }
       });
 
-      activeSocket.addEventListener("close", scheduleReconnect);
+      activeSocket.addEventListener("close", () => {
+        if (socketRef.current !== activeSocket) {
+          return;
+        }
+        scheduleReconnect();
+      });
       activeSocket.addEventListener("error", () => {
+        if (socketRef.current !== activeSocket) {
+          return;
+        }
         scheduleReconnect();
         activeSocket.close();
       });
     }
 
     function scheduleReconnect() {
-      if (stopped || reconnectTimer || reconnectAttempts >= maxReconnectAttempts) {
+      if (stopped || reconnectTimer) {
+        return;
+      }
+      if (reconnectAttempts >= maxReconnectAttempts) {
+        setConnectionStatus("disconnected");
         return;
       }
 
@@ -82,6 +117,7 @@ export function useConversationSocket(
         maxReconnectDelayMS
       );
       reconnectAttempts += 1;
+      setConnectionStatus("reconnecting");
       reconnectTimer = setTimeout(() => {
         reconnectTimer = undefined;
         connect();
@@ -97,10 +133,11 @@ export function useConversationSocket(
       }
       socketRef.current?.close();
       socketRef.current = null;
+      setConnectionStatus("idle");
     };
   }, [organizationID, conversationType, conversationID, token]);
 
-  return useCallback(
+  const loadOlderMessages = useCallback(
     (before: string): boolean => {
       if (!organizationID || !conversationType || !conversationID) {
         return false;
@@ -122,4 +159,6 @@ export function useConversationSocket(
     },
     [organizationID, conversationType, conversationID]
   );
+
+  return { connectionStatus, loadOlderMessages };
 }

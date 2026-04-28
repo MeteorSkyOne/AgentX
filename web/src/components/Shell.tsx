@@ -79,6 +79,7 @@ import {
   agentToneColor,
   blurActiveElement,
   browserPermissionLabel,
+  conversationActivityLabel,
   conversationSubtitle,
   conversationTitle,
   getProjectAvatar,
@@ -106,6 +107,7 @@ export function Shell({
   olderMessagesLoading,
   hasOlderMessages,
   streaming,
+  connectionStatus,
   notificationSettings,
   notificationSettingsLoading,
   preferences,
@@ -614,6 +616,7 @@ export function Shell({
   const subtitle = conversationSubtitle(selectedChannel, activeThread, boundAgents.length);
   const headerTitle = mainView === "metrics" ? "Metrics" : title;
   const headerSubtitle = mainView === "metrics" ? project?.name ?? "No project" : subtitle;
+  const activityLabel = conversationActivityLabel(connectionStatus, streaming.length > 0);
   const composerConversation =
     activeConversation && selectedChannel?.type === "text"
       ? { type: activeConversation.type, id: activeConversation.id, label: `#${selectedChannel.name}` }
@@ -711,7 +714,7 @@ export function Shell({
             {activeConversation && (
               <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
                 <Activity className="h-3.5 w-3.5 shrink-0" />
-                {streaming.length > 0 ? "running" : "ready"}
+                {activityLabel}
               </span>
             )}
             <div className="ml-auto flex items-center gap-1">
@@ -1295,7 +1298,7 @@ export function Shell({
                 {activeConversation && (
                   <span className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Activity className="h-3.5 w-3.5" />
-                    {streaming.length > 0 ? "running" : "ready"}
+                    {activityLabel}
                   </span>
                 )}
                 <Button

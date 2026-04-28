@@ -17,6 +17,7 @@ import type {
   WorkspaceTreeEntry,
 } from "../../api/types";
 import type { ThemeMode } from "../../theme";
+import type { SocketConnectionStatus } from "../../ws/useConversationSocket";
 
 export interface ActiveConversation {
   type: ConversationType;
@@ -59,6 +60,7 @@ export interface ShellProps {
   olderMessagesLoading: boolean;
   hasOlderMessages: boolean;
   streaming: StreamingMessage[];
+  connectionStatus: SocketConnectionStatus;
   notificationSettings?: NotificationSettings;
   notificationSettingsLoading: boolean;
   preferences: UserPreferences;

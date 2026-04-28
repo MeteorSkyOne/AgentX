@@ -419,7 +419,10 @@ export default function App() {
     ]
   );
 
-  const requestOlderMessages = useConversationSocket(
+  const {
+    connectionStatus,
+    loadOlderMessages: requestOlderMessages,
+  } = useConversationSocket(
     selectedOrganizationID,
     activeConversation?.type,
     activeConversation?.id,
@@ -776,6 +779,7 @@ export default function App() {
       olderMessagesLoading={olderMessagesLoading}
       hasOlderMessages={messageHistoryHasMore}
       streaming={Object.values(streamingByRunID)}
+      connectionStatus={connectionStatus}
       notificationSettings={notificationSettingsQuery.data}
       notificationSettingsLoading={notificationSettingsQuery.isLoading}
       preferences={userPreferencesQuery.data ?? { show_ttft: true, show_tps: true }}
