@@ -4,6 +4,7 @@ import { MessagePane } from "../MessagePane";
 import type { Channel, ConversationAgentContext, Message, Thread, UserPreferences } from "../../api/types";
 import type { ComposerConversation, ShellProps, StreamingMessage } from "./types";
 import type { ThemeMode } from "../../theme";
+import type { WorkspacePathTarget } from "@/lib/workspacePaths";
 import { ThreadForum } from "./ThreadForum";
 
 export function ConversationPanel({
@@ -27,6 +28,8 @@ export function ConversationPanel({
   onDeleteMessage,
   onLoadOlderMessages,
   onMessageSent,
+  workspacePath,
+  onOpenWorkspacePath,
 }: {
   selectedChannel?: Channel;
   activeThread?: Thread;
@@ -48,6 +51,8 @@ export function ConversationPanel({
   onDeleteMessage: ShellProps["onDeleteMessage"];
   onLoadOlderMessages: ShellProps["onLoadOlderMessages"];
   onMessageSent: ShellProps["onMessageSent"];
+  workspacePath?: string;
+  onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
 }) {
   const [replyTargetState, setReplyTargetState] = useState<{
     conversationKey: string;
@@ -116,6 +121,8 @@ export function ConversationPanel({
         onDeleteMessage={onDeleteMessage}
         onLoadOlder={onLoadOlderMessages}
         onReplyMessage={selectReplyTarget}
+        workspacePath={workspacePath}
+        onOpenWorkspacePath={onOpenWorkspacePath}
       />
       <Composer
         conversation={composerConversation}

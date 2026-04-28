@@ -1,5 +1,6 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import {
+  expectMonacoEditorPosition,
   expectMonacoEditorText,
   firstProject,
   readWorkspaceFile,
@@ -253,6 +254,47 @@ test("mobile project files navigates tree editor and back to chat", async ({ pag
   await page.getByRole("button", { name: "Back to chat" }).click();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Navigation" })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+});
+
+test("mobile message file links open the project editor directly", async ({ page }) => {
+  await signInMobile(page);
+  const project = await firstProject(page);
+  const filePath = "docs/mobile-link.ts";
+  await writeWorkspaceFile(
+    page,
+    project.workspace_id,
+    filePath,
+    [
+      "mobile line one",
+      "mobile line two",
+      "let selectedColumn = 5;",
+      "mobile line four",
+    ].join("\n")
+  );
+
+  const targetLabel = `${filePath}:3:5`;
+  await page.getByRole("textbox", { name: "Message" }).fill(`Open ${targetLabel}.`);
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const messages = page.getByLabel("Messages");
+  const messageRow = messages
+    .locator("[data-message-id]")
+    .filter({ hasText: "You" })
+    .filter({ hasText: targetLabel })
+    .last();
+  await expect(messageRow).toBeVisible();
+  await messageRow.getByRole("button", { name: `Open ${targetLabel}` }).click();
+
+  await expect(page.getByRole("button", { name: "Navigation" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Back to files" })).toBeVisible();
+  await expect(page.getByRole("tree", { name: "Project files" })).toHaveCount(0);
+
+  const editor = page.getByTestId("project-file-editor-pane");
+  await expect(editor).toBeVisible();
+  await expect(editor.getByText(filePath)).toBeVisible();
+  await expectMonacoEditorText(editor, "let selectedColumn = 5;");
+  await expectMonacoEditorPosition(page, editor, { lineNumber: 3, column: 5 });
   await expectNoHorizontalOverflow(page);
 });
 

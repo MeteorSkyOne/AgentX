@@ -5,6 +5,7 @@ import {
   e2ePassword,
   e2eSetupToken,
   e2eUsername,
+  expectMonacoEditorPosition,
   expectMonacoEditorText,
   firstEnabledAgent,
   firstProject,
@@ -315,6 +316,91 @@ test("desktop project files opens project editor and persists changes", async ({
   await page.getByRole("button", { name: "Project files" }).click();
   await expect(page.getByRole("button", { name: "Create channel" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+});
+
+test("desktop message file links open project files at the requested position", async ({ page }, testInfo) => {
+  await signIn(page);
+  const project = await firstProject(page);
+  const channel = await createChannelViaAPI(page, testInfo, { prefix: "file links" });
+  const filePath = "web/src/App.tsx";
+  await writeWorkspaceFile(
+    page,
+    project.workspace_id,
+    filePath,
+    [
+      "line one",
+      "line two",
+      "line three",
+      "const selectedColumn = 7;",
+      "line five",
+    ].join("\n")
+  );
+
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+  await page.getByRole("button", { name: channel.name, exact: true }).click();
+
+  const targetLabel = `${filePath}:4:7`;
+  await page.getByRole("textbox", { name: "Message" }).fill(`Please inspect ${targetLabel}.`);
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const messages = page.getByLabel("Messages");
+  const messageRow = messages
+    .locator("[data-message-id]")
+    .filter({ hasText: "You" })
+    .filter({ hasText: targetLabel })
+    .last();
+  await expect(messageRow).toBeVisible();
+  await messageRow.getByRole("button", { name: `Open ${targetLabel}` }).click();
+
+  const projectTree = page.getByRole("tree", { name: "Project files" });
+  await expect(projectTree).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Message" })).toHaveCount(0);
+
+  const editor = page.getByTestId("project-file-editor-pane");
+  await expect(editor).toBeVisible();
+  await expect(editor.getByText(filePath)).toBeVisible();
+  await expectMonacoEditorText(editor, "const selectedColumn = 7;");
+  await expectMonacoEditorPosition(page, editor, { lineNumber: 4, column: 7 });
+});
+
+test("desktop missing message file links show a prominent editor error", async ({ page }, testInfo) => {
+  await signIn(page);
+  const project = await firstProject(page);
+  const channel = await createChannelViaAPI(page, testInfo, { prefix: "missing file links" });
+  await writeWorkspaceFile(page, project.workspace_id, "src/existing.ts", "const oldContent = true;");
+
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+  await page.getByRole("button", { name: "Project files" }).click();
+  const editor = page.getByTestId("project-file-editor-pane");
+  await editor.getByLabel("File path").fill("src/existing.ts");
+  await editor.getByRole("button", { name: "Open" }).click();
+  await expectMonacoEditorText(editor, "const oldContent = true;");
+  await page.getByRole("button", { name: "Project files" }).click();
+
+  await page.getByRole("button", { name: channel.name, exact: true }).click();
+  const missingLabel = "src/not-found.ts:7:2";
+  await page.getByRole("textbox", { name: "Message" }).fill(`Please inspect ${missingLabel}.`);
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const messages = page.getByLabel("Messages");
+  const messageRow = messages
+    .locator("[data-message-id]")
+    .filter({ hasText: "You" })
+    .filter({ hasText: missingLabel })
+    .last();
+  await expect(messageRow).toBeVisible();
+  await messageRow.getByRole("button", { name: `Open ${missingLabel}` }).click();
+
+  await expect(editor).toBeVisible();
+  const loadError = editor.getByTestId("workspace-file-load-error");
+  await expect(loadError).toBeVisible();
+  await expect(loadError.getByText("File not found", { exact: true })).toBeVisible();
+  await expect(loadError.getByText("src/not-found.ts", { exact: true })).toBeVisible();
+  await expect(loadError.getByText("file not found", { exact: true })).toBeVisible();
+  await expect(loadError.getByRole("button", { name: "Retry" })).toBeVisible();
+  await expect(editor.getByText("const oldContent = true;")).toHaveCount(0);
 });
 
 test("agent files tab remains scoped to the agent workspace", async ({ page }) => {

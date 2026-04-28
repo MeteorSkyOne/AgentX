@@ -31,6 +31,15 @@ export interface WorkspaceFileBrowserActions {
   onDeleteFile: (workspaceID: string, path: string) => Promise<void>;
 }
 
+export interface WorkspaceFilePosition {
+  lineNumber: number;
+  column?: number;
+}
+
+export interface WorkspaceFileOpenOptions {
+  position?: WorkspaceFilePosition;
+}
+
 interface WorkspaceFileBrowserProps extends WorkspaceFileBrowserActions {
   workspaceID?: string;
   workspacePath?: string;
@@ -47,15 +56,18 @@ export interface WorkspaceFileBrowserController {
   workspaceTreeLoading: boolean;
   workspaceTreeError: string | null;
   fileLoading: boolean;
+  fileLoadError: string | null;
   fileSaving: boolean;
   fileDeleting: boolean;
   workspaceStatus: string | null;
+  fileOpenPosition?: WorkspaceFilePosition;
+  fileOpenRequestID: number;
   trimmedPath: string;
   canUseWorkspace: boolean;
   setFilePath: (path: string) => void;
   setFileBody: (body: string) => void;
   loadTree: (options?: { quiet?: boolean }) => Promise<void>;
-  loadFile: (path?: string) => Promise<void>;
+  loadFile: (path?: string, options?: WorkspaceFileOpenOptions) => Promise<void>;
   saveFile: () => Promise<void>;
   deleteFile: () => Promise<void>;
 }
@@ -75,9 +87,12 @@ export function useWorkspaceFileBrowser({
   const [workspaceTreeLoading, setWorkspaceTreeLoading] = useState(false);
   const [workspaceTreeError, setWorkspaceTreeError] = useState<string | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
+  const [fileLoadError, setFileLoadError] = useState<string | null>(null);
   const [fileSaving, setFileSaving] = useState(false);
   const [fileDeleting, setFileDeleting] = useState(false);
   const [workspaceStatus, setWorkspaceStatus] = useState<string | null>(null);
+  const [fileOpenPosition, setFileOpenPosition] = useState<WorkspaceFilePosition>();
+  const [fileOpenRequestID, setFileOpenRequestID] = useState(0);
   const workspaceTreeRequestRef = useRef(0);
   const fileRequestRef = useRef(0);
 
@@ -110,20 +125,27 @@ export function useWorkspaceFileBrowser({
   );
 
   const loadFile = useCallback(
-    async (path = filePath) => {
+    async (path = filePath, options: WorkspaceFileOpenOptions = {}) => {
       const targetPath = path.trim();
       if (!workspaceID || !targetPath) return;
       const requestID = ++fileRequestRef.current;
       setFileLoading(true);
+      setFileLoadError(null);
       setFilePath(targetPath);
+      setFileOpenPosition(normalizeWorkspaceFilePosition(options.position));
+      setFileOpenRequestID(requestID);
       try {
         const body = await onReadFile(workspaceID, targetPath);
         if (fileRequestRef.current !== requestID) return;
         setFileBody(body);
+        setFileLoadError(null);
         setWorkspaceStatus("Loaded");
       } catch (err) {
         if (fileRequestRef.current !== requestID) return;
-        setWorkspaceStatus(err instanceof Error ? err.message : "Load failed");
+        const message = err instanceof Error ? err.message : "Load failed";
+        setFileBody("");
+        setFileLoadError(message);
+        setWorkspaceStatus(message);
       } finally {
         if (fileRequestRef.current === requestID) {
           setFileLoading(false);
@@ -140,6 +162,7 @@ export function useWorkspaceFileBrowser({
     try {
       await onWriteFile(workspaceID, targetPath, fileBody);
       setFilePath(targetPath);
+      setFileLoadError(null);
       setWorkspaceStatus("Saved");
       await loadTree({ quiet: true });
     } catch (err) {
@@ -156,6 +179,7 @@ export function useWorkspaceFileBrowser({
     try {
       await onDeleteFile(workspaceID, targetPath);
       setFileBody("");
+      setFileLoadError(null);
       setWorkspaceStatus("Deleted");
       await loadTree({ quiet: true });
     } catch (err) {
@@ -172,10 +196,13 @@ export function useWorkspaceFileBrowser({
     setFilePath(initialPath);
     setFileBody("");
     setWorkspaceTreeError(null);
+    setFileLoadError(null);
     setWorkspaceTreeLoading(false);
     setFileLoading(false);
     setFileSaving(false);
     setFileDeleting(false);
+    setFileOpenPosition(undefined);
+    setFileOpenRequestID(0);
     setWorkspaceStatus(null);
   }, [initialPath, workspaceID]);
 
@@ -194,9 +221,12 @@ export function useWorkspaceFileBrowser({
     workspaceTreeLoading,
     workspaceTreeError,
     fileLoading,
+    fileLoadError,
     fileSaving,
     fileDeleting,
     workspaceStatus,
+    fileOpenPosition,
+    fileOpenRequestID,
     trimmedPath,
     canUseWorkspace,
     setFilePath,
@@ -205,6 +235,16 @@ export function useWorkspaceFileBrowser({
     loadFile,
     saveFile,
     deleteFile,
+  };
+}
+
+function normalizeWorkspaceFilePosition(
+  position?: WorkspaceFilePosition
+): WorkspaceFilePosition | undefined {
+  if (!position || position.lineNumber < 1) return undefined;
+  return {
+    lineNumber: position.lineNumber,
+    column: position.column && position.column > 0 ? position.column : 1,
   };
 }
 

@@ -36,6 +36,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import type { ThemeMode } from "@/theme";
+import type { WorkspacePathTarget } from "@/lib/workspacePaths";
 import type { WorkspaceFileBrowserController } from "./WorkspaceFileBrowser";
 import { AgentAvatar, agentKindColor } from "./AgentAvatar";
 import { messageMetricsParts } from "./messageMetrics";
@@ -72,6 +73,8 @@ interface MessagePaneProps {
   onDeleteMessage: (message: Message) => Promise<void>;
   onReplyMessage: (message: Message) => void;
   onLoadOlder: () => boolean;
+  workspacePath?: string;
+  onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
 }
 
 type DisplayProcessItem = ProcessItem & {
@@ -91,6 +94,8 @@ export function MessagePane({
   onDeleteMessage,
   onReplyMessage,
   onLoadOlder,
+  workspacePath,
+  onOpenWorkspacePath,
 }: MessagePaneProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -197,6 +202,8 @@ export function MessagePane({
                 onReplyMessage={onReplyMessage}
                 onJumpToReplyMessage={jumpToMessage}
                 theme={theme}
+                workspacePath={workspacePath}
+                onOpenWorkspacePath={onOpenWorkspacePath}
               />
             );
           })}
@@ -209,6 +216,8 @@ export function MessagePane({
                 agentName={agent?.name}
                 agentKind={agent?.kind}
                 agentID={agent?.id}
+                workspacePath={workspacePath}
+                onOpenWorkspacePath={onOpenWorkspacePath}
               />
             );
           })}
@@ -226,10 +235,22 @@ function cssEscape(value: string): string {
   return value.replace(/"/g, '\\"');
 }
 
-function MessageMarkdown({ text }: { text: string }) {
+function MessageMarkdown({
+  text,
+  workspacePath,
+  onOpenWorkspacePath,
+}: {
+  text: string;
+  workspacePath?: string;
+  onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
+}) {
   return (
     <Suspense fallback={<MarkdownFallback text={text} />}>
-      <MarkdownRenderer text={text} />
+      <MarkdownRenderer
+        text={text}
+        workspacePath={workspacePath}
+        onOpenWorkspacePath={onOpenWorkspacePath}
+      />
     </Suspense>
   );
 }
@@ -280,6 +301,8 @@ interface MessageItemProps {
   onDeleteMessage: (message: Message) => Promise<void>;
   onReplyMessage: (message: Message) => void;
   onJumpToReplyMessage?: (messageID: string) => void;
+  workspacePath?: string;
+  onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
 }
 
 function MessageItem(props: MessageItemProps) {
@@ -302,6 +325,8 @@ function ConversationMessageItem({
   onDeleteMessage,
   onReplyMessage,
   onJumpToReplyMessage,
+  workspacePath,
+  onOpenWorkspacePath,
 }: MessageItemProps) {
   const [editing, setEditing] = useState(false);
   const [draftBody, setDraftBody] = useState(message.body);
@@ -498,7 +523,11 @@ function ConversationMessageItem({
             {error && <p className="text-sm text-destructive">{error}</p>}
             {message.body.trim() !== "" && (
               <div className={messageBodyClassName} data-testid="message-body">
-                <MessageMarkdown text={message.body} />
+                <MessageMarkdown
+                  text={message.body}
+                  workspacePath={workspacePath}
+                  onOpenWorkspacePath={onOpenWorkspacePath}
+                />
               </div>
             )}
             <MessageAttachments attachments={message.attachments ?? []} theme={theme} />
@@ -935,9 +964,12 @@ export function createReadOnlyAttachmentEditorController(
     workspaceTreeLoading: false,
     workspaceTreeError: null,
     fileLoading: false,
+    fileLoadError: null,
     fileSaving: false,
     fileDeleting: false,
     workspaceStatus: null,
+    fileOpenPosition: undefined,
+    fileOpenRequestID: 0,
     trimmedPath: attachment.filename.trim(),
     canUseWorkspace: false,
     setFilePath: noop,
@@ -1087,11 +1119,15 @@ function StreamingItem({
   agentName,
   agentKind,
   agentID,
+  workspacePath,
+  onOpenWorkspacePath,
 }: {
   item: StreamingMessage;
   agentName?: string;
   agentKind?: string;
   agentID?: string;
+  workspacePath?: string;
+  onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
 }) {
   const isError = Boolean(item.error);
   const label = isError ? "System" : agentName ?? "Agent";
@@ -1127,7 +1163,11 @@ function StreamingItem({
         </div>
         {process.length > 0 && <ProcessBlock items={process} />}
         <div className={messageBodyClassName} data-testid="message-body">
-          <MessageMarkdown text={item.error ?? item.text} />
+          <MessageMarkdown
+            text={item.error ?? item.text}
+            workspacePath={workspacePath}
+            onOpenWorkspacePath={onOpenWorkspacePath}
+          />
         </div>
       </div>
     </div>

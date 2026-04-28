@@ -122,6 +122,39 @@ export async function expectMonacoEditorText(scope: Locator, text: string) {
   });
 }
 
+export async function expectMonacoEditorPosition(
+  page: Page,
+  scope: Locator,
+  position: { lineNumber: number; column: number }
+) {
+  const editor = scope.getByTestId("workspace-file-editor");
+  await expect(editor.locator(".monaco-editor")).toBeVisible({ timeout: 15_000 });
+  const editorHandle = await editor.elementHandle();
+  if (!editorHandle) throw new Error("missing workspace editor handle");
+
+  await page.waitForFunction(
+    (node) => {
+      const editorNode = node as HTMLElement & {
+        __agentxGetEditorPosition?: () => { lineNumber: number; column: number } | null;
+      };
+      return Boolean(editorNode.__agentxGetEditorPosition);
+    },
+    editorHandle,
+    { timeout: 5_000 }
+  );
+
+  await expect
+    .poll(() =>
+      editor.evaluate((node) => {
+        const editorNode = node as HTMLElement & {
+          __agentxGetEditorPosition?: () => { lineNumber: number; column: number } | null;
+        };
+        return editorNode.__agentxGetEditorPosition?.() ?? null;
+      })
+    )
+    .toEqual(position);
+}
+
 export async function request<T>(
   page: Page,
   path: string,

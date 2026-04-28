@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ArrowLeft,
@@ -22,6 +22,7 @@ import {
   X
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { WorkspacePathTarget } from "@/lib/workspacePaths";
 import { ChannelList } from "./ChannelList";
 import type { Channel } from "../api/types";
 import {
@@ -218,6 +219,12 @@ export function Shell({
     onWriteFile: onWriteWorkspaceFile,
     onDeleteFile: onDeleteWorkspaceFile,
   });
+  const projectWorkspaceIDRef = useRef(projectWorkspace?.id);
+  const projectLoadFileRef = useRef(projectFilesController.loadFile);
+  const projectLoadTreeRef = useRef(projectFilesController.loadTree);
+  projectWorkspaceIDRef.current = projectWorkspace?.id;
+  projectLoadFileRef.current = projectFilesController.loadFile;
+  projectLoadTreeRef.current = projectFilesController.loadTree;
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 767px)");
@@ -468,6 +475,25 @@ export function Shell({
     setProjectFilesOpen(true);
     void projectFilesController.loadTree({ quiet: true });
   }
+
+  const openWorkspacePath = useCallback((target: WorkspacePathTarget) => {
+    if (!projectWorkspaceIDRef.current) return;
+    blurActiveElement();
+    setMainView("chat");
+    setAgentPanelOpen(false);
+    setMembersPanelOpen(false);
+    setMobileNavOpen(false);
+    setMobileAgentPanelOpen(false);
+    setMobileMembersPanelOpen(false);
+    setMobileProjectFilesView("editor");
+    setProjectFilesOpen(true);
+    void projectLoadFileRef.current(target.path, {
+      position: target.lineNumber
+        ? { lineNumber: target.lineNumber, column: target.column ?? 1 }
+        : undefined,
+    });
+    void projectLoadTreeRef.current({ quiet: true });
+  }, []);
 
   function openMetrics() {
     if (!project && !selectedChannel) return;
@@ -792,6 +818,8 @@ export function Shell({
             onDeleteMessage={onDeleteMessage}
             onLoadOlderMessages={onLoadOlderMessages}
             onMessageSent={onMessageSent}
+            workspacePath={projectWorkspace?.path}
+            onOpenWorkspacePath={openWorkspacePath}
           />
         )}
 
@@ -1380,6 +1408,8 @@ export function Shell({
               onDeleteMessage={onDeleteMessage}
               onLoadOlderMessages={onLoadOlderMessages}
               onMessageSent={onMessageSent}
+              workspacePath={projectWorkspace?.path}
+              onOpenWorkspacePath={openWorkspacePath}
             />
             )}
           </div>
