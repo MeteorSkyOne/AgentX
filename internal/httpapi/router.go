@@ -39,6 +39,8 @@ func NewRouter(a *app.App, bus *eventbus.Bus) http.Handler {
 			r.Put("/me/preferences", s.handleUpdateUserPreferences)
 			r.Get("/organizations", s.handleOrganizations)
 			r.Get("/organizations/{orgID}/channels", s.handleChannels)
+			r.Get("/organizations/{orgID}/server-settings", s.handleServerSettings)
+			r.Put("/organizations/{orgID}/server-settings", s.handleUpdateServerSettings)
 			r.Get("/organizations/{orgID}/notification-settings", s.handleNotificationSettings)
 			r.Put("/organizations/{orgID}/notification-settings", s.handleUpdateNotificationSettings)
 			r.Post("/organizations/{orgID}/notification-settings/test", s.handleTestNotificationSettings)

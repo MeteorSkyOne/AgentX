@@ -53,6 +53,15 @@ ORDER BY organizations.created_at ASC`, userID)
 	return orgs, nil
 }
 
+func (r organizationRepo) MemberRole(ctx context.Context, orgID string, userID string) (domain.Role, error) {
+	var role string
+	err := r.q.QueryRowContext(ctx,
+		`SELECT role FROM memberships WHERE org_id = ? AND user_id = ?`,
+		orgID, userID,
+	).Scan(&role)
+	return domain.Role(role), err
+}
+
 func (r organizationRepo) AddMember(ctx context.Context, orgID string, userID string, role domain.Role) error {
 	_, err := r.q.ExecContext(ctx,
 		`INSERT INTO memberships (org_id, user_id, role, created_at) VALUES (?, ?, ?, ?)`,

@@ -15,6 +15,8 @@ import type {
   NotificationSettings,
   Organization,
   Project,
+  ServerSettings,
+  ServerSettingsUpdatePayload,
   Thread,
   User,
   UserPreferences,
@@ -130,6 +132,25 @@ export function organizations(): Promise<Organization[]> {
 export function notificationSettings(orgID: string): Promise<NotificationSettings> {
   return request<NotificationSettings>(
     `/api/organizations/${encodeURIComponent(orgID)}/notification-settings`
+  );
+}
+
+export function serverSettings(orgID: string): Promise<ServerSettings> {
+  return request<ServerSettings>(
+    `/api/organizations/${encodeURIComponent(orgID)}/server-settings`
+  );
+}
+
+export function updateServerSettings(
+  orgID: string,
+  payload: ServerSettingsUpdatePayload
+): Promise<ServerSettings> {
+  return request<ServerSettings>(
+    `/api/organizations/${encodeURIComponent(orgID)}/server-settings`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    }
   );
 }
 

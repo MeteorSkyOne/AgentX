@@ -24,6 +24,7 @@ import {
   projectChannels,
   projects,
   putWorkspaceFile,
+  serverSettings,
   setChannelAgents,
   testNotificationSettings,
   updateAgent,
@@ -31,6 +32,7 @@ import {
   updateMessage,
   updateNotificationSettings,
   updateProject,
+  updateServerSettings,
   updateThread,
   updateUserPreferences,
   userPreferences,
@@ -49,6 +51,8 @@ import type {
   NotificationSettings,
   ProcessItem,
   Project,
+  ServerSettings,
+  ServerSettingsUpdatePayload,
   Thread,
   UserPreferences,
   WorkspaceTreeEntry
@@ -175,6 +179,13 @@ export default function App() {
     queryKey: ["notification-settings", selectedOrganizationID],
     queryFn: () => notificationSettings(selectedOrganizationID as string),
     enabled: hasSession && Boolean(selectedOrganizationID)
+  });
+
+  const serverSettingsQuery = useQuery({
+    queryKey: ["server-settings", selectedOrganizationID],
+    queryFn: () => serverSettings(selectedOrganizationID as string),
+    enabled: hasSession && Boolean(selectedOrganizationID),
+    retry: false
   });
 
   const userPreferencesQuery = useQuery({
@@ -704,6 +715,14 @@ export default function App() {
     return updated;
   }
 
+  async function handleUpdateServerSettings(payload: ServerSettingsUpdatePayload): Promise<ServerSettings> {
+    const updated = await updateServerSettings(selectedOrganizationID as string, payload);
+    await queryClient.invalidateQueries({
+      queryKey: ["server-settings", selectedOrganizationID]
+    });
+    return updated;
+  }
+
   async function handleUpdateUserPreferences(payload: UserPreferences): Promise<UserPreferences> {
     const updated = await updateUserPreferences(payload);
     await queryClient.invalidateQueries({ queryKey: ["user-preferences", sessionToken] });
@@ -782,6 +801,9 @@ export default function App() {
       connectionStatus={connectionStatus}
       notificationSettings={notificationSettingsQuery.data}
       notificationSettingsLoading={notificationSettingsQuery.isLoading}
+      serverSettings={serverSettingsQuery.data}
+      serverSettingsLoading={serverSettingsQuery.isLoading}
+      serverSettingsError={serverSettingsQuery.error instanceof Error ? serverSettingsQuery.error.message : null}
       preferences={userPreferencesQuery.data ?? { show_ttft: true, show_tps: true }}
       preferencesLoading={userPreferencesQuery.isLoading}
       theme={theme}
@@ -802,6 +824,7 @@ export default function App() {
       onUpdateAgent={handleUpdateAgent}
       onDeleteAgent={handleDeleteAgent}
       onUpdateNotificationSettings={handleUpdateNotificationSettings}
+      onUpdateServerSettings={handleUpdateServerSettings}
       onUpdateUserPreferences={handleUpdateUserPreferences}
       onTestNotificationSettings={handleTestNotificationSettings}
       onLoadWorkspaceTree={handleLoadWorkspaceTree}

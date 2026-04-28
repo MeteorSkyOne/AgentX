@@ -10,6 +10,8 @@ import type {
   Organization,
   ProcessItem,
   Project,
+  ServerSettings,
+  ServerSettingsUpdatePayload,
   Thread,
   User,
   UserPreferences,
@@ -63,6 +65,9 @@ export interface ShellProps {
   connectionStatus: SocketConnectionStatus;
   notificationSettings?: NotificationSettings;
   notificationSettingsLoading: boolean;
+  serverSettings?: ServerSettings;
+  serverSettingsLoading: boolean;
+  serverSettingsError: string | null;
   preferences: UserPreferences;
   preferencesLoading: boolean;
   theme: ThemeMode;
@@ -107,6 +112,7 @@ export interface ShellProps {
     webhook_url: string;
     webhook_secret?: string;
   }) => Promise<NotificationSettings>;
+  onUpdateServerSettings: (payload: ServerSettingsUpdatePayload) => Promise<ServerSettings>;
   onUpdateUserPreferences: (payload: UserPreferences) => Promise<UserPreferences>;
   onTestNotificationSettings: () => Promise<void>;
   onLoadWorkspaceTree: (workspaceID: string) => Promise<WorkspaceTreeEntry>;

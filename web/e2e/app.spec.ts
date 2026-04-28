@@ -19,6 +19,13 @@ import {
 
 const displayName = "E2E User";
 
+function longPEM(label: "CERTIFICATE" | "PRIVATE KEY", lines: number) {
+  const body = Array.from({ length: lines }, (_, index) => {
+    return `MII${String(index).padStart(4, "0")}abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789`;
+  });
+  return [`-----BEGIN ${label}-----`, ...body, `-----END ${label}-----`].join("\n");
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await page.evaluate(() => localStorage.clear());
@@ -282,6 +289,38 @@ test("keeps an empty project workspace path draft while editing", async ({ page 
   await expect(dialog.getByRole("button", { name: "Save" })).toBeDisabled();
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect(dialog).toHaveCount(0);
+});
+
+test("server settings stays scrollable with long PEM contents", async ({ page }) => {
+  await signIn(page);
+
+  await page.getByRole("button", { name: "User settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "User settings" });
+  await expect(dialog.getByText("Server / SSL")).toBeVisible();
+
+  const certificatePEM = longPEM("CERTIFICATE", 120);
+  const privateKeyPEM = longPEM("PRIVATE KEY", 120);
+  await dialog.getByLabel("Certificate PEM").fill(certificatePEM);
+  await dialog.getByLabel("Private key PEM").fill(privateKeyPEM);
+
+  const scrollRegion = dialog.getByTestId("user-settings-scroll");
+  const certTextarea = dialog.getByLabel("Certificate PEM");
+  const keyTextarea = dialog.getByLabel("Private key PEM");
+  const saveButton = dialog.getByRole("button", { name: "Save Server" });
+
+  const metrics = await scrollRegion.evaluate((node) => ({
+    clientHeight: node.clientHeight,
+    scrollHeight: node.scrollHeight,
+  }));
+  expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+  await expect.poll(() => certTextarea.evaluate((node) => node.getBoundingClientRect().height)).toBeLessThanOrEqual(220);
+  await expect.poll(() => keyTextarea.evaluate((node) => node.getBoundingClientRect().height)).toBeLessThanOrEqual(220);
+
+  await scrollRegion.evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+
+  await expect(saveButton).toBeInViewport({ ratio: 1 });
 });
 
 test("desktop project files opens project editor and persists changes", async ({ page }) => {

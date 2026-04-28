@@ -44,9 +44,9 @@ case "$output" in
 esac
 
 case "$output" in
-  *"AGENTX_ADDR=127.0.0.1:8080"* ) ;;
+  *"AGENTX_ADDR=<unset>"* ) ;;
   * )
-    echo "dry run did not include default backend address" >&2
+    echo "dry run unexpectedly set default backend address" >&2
     echo "$output" >&2
     exit 1
     ;;
@@ -70,6 +70,15 @@ case "$prod_output" in
   *"AGENTX_ADMIN_TOKEN=<generated>"* ) ;;
   * )
     echo "prod dry run did not include generated setup token placeholder" >&2
+    echo "$prod_output" >&2
+    exit 1
+    ;;
+esac
+
+case "$prod_output" in
+  *"AGENTX_ADDR=<unset>"* ) ;;
+  * )
+    echo "prod dry run unexpectedly set default backend address" >&2
     echo "$prod_output" >&2
     exit 1
     ;;

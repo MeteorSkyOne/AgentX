@@ -55,6 +55,13 @@ func TestStoreCreatesOrganizationChannelAndMessage(t *testing.T) {
 	if len(channels) != 1 || channels[0].Name != "general" {
 		t.Fatalf("channels = %#v", channels)
 	}
+	role, err := st.Organizations().MemberRole(ctx, org.ID, user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if role != domain.RoleOwner {
+		t.Fatalf("MemberRole = %q, want %q", role, domain.RoleOwner)
+	}
 
 	messages, err := st.Messages().List(ctx, domain.ConversationChannel, channel.ID, 20)
 	if err != nil {

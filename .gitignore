@@ -8,6 +8,7 @@ logs/
 node_modules/
 .agentx/
 .agentx-e2e/
+.agentx-worktree/
 .playwright-libs/
 web/playwright-report/
 web/test-results/

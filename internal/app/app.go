@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/meteorsky/agentx/internal/config"
 	"github.com/meteorsky/agentx/internal/domain"
 	"github.com/meteorsky/agentx/internal/eventbus"
 	agentruntime "github.com/meteorsky/agentx/internal/runtime"
@@ -15,6 +16,10 @@ import (
 type Options struct {
 	AdminToken        string
 	DataDir           string
+	ServerSettings    config.ServerSettings
+	ServerAddr        string
+	AddrOverride      bool
+	AddrOverrideValue string
 	DefaultAgentKind  string
 	DefaultAgentName  string
 	DefaultAgentModel string

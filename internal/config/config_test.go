@@ -29,10 +29,16 @@ func TestFromEnvDefaults(t *testing.T) {
 	if cfg.Addr != "127.0.0.1:8080" {
 		t.Fatalf("Addr = %q, want 127.0.0.1:8080", cfg.Addr)
 	}
+	if cfg.AddrOverrideActive {
+		t.Fatal("AddrOverrideActive = true, want false")
+	}
 	home, _ := os.UserHomeDir()
 	wantDataDir := filepath.Join(home, ".agentx")
 	if cfg.DataDir != wantDataDir {
 		t.Fatalf("DataDir = %q, want %q", cfg.DataDir, wantDataDir)
+	}
+	if cfg.Server.ListenIP != "127.0.0.1" || cfg.Server.ListenPort != 8080 || cfg.Server.TLS.Enabled || cfg.Server.TLS.ListenPort != 8443 {
+		t.Fatalf("Server = %#v, want defaults", cfg.Server)
 	}
 	wantDBPath := filepath.Join(wantDataDir, "agentx.db")
 	if cfg.SQLitePath != wantDBPath {
@@ -73,6 +79,9 @@ func TestFromEnvOverrides(t *testing.T) {
 
 	if cfg.Addr != "0.0.0.0:9000" {
 		t.Fatalf("Addr = %q", cfg.Addr)
+	}
+	if !cfg.AddrOverrideActive || cfg.AddrOverrideValue != "0.0.0.0:9000" {
+		t.Fatalf("addr override = active %v value %q", cfg.AddrOverrideActive, cfg.AddrOverrideValue)
 	}
 	if cfg.DataDir != "/tmp/agentx" {
 		t.Fatalf("DataDir = %q", cfg.DataDir)
@@ -121,7 +130,7 @@ func TestLoadCreatesDefaultConfigFile(t *testing.T) {
 		t.Fatalf("read config file: %v", err)
 	}
 	got := string(body)
-	for _, want := range []string{`[server]`, `listen_ip = "127.0.0.1"`, `listen_port = 8080`} {
+	for _, want := range []string{`[server]`, `listen_ip = "127.0.0.1"`, `listen_port = 8080`, `[server.tls]`, `enabled = false`, `listen_port = 8443`, `cert_file = ""`, `key_file = ""`} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("config file = %q, want it to contain %q", got, want)
 		}
@@ -135,6 +144,12 @@ func TestLoadUsesConfigFileListenAddress(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(`[server]
 listen_ip = "0.0.0.0"
 listen_port = 9090
+
+[server.tls]
+enabled = true
+listen_port = 9443
+cert_file = "/tmp/agentx-cert.pem"
+key_file = "/tmp/agentx-key.pem"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -145,6 +160,12 @@ listen_port = 9090
 	}
 	if cfg.Addr != "0.0.0.0:9090" {
 		t.Fatalf("Addr = %q, want 0.0.0.0:9090", cfg.Addr)
+	}
+	if !cfg.Server.TLS.Enabled || cfg.Server.TLS.ListenPort != 9443 || cfg.Server.TLS.CertFile != "/tmp/agentx-cert.pem" || cfg.Server.TLS.KeyFile != "/tmp/agentx-key.pem" {
+		t.Fatalf("TLS = %#v, want enabled paths", cfg.Server.TLS)
+	}
+	if got := ServerTLSAddr(cfg.Server); got != "0.0.0.0:9443" {
+		t.Fatalf("ServerTLSAddr = %q, want 0.0.0.0:9443", got)
 	}
 }
 
@@ -166,6 +187,9 @@ listen_port = 9090
 	if cfg.Addr != "127.0.0.1:7777" {
 		t.Fatalf("Addr = %q, want env override", cfg.Addr)
 	}
+	if !cfg.AddrOverrideActive {
+		t.Fatal("AddrOverrideActive = false, want true")
+	}
 }
 
 func TestLoadRejectsInvalidConfigFileListenPort(t *testing.T) {
@@ -185,5 +209,88 @@ listen_port = 70000
 	}
 	if !strings.Contains(err.Error(), "server.listen_port") {
 		t.Fatalf("Load() error = %q, want server.listen_port", err)
+	}
+}
+
+func TestLoadRejectsEnabledTLSWithoutFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AGENTX_DATA_DIR", dir)
+	t.Setenv("AGENTX_ADDR", "")
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(`[server]
+listen_ip = "127.0.0.1"
+listen_port = 8080
+
+[server.tls]
+enabled = true
+listen_port = 8443
+cert_file = ""
+key_file = ""
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want TLS file error")
+	}
+	if !strings.Contains(err.Error(), "server.tls.cert_file") {
+		t.Fatalf("Load() error = %q, want server.tls.cert_file", err)
+	}
+}
+
+func TestLoadRejectsMatchingHTTPAndTLSPorts(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AGENTX_DATA_DIR", dir)
+	t.Setenv("AGENTX_ADDR", "")
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(`[server]
+listen_ip = "127.0.0.1"
+listen_port = 8443
+
+[server.tls]
+enabled = true
+listen_port = 8443
+cert_file = "/tmp/agentx-cert.pem"
+key_file = "/tmp/agentx-key.pem"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want duplicate port error")
+	}
+	if !strings.Contains(err.Error(), "server.tls.listen_port") {
+		t.Fatalf("Load() error = %q, want server.tls.listen_port", err)
+	}
+}
+
+func TestSaveServerSettingsWritesTLSConfig(t *testing.T) {
+	dir := t.TempDir()
+	settings, err := SaveServerSettings(dir, ServerSettings{
+		ListenIP:   "0.0.0.0",
+		ListenPort: 8080,
+		TLS: ServerTLSSettings{
+			Enabled:    true,
+			ListenPort: 8443,
+			CertFile:   "/etc/agentx/cert.pem",
+			KeyFile:    "/etc/agentx/key.pem",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ServerAddr(settings) != "0.0.0.0:8080" {
+		t.Fatalf("ServerAddr = %q", ServerAddr(settings))
+	}
+	if ServerTLSAddr(settings) != "0.0.0.0:8443" {
+		t.Fatalf("ServerTLSAddr = %q", ServerTLSAddr(settings))
+	}
+
+	loaded, err := LoadServerSettings(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ServerSettingsEqual(settings, loaded) {
+		t.Fatalf("loaded settings = %#v, want %#v", loaded, settings)
 	}
 }

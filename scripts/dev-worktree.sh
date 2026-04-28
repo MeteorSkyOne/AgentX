@@ -61,12 +61,13 @@ handle_signal() {
 
 cd "$worktree_dir"
 
-backend_addr="${AGENTX_ADDR:-127.0.0.1:8080}"
+backend_addr="${AGENTX_ADDR:-}"
 web_host="${AGENTX_WEB_HOST:-127.0.0.1}"
 web_port="${AGENTX_WEB_PORT:-5173}"
 data_dir="${AGENTX_DATA_DIR:-.agentx-worktree}"
 sqlite_path="${AGENTX_SQLITE_PATH:-$data_dir/agentx.db}"
 setup_token="${AGENTX_ADMIN_TOKEN:-dev-token}"
+backend_label="${backend_addr:-config.toml}"
 
 if [[ ! -d web/node_modules ]]; then
   echo "Installing web dependencies..."
@@ -77,10 +78,12 @@ pids=()
 trap cleanup EXIT
 trap handle_signal INT TERM
 
-echo "Starting AgentX API at http://$backend_addr"
+echo "Starting AgentX API at $backend_label"
 (
   export AGENTX_ADMIN_TOKEN="$setup_token"
-  export AGENTX_ADDR="$backend_addr"
+  if [[ -n "$backend_addr" ]]; then
+    export AGENTX_ADDR="$backend_addr"
+  fi
   export AGENTX_DATA_DIR="$data_dir"
   export AGENTX_SQLITE_PATH="$sqlite_path"
   go run ./cmd/agentx

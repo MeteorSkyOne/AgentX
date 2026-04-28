@@ -74,6 +74,94 @@ func TestServeHTTPShutsDownWhenContextCanceled(t *testing.T) {
 	}
 }
 
+func TestRunHTTPServersServesMultipleListeners(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen http: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = httpListener.Close()
+	})
+	httpsListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen https: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = httpsListener.Close()
+	})
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(r.URL.Path))
+	})
+	httpServer := newServer(httpListener.Addr().String(), handler)
+	httpsServer := newServer(httpsListener.Addr().String(), handler)
+	t.Cleanup(func() {
+		_ = httpServer.Close()
+		_ = httpsServer.Close()
+	})
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runHTTPServers(ctx, []serverRunner{
+			{
+				name:   "http",
+				server: httpServer,
+				serve: func(server *http.Server) func() error {
+					return func() error {
+						return server.Serve(httpListener)
+					}
+				},
+			},
+			{
+				name:   "https",
+				server: httpsServer,
+				serve: func(server *http.Server) func() error {
+					return func() error {
+						return server.Serve(httpsListener)
+					}
+				},
+			},
+		})
+	}()
+
+	for _, tc := range []struct {
+		name string
+		addr string
+		path string
+	}{
+		{name: "http", addr: httpListener.Addr().String(), path: "/http"},
+		{name: "https", addr: httpsListener.Addr().String(), path: "/https"},
+	} {
+		resp, err := http.Get("http://" + tc.addr + tc.path)
+		if err != nil {
+			t.Fatalf("GET %s test server: %v", tc.name, err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			t.Fatalf("close %s response body: %v", tc.name, closeErr)
+		}
+		if err != nil {
+			t.Fatalf("read %s response body: %v", tc.name, err)
+		}
+		if string(body) != tc.path {
+			t.Fatalf("%s response body = %q, want %q", tc.name, string(body), tc.path)
+		}
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("runHTTPServers() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("runHTTPServers() did not stop after context cancellation")
+	}
+}
+
 func TestConfigureLoggingCreatesStartupLogFile(t *testing.T) {
 	t.Chdir(t.TempDir())
 	previousLogger := slog.Default()

@@ -72,9 +72,15 @@ The production server listens on `127.0.0.1:8080` by default. On startup, AgentX
 [server]
 listen_ip = "127.0.0.1"
 listen_port = 8080
+
+[server.tls]
+enabled = false
+listen_port = 8443
+cert_file = ""
+key_file = ""
 ```
 
-Set `AGENTX_ADDR` to override the config file for a single run. Set `AGENTX_ADMIN_TOKEN` to use a stable first-run setup token; otherwise the script generates a token for the current run. When initial setup is still pending, the server prints the setup token to stdout only; it is not written to the startup log file.
+When TLS is enabled, AgentX serves HTTP on `server.listen_port` and HTTPS on `server.tls.listen_port`. TLS can also be managed from User settings in the web UI. HTTPS takes effect after restart. Set `AGENTX_ADDR` to override the config file HTTP address for a single run. Set `AGENTX_ADMIN_TOKEN` to use a stable first-run setup token; otherwise the script generates a token for the current run. When initial setup is still pending, the server prints the setup token to stdout only; it is not written to the startup log file.
 
 Reset the local admin username and password directly against the configured SQLite database:
 

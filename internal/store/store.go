@@ -68,6 +68,7 @@ type OrganizationStore interface {
 	Any(ctx context.Context) (bool, error)
 	Create(ctx context.Context, org domain.Organization) error
 	ListForUser(ctx context.Context, userID string) ([]domain.Organization, error)
+	MemberRole(ctx context.Context, orgID string, userID string) (domain.Role, error)
 	AddMember(ctx context.Context, orgID string, userID string, role domain.Role) error
 }
 

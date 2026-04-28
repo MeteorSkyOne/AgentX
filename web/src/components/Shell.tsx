@@ -15,9 +15,11 @@ import {
   Rows3,
   Save,
   Send,
+  Server as ServerIcon,
   Settings,
   Sun,
   Trash2,
+  Upload,
   UserRound,
   X
 } from "lucide-react";
@@ -111,6 +113,9 @@ export function Shell({
   connectionStatus,
   notificationSettings,
   notificationSettingsLoading,
+  serverSettings,
+  serverSettingsLoading,
+  serverSettingsError,
   preferences,
   preferencesLoading,
   theme,
@@ -131,6 +136,7 @@ export function Shell({
   onUpdateAgent,
   onDeleteAgent,
   onUpdateNotificationSettings,
+  onUpdateServerSettings,
   onUpdateUserPreferences,
   onTestNotificationSettings,
   onLoadWorkspaceTree,
@@ -200,6 +206,17 @@ export function Shell({
   const [notificationActionStatus, setNotificationActionStatus] = useState<string | null>(null);
   const [notificationSavePending, setNotificationSavePending] = useState(false);
   const [notificationTestPending, setNotificationTestPending] = useState(false);
+  const [serverListenIP, setServerListenIP] = useState("127.0.0.1");
+  const [serverListenPort, setServerListenPort] = useState("8080");
+  const [serverTLSEnabled, setServerTLSEnabled] = useState(false);
+  const [serverTLSListenPort, setServerTLSListenPort] = useState("8443");
+  const [serverTLSCertFile, setServerTLSCertFile] = useState("");
+  const [serverTLSKeyFile, setServerTLSKeyFile] = useState("");
+  const [serverTLSCertPEM, setServerTLSCertPEM] = useState("");
+  const [serverTLSKeyPEM, setServerTLSKeyPEM] = useState("");
+  const [serverSettingsPending, setServerSettingsPending] = useState(false);
+  const [serverSettingsActionError, setServerSettingsActionError] = useState<string | null>(null);
+  const [serverSettingsActionStatus, setServerSettingsActionStatus] = useState<string | null>(null);
   const [preferencesPending, setPreferencesPending] = useState(false);
   const [preferencesError, setPreferencesError] = useState<string | null>(null);
   const visibleAgents = useMemo(() => uniqueAgents(agents), [agents]);
@@ -210,6 +227,25 @@ export function Shell({
   const activeAgents = useMemo(() => visibleAgents.filter((agent) => agent.enabled), [visibleAgents]);
   const selectedAgent =
     visibleAgents.find((agent) => agent.id === focusedAgentID) ?? boundAgents[0]?.agent ?? activeAgents[0];
+  const serverListenPortNumber = Number(serverListenPort);
+  const serverListenPortValid =
+    Number.isInteger(serverListenPortNumber) && serverListenPortNumber >= 1 && serverListenPortNumber <= 65535;
+  const serverTLSListenPortNumber = Number(serverTLSListenPort);
+  const serverTLSListenPortValid =
+    Number.isInteger(serverTLSListenPortNumber) &&
+    serverTLSListenPortNumber >= 1 &&
+    serverTLSListenPortNumber <= 65535;
+  const serverPortsConflict = serverTLSEnabled && serverListenPortNumber === serverTLSListenPortNumber;
+  const serverTLSCertAvailable = Boolean(serverTLSCertFile.trim() || serverTLSCertPEM.trim());
+  const serverTLSKeyAvailable = Boolean(serverTLSKeyFile.trim() || serverTLSKeyPEM.trim());
+  const serverSettingsSaveDisabled =
+    serverSettingsLoading ||
+    serverSettingsPending ||
+    !serverListenIP.trim() ||
+    !serverListenPortValid ||
+    !serverTLSListenPortValid ||
+    (serverTLSEnabled && serverPortsConflict) ||
+    (serverTLSEnabled && (!serverTLSCertAvailable || !serverTLSKeyAvailable));
   const activeThread = conversationContext?.thread;
   const projectFilesController = useWorkspaceFileBrowser({
     workspaceID: projectWorkspace?.id,
@@ -295,6 +331,7 @@ export function Shell({
   useEffect(() => {
     if (!accountSettingsOpen) {
       syncNotificationDraft();
+      syncServerSettingsDraft();
       syncPreferenceDraft();
     }
   }, [
@@ -302,6 +339,13 @@ export function Shell({
     notificationSettings?.organization_id,
     notificationSettings?.webhook_enabled,
     notificationSettings?.webhook_url,
+    serverSettings?.organization_id,
+    serverSettings?.listen_ip,
+    serverSettings?.listen_port,
+    serverSettings?.tls.enabled,
+    serverSettings?.tls.listen_port,
+    serverSettings?.tls.cert_file,
+    serverSettings?.tls.key_file,
     preferences.show_ttft,
     preferences.show_tps
   ]);
@@ -380,6 +424,7 @@ export function Shell({
     blurActiveElement();
     setBrowserPermission(browserNotificationPermission());
     syncNotificationDraft();
+    syncServerSettingsDraft();
     setAccountSettingsOpen(true);
   }
 
@@ -389,6 +434,19 @@ export function Shell({
     setWebhookSecret("");
     setNotificationActionError(null);
     setNotificationActionStatus(null);
+  }
+
+  function syncServerSettingsDraft() {
+    setServerListenIP(serverSettings?.listen_ip ?? "127.0.0.1");
+    setServerListenPort(String(serverSettings?.listen_port ?? 8080));
+    setServerTLSEnabled(serverSettings?.tls.enabled ?? false);
+    setServerTLSListenPort(String(serverSettings?.tls.listen_port ?? 8443));
+    setServerTLSCertFile(serverSettings?.tls.cert_file ?? "");
+    setServerTLSKeyFile(serverSettings?.tls.key_file ?? "");
+    setServerTLSCertPEM("");
+    setServerTLSKeyPEM("");
+    setServerSettingsActionError(null);
+    setServerSettingsActionStatus(null);
   }
 
   function syncPreferenceDraft() {
@@ -460,6 +518,55 @@ export function Shell({
       webhook_url: webhookURL.trim(),
       ...(secret ? { webhook_secret: secret } : {})
     };
+  }
+
+  async function saveServerSettings() {
+    setServerSettingsActionError(null);
+    setServerSettingsActionStatus(null);
+    setServerSettingsPending(true);
+    try {
+      const updated = await onUpdateServerSettings(serverSettingsPayload());
+      setServerListenIP(updated.listen_ip);
+      setServerListenPort(String(updated.listen_port));
+      setServerTLSEnabled(updated.tls.enabled);
+      setServerTLSListenPort(String(updated.tls.listen_port));
+      setServerTLSCertFile(updated.tls.cert_file);
+      setServerTLSKeyFile(updated.tls.key_file);
+      setServerTLSCertPEM("");
+      setServerTLSKeyPEM("");
+      setServerSettingsActionStatus(updated.restart_required ? "Saved. Restart required." : "Saved");
+    } catch (err) {
+      setServerSettingsActionError(err instanceof Error ? err.message : "Save server settings failed");
+    } finally {
+      setServerSettingsPending(false);
+    }
+  }
+
+  function serverSettingsPayload() {
+    const certPEM = serverTLSCertPEM.trim();
+    const keyPEM = serverTLSKeyPEM.trim();
+    return {
+      listen_ip: serverListenIP.trim(),
+      listen_port: Number(serverListenPort),
+      tls: {
+        enabled: serverTLSEnabled,
+        listen_port: Number(serverTLSListenPort),
+        cert_file: serverTLSCertFile.trim(),
+        key_file: serverTLSKeyFile.trim(),
+        ...(certPEM ? { cert_pem: certPEM } : {}),
+        ...(keyPEM ? { key_pem: keyPEM } : {})
+      }
+    };
+  }
+
+  async function readServerPEMUpload(file: File, update: (value: string) => void) {
+    setServerSettingsActionError(null);
+    setServerSettingsActionStatus(null);
+    try {
+      update(await file.text());
+    } catch (err) {
+      setServerSettingsActionError(err instanceof Error ? err.message : "Read file failed");
+    }
   }
 
   function openProjectFiles() {
@@ -1489,12 +1596,12 @@ export function Shell({
 
       {/* Account Settings Modal */}
       <Dialog open={accountSettingsOpen} onOpenChange={setAccountSettingsOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[calc(100vh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>User settings</DialogTitle>
             <DialogDescription>Session and workspace details.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="min-h-0 space-y-4 overflow-y-auto py-2 pr-1" data-testid="user-settings-scroll">
             <div className="grid gap-3 rounded-md border border-border p-3 text-sm">
               <div className="flex items-center justify-between gap-4">
                 <span className="text-muted-foreground">User</span>
@@ -1618,6 +1725,172 @@ export function Shell({
                 >
                   <Save className="h-4 w-4" />
                   Save
+                </Button>
+              </div>
+            </div>
+            <div className="grid gap-3 rounded-md border border-border p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="flex items-center gap-2 text-sm font-medium">
+                    <ServerIcon className="h-4 w-4" />
+                    Server / SSL
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    {serverSettings?.restart_required
+                      ? "Saved changes require restart"
+                      : `HTTP ${serverSettings?.effective_http_addr ?? serverSettings?.effective_addr ?? "from config"}${serverSettings?.effective_https_addr ? `, HTTPS ${serverSettings.effective_https_addr}` : ""}`}
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch
+                    checked={serverTLSEnabled}
+                    disabled={serverSettingsLoading || serverSettingsPending}
+                    aria-label="Enable HTTPS"
+                    onCheckedChange={setServerTLSEnabled}
+                  />
+                  HTTPS
+                </label>
+              </div>
+              {serverSettings?.addr_override_active && (
+                <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+                  AGENTX_ADDR is active ({serverSettings.addr_override_value}); HTTP listen IP and port values are saved to config.toml but the environment override controls HTTP startup.
+                </p>
+              )}
+              {serverSettingsError && (
+                <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  {serverSettingsError}
+                </p>
+              )}
+              <div className="grid gap-3 sm:grid-cols-[1fr_8rem_8rem]">
+                <div className="space-y-2">
+                  <Label htmlFor="server-listen-ip">Listen IP</Label>
+                  <Input
+                    id="server-listen-ip"
+                    value={serverListenIP}
+                    onChange={(event) => setServerListenIP(event.target.value)}
+                    disabled={serverSettingsLoading || serverSettingsPending}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="server-listen-port">HTTP port</Label>
+                  <Input
+                    id="server-listen-port"
+                    value={serverListenPort}
+                    onChange={(event) => setServerListenPort(event.target.value)}
+                    disabled={serverSettingsLoading || serverSettingsPending}
+                    inputMode="numeric"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="server-tls-listen-port">HTTPS port</Label>
+                  <Input
+                    id="server-tls-listen-port"
+                    value={serverTLSListenPort}
+                    onChange={(event) => setServerTLSListenPort(event.target.value)}
+                    disabled={serverSettingsLoading || serverSettingsPending}
+                    inputMode="numeric"
+                  />
+                </div>
+              </div>
+              {!serverListenPortValid && (
+                <p className="text-xs text-destructive">HTTP port must be between 1 and 65535.</p>
+              )}
+              {!serverTLSListenPortValid && (
+                <p className="text-xs text-destructive">HTTPS port must be between 1 and 65535.</p>
+              )}
+              {serverPortsConflict && (
+                <p className="text-xs text-destructive">HTTP and HTTPS ports must be different.</p>
+              )}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="server-cert-file">Certificate path</Label>
+                  <Input
+                    id="server-cert-file"
+                    value={serverTLSCertFile}
+                    onChange={(event) => setServerTLSCertFile(event.target.value)}
+                    disabled={serverSettingsLoading || serverSettingsPending}
+                    placeholder="/etc/agentx/cert.pem"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="server-key-file">Private key path</Label>
+                  <Input
+                    id="server-key-file"
+                    value={serverTLSKeyFile}
+                    onChange={(event) => setServerTLSKeyFile(event.target.value)}
+                    disabled={serverSettingsLoading || serverSettingsPending}
+                    placeholder="/etc/agentx/key.pem"
+                  />
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="server-cert-pem">Certificate PEM</Label>
+                  <Input
+                    type="file"
+                    accept=".pem,.crt,.cert,text/plain"
+                    disabled={serverSettingsLoading || serverSettingsPending}
+                    onChange={(event) => {
+                      const input = event.currentTarget;
+                      const file = input.files?.[0];
+                      if (!file) return;
+                      void readServerPEMUpload(file, setServerTLSCertPEM).finally(() => {
+                        input.value = "";
+                      });
+                    }}
+                  />
+                  <Textarea
+                    id="server-cert-pem"
+                    value={serverTLSCertPEM}
+                    onChange={(event) => setServerTLSCertPEM(event.target.value)}
+                    disabled={serverSettingsLoading || serverSettingsPending}
+                    placeholder="Paste certificate PEM"
+                    className="h-32 min-h-32 max-h-48 resize-y overflow-auto [field-sizing:fixed] font-mono text-xs"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="server-key-pem">Private key PEM</Label>
+                  <Input
+                    type="file"
+                    accept=".pem,.key,text/plain"
+                    disabled={serverSettingsLoading || serverSettingsPending}
+                    onChange={(event) => {
+                      const input = event.currentTarget;
+                      const file = input.files?.[0];
+                      if (!file) return;
+                      void readServerPEMUpload(file, setServerTLSKeyPEM).finally(() => {
+                        input.value = "";
+                      });
+                    }}
+                  />
+                  <Textarea
+                    id="server-key-pem"
+                    value={serverTLSKeyPEM}
+                    onChange={(event) => setServerTLSKeyPEM(event.target.value)}
+                    disabled={serverSettingsLoading || serverSettingsPending}
+                    placeholder="Paste private key PEM"
+                    className="h-32 min-h-32 max-h-48 resize-y overflow-auto [field-sizing:fixed] font-mono text-xs"
+                  />
+                </div>
+              </div>
+              {serverTLSEnabled && (!serverTLSCertAvailable || !serverTLSKeyAvailable) && (
+                <p className="text-xs text-destructive">
+                  HTTPS requires a certificate and private key path or pasted PEM content.
+                </p>
+              )}
+              {(serverSettingsActionError || serverSettingsActionStatus) && (
+                <p className={cn("text-sm", serverSettingsActionError ? "text-destructive" : "text-muted-foreground")}>
+                  {serverSettingsActionError ?? serverSettingsActionStatus}
+                </p>
+              )}
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  onClick={saveServerSettings}
+                  disabled={serverSettingsSaveDisabled}
+                >
+                  {serverTLSCertPEM || serverTLSKeyPEM ? <Upload className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+                  Save Server
                 </Button>
               </div>
             </div>

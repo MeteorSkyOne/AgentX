@@ -72,6 +72,35 @@ export interface NotificationSettings {
   updated_at: string;
 }
 
+export interface ServerSettings {
+  organization_id: string;
+  listen_ip: string;
+  listen_port: number;
+  addr_override_active: boolean;
+  addr_override_value?: string;
+  effective_addr: string;
+  effective_http_addr: string;
+  effective_https_addr?: string;
+  restart_required: boolean;
+  tls: ServerTLSSettings;
+}
+
+export interface ServerTLSSettings {
+  enabled: boolean;
+  listen_port: number;
+  cert_file: string;
+  key_file: string;
+}
+
+export interface ServerSettingsUpdatePayload {
+  listen_ip: string;
+  listen_port: number;
+  tls: ServerTLSSettings & {
+    cert_pem?: string;
+    key_pem?: string;
+  };
+}
+
 export interface UserPreferences {
   show_ttft: boolean;
   show_tps: boolean;

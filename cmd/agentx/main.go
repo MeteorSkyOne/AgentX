@@ -77,6 +77,10 @@ func main() {
 	a := app.New(st, bus, app.Options{
 		AdminToken:        cfg.AdminToken,
 		DataDir:           cfg.DataDir,
+		ServerSettings:    cfg.Server,
+		ServerAddr:        cfg.Addr,
+		AddrOverride:      cfg.AddrOverrideActive,
+		AddrOverrideValue: cfg.AddrOverrideValue,
 		DefaultAgentKind:  cfg.DefaultAgentKind,
 		DefaultAgentModel: cfg.DefaultAgentModel,
 		ProviderLimits: app.ProviderLimitOptions{
@@ -105,17 +109,27 @@ func main() {
 		os.Exit(1)
 	}
 
-	server := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           newHTTPHandler(httpapi.NewRouter(a, bus), webdist.FS(), resolveWebDistDir(webDistDir)),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
+	handler := newHTTPHandler(httpapi.NewRouter(a, bus), webdist.FS(), resolveWebDistDir(webDistDir))
+	servers := []serverRunner{{
+		name:   "http",
+		server: newServer(cfg.Addr, handler),
+	}}
+	if cfg.Server.TLS.Enabled {
+		tlsAddr := config.ServerTLSAddr(cfg.Server)
+		servers = append(servers, serverRunner{
+			name:   "https",
+			server: newServer(tlsAddr, handler),
+			serve: func(server *http.Server) func() error {
+				return func() error {
+					return server.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
+				}
+			},
+		})
+		slog.Info("agentx listening", "http_addr", cfg.Addr, "https_addr", tlsAddr)
+	} else {
+		slog.Info("agentx listening", "http_addr", cfg.Addr)
 	}
-
-	slog.Info("agentx listening", "addr", cfg.Addr)
-	if err := runHTTPServer(ctx, server); err != nil {
+	if err := runHTTPServers(ctx, servers); err != nil {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
@@ -179,8 +193,72 @@ func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout io.Write
 	return true, 0
 }
 
-func runHTTPServer(ctx context.Context, server *http.Server) error {
-	return serveHTTP(ctx, server, server.ListenAndServe)
+type serverRunner struct {
+	name   string
+	server *http.Server
+	serve  func(*http.Server) func() error
+}
+
+func newServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+}
+
+func runHTTPServers(ctx context.Context, servers []serverRunner) error {
+	if len(servers) == 0 {
+		return nil
+	}
+
+	errCh := make(chan error, len(servers))
+	for _, runner := range servers {
+		runner := runner
+		serve := runner.server.ListenAndServe
+		if runner.serve != nil {
+			serve = runner.serve(runner.server)
+		}
+		go func() {
+			if err := serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				errCh <- fmt.Errorf("%s server: %w", runner.name, err)
+				return
+			}
+			errCh <- nil
+		}()
+	}
+
+	select {
+	case <-ctx.Done():
+		return shutdownHTTPServers(servers)
+	case err := <-errCh:
+		if err != nil {
+			_ = shutdownHTTPServers(servers)
+			return err
+		}
+		return nil
+	}
+}
+
+func shutdownHTTPServers(servers []serverRunner) error {
+	slog.Info("agentx shutting down")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var shutdownErr error
+	for _, runner := range servers {
+		if err := runner.server.Shutdown(shutdownCtx); err != nil && shutdownErr == nil {
+			shutdownErr = err
+		}
+	}
+	if shutdownErr != nil {
+		return shutdownErr
+	}
+	slog.Info("agentx stopped")
+	return nil
 }
 
 func serveHTTP(ctx context.Context, server *http.Server, serve func() error) error {

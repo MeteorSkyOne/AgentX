@@ -23,6 +23,7 @@ import (
 	"github.com/meteorsky/agentx/internal/id"
 	"github.com/meteorsky/agentx/internal/store"
 	sqlitestore "github.com/meteorsky/agentx/internal/store/sqlite"
+	"golang.org/x/crypto/bcrypt"
 	"nhooyr.io/websocket"
 )
 
@@ -365,6 +366,82 @@ func TestHTTPChannelsRejectsOrganizationOutsideAuthenticatedMemberships(t *testi
 	bootstrap := setupHTTP(t, ts.URL)
 
 	getJSON(t, ts.URL+"/api/organizations/not-a-real-org/channels", bootstrap.SessionToken, http.StatusNotFound, nil)
+}
+
+func TestHTTPServerSettingsAuthorizeAndPersistTLS(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	bootstrap := setupApp(t, ctx, env.app)
+
+	settingsURL := env.server.URL + "/api/organizations/" + bootstrap.Organization.ID + "/server-settings"
+	getJSON(t, settingsURL, "", http.StatusUnauthorized, nil)
+	getJSON(t, env.server.URL+"/api/organizations/not-a-real-org/server-settings", bootstrap.SessionToken, http.StatusNotFound, nil)
+
+	memberPassword := "member-password-123"
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(memberPassword), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	passwordUpdatedAt := now
+	member := domain.User{
+		ID:                "usr_member",
+		Username:          "member",
+		DisplayName:       "Member",
+		PasswordHash:      string(passwordHash),
+		PasswordUpdatedAt: &passwordUpdatedAt,
+		CreatedAt:         now,
+	}
+	if err := env.store.Users().Create(ctx, member); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.store.Organizations().AddMember(ctx, bootstrap.Organization.ID, member.ID, domain.RoleMember); err != nil {
+		t.Fatal(err)
+	}
+	memberLogin, err := env.app.Login(ctx, app.LoginRequest{Username: "member", Password: memberPassword})
+	if err != nil {
+		t.Fatal(err)
+	}
+	getJSON(t, settingsURL, memberLogin.SessionToken, http.StatusForbidden, nil)
+
+	var settings app.ServerSettings
+	getJSON(t, settingsURL, bootstrap.SessionToken, http.StatusOK, &settings)
+	if settings.ListenIP != "127.0.0.1" || settings.ListenPort != 8080 || settings.TLS.Enabled || settings.TLS.ListenPort != 8443 {
+		t.Fatalf("default server settings = %#v", settings)
+	}
+
+	putJSON(t, settingsURL, bootstrap.SessionToken, map[string]any{
+		"listen_ip":   "127.0.0.1",
+		"listen_port": 70000,
+		"tls":         map[string]any{"enabled": false, "cert_file": "", "key_file": ""},
+	}, http.StatusBadRequest, nil)
+
+	putJSON(t, settingsURL, bootstrap.SessionToken, map[string]any{
+		"listen_ip":   "0.0.0.0",
+		"listen_port": 8080,
+		"tls": map[string]any{
+			"enabled":     true,
+			"listen_port": 9443,
+			"cert_file":   "",
+			"key_file":    "",
+			"cert_pem":    "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----",
+			"key_pem":     "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
+		},
+	}, http.StatusOK, &settings)
+
+	if settings.ListenIP != "0.0.0.0" || settings.ListenPort != 8080 || !settings.TLS.Enabled || settings.TLS.ListenPort != 9443 || !settings.RestartRequired {
+		t.Fatalf("updated server settings = %#v", settings)
+	}
+	if filepath.Base(settings.TLS.CertFile) != "cert" || filepath.Base(settings.TLS.KeyFile) != "privkey" {
+		t.Fatalf("TLS files = %#v", settings.TLS)
+	}
+	keyInfo, err := os.Stat(settings.TLS.KeyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keyInfo.Mode().Perm() != 0o600 {
+		t.Fatalf("key permissions = %v, want 0600", keyInfo.Mode().Perm())
+	}
 }
 
 func TestHTTPNotificationSettingsAuthorizeValidateAndRedactSecret(t *testing.T) {

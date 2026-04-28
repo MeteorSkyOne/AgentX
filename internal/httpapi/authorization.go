@@ -77,3 +77,14 @@ func (s *Server) authorizedWorkspace(r *http.Request, userID string, workspaceID
 	}
 	return workspace, true, nil
 }
+
+func (s *Server) authorizedOrganizationRole(r *http.Request, userID string, orgID string) (domain.Role, bool, error) {
+	role, err := s.app.OrganizationRole(r.Context(), orgID, userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return role, true, nil
+}

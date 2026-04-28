@@ -53,6 +53,10 @@ func (a *App) ListOrganizations(ctx context.Context, userID string) ([]domain.Or
 	return a.store.Organizations().ListForUser(ctx, userID)
 }
 
+func (a *App) OrganizationRole(ctx context.Context, orgID string, userID string) (domain.Role, error) {
+	return a.store.Organizations().MemberRole(ctx, orgID, userID)
+}
+
 func (a *App) ListChannels(ctx context.Context, orgID string) ([]domain.Channel, error) {
 	return a.store.Channels().ListByOrganization(ctx, orgID)
 }
