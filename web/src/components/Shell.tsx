@@ -591,9 +591,6 @@ export function Shell({
   function openProjectFiles() {
     if (!projectWorkspace?.id) return;
     blurActiveElement();
-    setMainView("chat");
-    setAgentPanelOpen(false);
-    setMembersPanelOpen(false);
     setMobileNavOpen(false);
     setMobileAgentPanelOpen(false);
     setMobileMembersPanelOpen(false);
@@ -605,9 +602,6 @@ export function Shell({
   const openWorkspacePath = useCallback((target: WorkspacePathTarget) => {
     if (!projectWorkspaceIDRef.current) return;
     blurActiveElement();
-    setMainView("chat");
-    setAgentPanelOpen(false);
-    setMembersPanelOpen(false);
     setMobileNavOpen(false);
     setMobileAgentPanelOpen(false);
     setMobileMembersPanelOpen(false);
@@ -639,8 +633,6 @@ export function Shell({
       blurActiveElement();
       setProjectFilesOpen(false);
       setMobileProjectFilesView("tree");
-      setAgentPanelOpen(false);
-      setMembersPanelOpen(false);
       return;
     }
     openProjectFiles();
@@ -906,55 +898,63 @@ export function Shell({
           </div>
         )}
 
-        {projectFilesOpen ? (
-          mobileProjectFilesView === "tree" ? (
-            <WorkspaceFileTreePane
-              controller={projectFilesController}
-              title="Project files"
-              ariaLabel="Project files"
-              className="min-h-0 flex-1"
-              onFileSelected={() => setMobileProjectFilesView("editor")}
+        <div className="relative min-h-0 flex-1">
+          {mainView === "metrics" ? (
+            <MetricsPanel
+              project={project}
+              selectedChannel={selectedChannel}
+              activeConversation={activeConversation}
             />
           ) : (
-            <WorkspaceFileEditorPane
-              controller={projectFilesController}
+            <ConversationPanel
+              selectedChannel={selectedChannel}
+              activeThread={activeThread}
+              threads={threads}
+              messages={messages}
+              messagesLoading={messagesLoading}
+              olderMessagesLoading={olderMessagesLoading}
+              hasOlderMessages={hasOlderMessages}
+              streaming={streaming}
+              boundAgents={boundAgents}
+              preferences={preferences}
               theme={theme}
-              contentAriaLabel="Project file editor"
-              className="min-h-0 flex-1"
+              composerConversation={composerConversation}
+              onSelectThread={onSelectThread}
+              onCreateThread={onCreateThread}
+              onUpdateThread={onUpdateThread}
+              onDeleteThread={onDeleteThread}
+              onUpdateMessage={onUpdateMessage}
+              onDeleteMessage={onDeleteMessage}
+              onLoadOlderMessages={onLoadOlderMessages}
+              onMessageSent={onMessageSent}
+              workspacePath={projectWorkspace?.path}
+              onOpenWorkspacePath={openWorkspacePath}
             />
-          )
-        ) : mainView === "metrics" ? (
-          <MetricsPanel
-            project={project}
-            selectedChannel={selectedChannel}
-            activeConversation={activeConversation}
-          />
-        ) : (
-          <ConversationPanel
-            selectedChannel={selectedChannel}
-            activeThread={activeThread}
-            threads={threads}
-            messages={messages}
-            messagesLoading={messagesLoading}
-            olderMessagesLoading={olderMessagesLoading}
-            hasOlderMessages={hasOlderMessages}
-            streaming={streaming}
-            boundAgents={boundAgents}
-            preferences={preferences}
-            theme={theme}
-            composerConversation={composerConversation}
-            onSelectThread={onSelectThread}
-            onCreateThread={onCreateThread}
-            onUpdateThread={onUpdateThread}
-            onDeleteThread={onDeleteThread}
-            onUpdateMessage={onUpdateMessage}
-            onDeleteMessage={onDeleteMessage}
-            onLoadOlderMessages={onLoadOlderMessages}
-            onMessageSent={onMessageSent}
-            workspacePath={projectWorkspace?.path}
-            onOpenWorkspacePath={openWorkspacePath}
-          />
-        )}
+          )}
+          {projectFilesOpen && (
+            <div
+              className="absolute inset-0 z-20 flex min-h-0 flex-col bg-background"
+              data-testid="project-files-overlay"
+            >
+              {mobileProjectFilesView === "tree" ? (
+                <WorkspaceFileTreePane
+                  controller={projectFilesController}
+                  title="Project files"
+                  ariaLabel="Project files"
+                  className="min-h-0 flex-1"
+                  onFileSelected={() => setMobileProjectFilesView("editor")}
+                />
+              ) : (
+                <WorkspaceFileEditorPane
+                  controller={projectFilesController}
+                  theme={theme}
+                  contentAriaLabel="Project file editor"
+                  className="min-h-0 flex-1"
+                />
+              )}
+            </div>
+          )}
+        </div>
 
         <Dialog open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
           <DialogContent
@@ -1291,114 +1291,87 @@ export function Shell({
       </TooltipProvider>
 
       {/* Main Content */}
-      <ResizablePanelGroup direction="horizontal" className="flex-1">
-        {/* Channel Sidebar */}
-        <ResizablePanel defaultSize={18} minSize={15} maxSize={25}>
-          {projectFilesOpen ? (
-            <WorkspaceFileTreePane
-              controller={projectFilesController}
-              title="Project files"
-              ariaLabel="Project files"
-            />
-          ) : (
-          <div className="flex h-full min-h-0 flex-col bg-sidebar">
-            {/* Workspace Header */}
-            <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
-              <h2 className="truncate text-base font-semibold">
-                {project?.name ?? "No project"}
-              </h2>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                title="Project settings"
-                aria-label="Project settings"
-                disabled={!project}
-                onClick={openProjectSettings}
-              >
-                <ChevronDown className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <ScrollArea className="min-h-0 flex-1">
-              <div className="px-2 py-3">
-                {/* Channels */}
-                <ChannelList
-                  channels={channels}
-                  selectedChannelID={selectedChannel?.id}
-                  metricsActive={mainView === "metrics"}
-                  onSelect={selectSidebarChannel}
-                  onOpenMetrics={openMetrics}
-                  onCreate={() => setChannelDraftOpen(true)}
-                  onUpdate={onUpdateChannel}
-                  onDelete={onDeleteChannel}
-                />
-
-                {/* Agents Section */}
-                <AgentsSidebar
-                  agents={activeAgents}
-                  boundAgents={boundAgents}
-                  contextLoading={contextLoading}
-                  onOpenPanel={(agentID) => {
-                    if (agentID) setFocusedAgentID(agentID);
-                    setMembersPanelOpen(false);
-                    setAgentPanelOpen(true);
-                  }}
-                  onCreateAgent={() => setAgentDraftOpen(true)}
-                />
+      <div className="relative min-h-0 min-w-0 flex-1">
+        <ResizablePanelGroup direction="horizontal" className="h-full">
+          {/* Channel Sidebar */}
+          <ResizablePanel defaultSize={18} minSize={15} maxSize={25}>
+            <div className="flex h-full min-h-0 flex-col bg-sidebar">
+              {/* Workspace Header */}
+              <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
+                <h2 className="truncate text-base font-semibold">
+                  {project?.name ?? "No project"}
+                </h2>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  title="Project settings"
+                  aria-label="Project settings"
+                  disabled={!project}
+                  onClick={openProjectSettings}
+                >
+                  <ChevronDown className="h-4 w-4" />
+                </Button>
               </div>
-            </ScrollArea>
 
-            {/* User Info */}
-            <div className="flex shrink-0 items-center gap-2 border-t border-border bg-sidebar p-2">
-              <Avatar className="h-8 w-8">
-                <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-                  {initials(user.display_name)}
-                </AvatarFallback>
-              </Avatar>
-              <div className="flex-1 truncate">
-                <p className="text-sm font-medium">{user.display_name}</p>
-                <p className="text-xs text-muted-foreground">online</p>
+              <ScrollArea className="min-h-0 flex-1">
+                <div className="px-2 py-3">
+                  {/* Channels */}
+                  <ChannelList
+                    channels={channels}
+                    selectedChannelID={selectedChannel?.id}
+                    metricsActive={mainView === "metrics"}
+                    onSelect={selectSidebarChannel}
+                    onOpenMetrics={openMetrics}
+                    onCreate={() => setChannelDraftOpen(true)}
+                    onUpdate={onUpdateChannel}
+                    onDelete={onDeleteChannel}
+                  />
+
+                  {/* Agents Section */}
+                  <AgentsSidebar
+                    agents={activeAgents}
+                    boundAgents={boundAgents}
+                    contextLoading={contextLoading}
+                    onOpenPanel={(agentID) => {
+                      if (agentID) setFocusedAgentID(agentID);
+                      setMembersPanelOpen(false);
+                      setAgentPanelOpen(true);
+                    }}
+                    onCreateAgent={() => setAgentDraftOpen(true)}
+                  />
+                </div>
+              </ScrollArea>
+
+              {/* User Info */}
+              <div className="flex shrink-0 items-center gap-2 border-t border-border bg-sidebar p-2">
+                <Avatar className="h-8 w-8">
+                  <AvatarFallback className="bg-primary text-primary-foreground text-xs">
+                    {initials(user.display_name)}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1 truncate">
+                  <p className="text-sm font-medium">{user.display_name}</p>
+                  <p className="text-xs text-muted-foreground">online</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  title="User settings"
+                  aria-label="User settings"
+                  onClick={openAccountSettings}
+                >
+                  <Settings className="h-4 w-4" />
+                </Button>
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                title="User settings"
-                aria-label="User settings"
-                onClick={openAccountSettings}
-              >
-                <Settings className="h-4 w-4" />
-              </Button>
             </div>
-          </div>
-          )}
-        </ResizablePanel>
+          </ResizablePanel>
 
         <ResizableHandle withHandle />
 
         {/* Message Area */}
-        <ResizablePanel defaultSize={projectFilesOpen ? 82 : agentPanelOpen ? 37 : membersPanelOpen ? 62 : 82}>
-          {projectFilesOpen ? (
-            <WorkspaceFileEditorPane
-              controller={projectFilesController}
-              theme={theme}
-              contentAriaLabel="Project file editor"
-              toolbarEnd={
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0 bg-accent"
-                  title="Close project files"
-                  aria-label="Project files"
-                  aria-pressed="true"
-                  onClick={toggleProjectFiles}
-                >
-                  <FolderOpen className="h-4 w-4" />
-                </Button>
-              }
-            />
-          ) : (
+        <ResizablePanel defaultSize={agentPanelOpen ? 37 : membersPanelOpen ? 62 : 82}>
           <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
             {/* Channel Header */}
             <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
@@ -1546,7 +1519,6 @@ export function Shell({
             />
             )}
           </div>
-          )}
         </ResizablePanel>
 
         {/* Members Panel */}
@@ -1591,6 +1563,44 @@ export function Shell({
           </>
         )}
       </ResizablePanelGroup>
+      {projectFilesOpen && (
+        <div
+          className="absolute inset-0 z-30 min-h-0 min-w-0 bg-background shadow-2xl"
+          data-testid="project-files-overlay"
+        >
+          <ResizablePanelGroup direction="horizontal" className="h-full">
+            <ResizablePanel defaultSize={24} minSize={18} maxSize={36}>
+              <WorkspaceFileTreePane
+                controller={projectFilesController}
+                title="Project files"
+                ariaLabel="Project files"
+              />
+            </ResizablePanel>
+            <ResizableHandle withHandle />
+            <ResizablePanel defaultSize={76} minSize={48}>
+              <WorkspaceFileEditorPane
+                controller={projectFilesController}
+                theme={theme}
+                contentAriaLabel="Project file editor"
+                toolbarEnd={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 bg-accent"
+                    title="Close project files"
+                    aria-label="Close project files"
+                    aria-pressed="true"
+                    onClick={toggleProjectFiles}
+                  >
+                    <FolderOpen className="h-4 w-4" />
+                  </Button>
+                }
+              />
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </div>
+      )}
+      </div>
       </div>
       ) : null}
 
