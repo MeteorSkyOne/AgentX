@@ -95,6 +95,80 @@ test("mobile navigation, messaging, and side panels are usable", async ({ page }
   await expectNoHorizontalOverflow(page);
 });
 
+test("mobile messages keep wide markdown content accessible", async ({ page }) => {
+  await signInMobile(page);
+
+  const longToken = `mobile-wide-${"0123456789abcdef".repeat(18)}`;
+  const messageText = [
+    "mobile markdown stress",
+    "",
+    `Inline code: \`${longToken}\``,
+    "",
+    "```ts",
+    `const value = "${longToken}";`,
+    "```",
+    "",
+    "| field | value |",
+    "| --- | --- |",
+    `| token | ${longToken} |`,
+  ].join("\n");
+
+  const composer = page.getByRole("textbox", { name: "Message" });
+  await composer.fill(messageText);
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const messages = page.getByLabel("Messages");
+  const body = messages.getByTestId("message-body").filter({ hasText: "mobile markdown stress" }).first();
+  await expect(body).toBeVisible();
+
+  const bodyMetrics = await body.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    return {
+      overflowX: getComputedStyle(node).overflowX,
+      right: rect.right,
+      viewport: document.documentElement.clientWidth,
+    };
+  });
+  expect(bodyMetrics.overflowX).not.toBe("hidden");
+  expect(bodyMetrics.right).toBeLessThanOrEqual(bodyMetrics.viewport + 1);
+
+  const codeBlock = body.getByTestId("code-block").first();
+  await expect(codeBlock).toBeVisible();
+  const codeMetrics = await codeBlock.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    return {
+      clientWidth: node.clientWidth,
+      overflowX: getComputedStyle(node).overflowX,
+      right: rect.right,
+      scrollWidth: node.scrollWidth,
+      viewport: document.documentElement.clientWidth,
+    };
+  });
+  expect(codeMetrics.overflowX).toBe("auto");
+  expect(codeMetrics.right).toBeLessThanOrEqual(codeMetrics.viewport + 1);
+  expect(codeMetrics.scrollWidth).toBeGreaterThan(codeMetrics.clientWidth);
+
+  await codeBlock.evaluate((node) => {
+    node.scrollLeft = node.scrollWidth;
+  });
+  await expect.poll(() => codeBlock.evaluate((node) => node.scrollLeft)).toBeGreaterThan(0);
+
+  const table = body.locator("table").first();
+  await expect(table).toBeVisible();
+  const tableMetrics = await table.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    const firstHeader = node.querySelector("th");
+    return {
+      firstHeaderWidth: firstHeader?.getBoundingClientRect().width ?? 0,
+      right: rect.right,
+      viewport: document.documentElement.clientWidth,
+    };
+  });
+  expect(tableMetrics.firstHeaderWidth).toBeGreaterThan(80);
+  expect(tableMetrics.right).toBeLessThanOrEqual(tableMetrics.viewport + 1);
+  await expectNoHorizontalOverflow(page);
+});
+
 test("mobile navigation opens project settings", async ({ page }) => {
   await signInMobile(page);
 

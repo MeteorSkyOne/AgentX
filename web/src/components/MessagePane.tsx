@@ -28,6 +28,9 @@ const MarkdownRenderer = lazy(() =>
   import("./MarkdownRenderer").then((module) => ({ default: module.MarkdownRenderer }))
 );
 
+const messageBodyClassName =
+  "prose prose-sm min-w-0 w-full max-w-full overflow-x-auto break-words select-text dark:prose-invert";
+
 interface StreamingMessage {
   runID: string;
   agentID?: string;
@@ -137,13 +140,14 @@ export function MessagePane({
 
   return (
     <ScrollArea
-      className="min-h-0 flex-1"
+      className="min-h-0 min-w-0 flex-1"
       aria-label="Messages"
       viewportRef={viewportRef}
+      viewportClassName="[&>div]:!block [&>div]:!min-w-0 [&>div]:!w-full [&>div]:!max-w-full"
       onViewportScroll={handleScroll}
     >
-      <section className="p-3 md:p-4">
-        <div className="space-y-4">
+      <section className="min-w-0 max-w-full p-3 md:p-4">
+        <div className="min-w-0 max-w-full space-y-4">
           {isLoadingOlder && (
             <div className="py-2 text-center text-xs text-muted-foreground">
               Loading older messages...
@@ -293,7 +297,7 @@ function ConversationMessageItem({
 
   return (
     <div
-      className="group flex gap-3 rounded-md px-1 py-1 hover:bg-accent/30 md:gap-4 md:px-2"
+      className="group flex min-w-0 max-w-full gap-3 rounded-md px-1 py-1 hover:bg-accent/30 md:gap-4 md:px-2"
       data-message-id={message.id}
     >
       {isBot && agentID ? (
@@ -398,7 +402,7 @@ function ConversationMessageItem({
         ) : (
           <>
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <div className="prose prose-sm max-w-none overflow-hidden break-words select-text dark:prose-invert">
+            <div className={messageBodyClassName} data-testid="message-body">
               <MessageMarkdown text={message.body} />
             </div>
             {metricsParts.length > 0 && (
@@ -515,7 +519,7 @@ function StreamingItem({
   const process = processFromStreaming(item);
 
   return (
-    <div className={cn("group flex gap-3 rounded-md px-1 py-1 md:gap-4 md:px-2", isError && "opacity-70")}>
+    <div className={cn("group flex min-w-0 max-w-full gap-3 rounded-md px-1 py-1 md:gap-4 md:px-2", isError && "opacity-70")}>
       {isError ? (
         <Avatar className="h-10 w-10 shrink-0">
           <AvatarFallback className="text-white text-sm bg-destructive">
@@ -543,7 +547,7 @@ function StreamingItem({
           <span className="text-xs text-muted-foreground animate-pulse">streaming...</span>
         </div>
         {process.length > 0 && <ProcessBlock items={process} />}
-        <div className="prose prose-sm max-w-none overflow-hidden break-words select-text dark:prose-invert">
+        <div className={messageBodyClassName} data-testid="message-body">
           <MessageMarkdown text={item.error ?? item.text} />
         </div>
       </div>

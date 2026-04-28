@@ -68,9 +68,14 @@ const components: Components = {
     }
     return <td {...props}>{children}</td>;
   },
-  table: ({ children, node: _node, ...props }) => (
-    <div className="overflow-x-auto">
-      <table {...props}>{children}</table>
+  table: ({ children, className, node: _node, ...props }) => (
+    <div className="min-w-0 w-full max-w-full overflow-x-auto">
+      <table
+        {...props}
+        className={["table-fixed w-full max-w-full", className].filter(Boolean).join(" ")}
+      >
+        {children}
+      </table>
     </div>
   ),
 };

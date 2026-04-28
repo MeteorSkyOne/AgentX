@@ -132,6 +132,8 @@
     border-radius: 0.25rem;
     font-size: 0.85em;
     font-weight: 500;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
   .prose code::before,
   .prose code::after {
@@ -140,6 +142,9 @@
   .prose {
     --tw-prose-bold: var(--muted-foreground);
     --tw-prose-quotes: var(--muted-foreground);
+  }
+  .prose :where(a, p, li, blockquote, td, th):not(:where(pre *, code *)) {
+    overflow-wrap: anywhere;
   }
   .prose :where(input[type="checkbox"]) {
     appearance: none;
@@ -163,13 +168,17 @@
   }
   .prose :where(table) {
     border-collapse: collapse;
+    max-width: 100%;
+    table-layout: fixed;
     width: 100%;
   }
   .prose :where(th),
   .prose :where(td) {
     border: 1px solid color-mix(in oklch, var(--muted-foreground) 50%, transparent);
+    overflow-wrap: anywhere;
     padding: 0.5rem 0.75rem !important;
     text-align: left;
+    word-break: break-word;
   }
   .prose :where(th) {
     background: color-mix(in oklch, var(--muted) 50%, transparent);

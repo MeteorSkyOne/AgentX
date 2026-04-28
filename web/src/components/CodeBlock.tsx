@@ -95,7 +95,7 @@ function FencedCodeBlock({
   }, [code]);
 
   return (
-    <div className="group/code relative my-2 overflow-x-auto rounded-md bg-[#282c34] dark:bg-sidebar">
+    <div className="group/code relative my-2 min-w-0 w-full max-w-full overflow-hidden rounded-md bg-[#282c34] dark:bg-sidebar">
       <div className="flex items-center justify-between px-3 pt-2">
         {language && (
           <span className="text-xs text-white/60 dark:text-muted-foreground">{language}</span>
@@ -113,14 +113,16 @@ function FencedCodeBlock({
           )}
         </button>
       </div>
-      <SyntaxHighlighter
-        language={language}
-        style={codeStyle}
-        PreTag="div"
-        customStyle={{ background: "transparent", margin: 0 }}
-      >
-        {code}
-      </SyntaxHighlighter>
+      <div className="min-w-0 w-full max-w-full overflow-x-auto" data-testid="code-block">
+        <SyntaxHighlighter
+          language={language}
+          style={codeStyle}
+          PreTag="div"
+          customStyle={{ background: "transparent", margin: 0, minWidth: "max-content" }}
+        >
+          {code}
+        </SyntaxHighlighter>
+      </div>
     </div>
   );
 }

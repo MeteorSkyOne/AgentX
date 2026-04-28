@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { firstProject, seedDenseNavigation, setLightTheme, setMonacoEditorValue, signIn, writeWorkspaceFile } from "./helpers";
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -36,6 +36,28 @@ test("captures diagnostic screenshots for AI review", async ({ page }, testInfo)
     await page.getByRole("button", { name: "Back to files" }).click();
     await page.getByRole("button", { name: "Back to chat" }).click();
     await capture(page, testInfo, "09-mobile-restored-chat");
+
+    await sendWideMarkdownMessage(page);
+    const wideMessage = page
+      .getByLabel("Messages")
+      .getByTestId("message-body")
+      .filter({ hasText: "mobile screenshot markdown stress" })
+      .last();
+    await expect(wideMessage).toBeVisible();
+    await expect(wideMessage.getByTestId("code-block").first()).toBeVisible();
+    await expect(wideMessage.locator("table").first()).toBeVisible();
+    await expectElementRightInsideViewport(page, wideMessage.locator("table").first());
+    await expectFirstTableColumnReadable(wideMessage.locator("table").first());
+    const wideMessageRow = wideMessage.locator("xpath=ancestor::*[@data-message-id][1]");
+    await expect(wideMessageRow).toBeVisible();
+    await positionElementAtTopOfMessages(wideMessageRow);
+    await expect(page.getByText("Echo: mobile screenshot markdown stress", { exact: true })).toBeInViewport({ ratio: 1 });
+    await expectNoHorizontalOverflow(page);
+    await capture(page, testInfo, "04-mobile-wide-markdown-message");
+
+    await clearDefaultChannelMessages(page);
+    await page.reload();
+    await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
   } else {
     await page.getByRole("button", { name: "Project files" }).click();
     await capture(page, testInfo, "09-restored-chat");
@@ -96,6 +118,70 @@ async function capture(page: Page, testInfo: TestInfo, name: string) {
   const filePath = path.join(dir, `${name}.png`);
   await page.screenshot({ path: filePath, animations: "disabled" });
   await testInfo.attach(name, { path: filePath, contentType: "image/png" });
+}
+
+async function sendWideMarkdownMessage(page: Page) {
+  const longToken = `mobile-wide-${"0123456789abcdef".repeat(8)}`;
+  const messageText = [
+    "mobile screenshot markdown stress",
+    "",
+    `Inline code: \`${longToken}\``,
+    "",
+    "```ts",
+    `const value = "${longToken}";`,
+    "```",
+    "",
+    "| field | value |",
+    "| --- | --- |",
+    `| token | ${longToken} |`,
+  ].join("\n");
+
+  await page.getByRole("textbox", { name: "Message" }).fill(messageText);
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("Echo: mobile screenshot markdown stress", { exact: true })).toBeVisible();
+}
+
+async function positionElementAtTopOfMessages(locator: Locator) {
+  await locator.evaluate((node) => {
+    const target = node as HTMLElement;
+    const viewport = target.closest('[data-slot="scroll-area-viewport"]') as HTMLElement | null;
+    if (!viewport) {
+      target.scrollIntoView({ block: "start" });
+      return;
+    }
+
+    const targetTop = target.getBoundingClientRect().top;
+    const viewportTop = viewport.getBoundingClientRect().top;
+    viewport.scrollTop += targetTop - viewportTop - 12;
+  });
+}
+
+async function expectNoHorizontalOverflow(page: Page) {
+  const widths = await page.evaluate(() => ({
+    body: document.body.scrollWidth,
+    doc: document.documentElement.scrollWidth,
+    viewport: document.documentElement.clientWidth,
+  }));
+  expect(Math.max(widths.body, widths.doc)).toBeLessThanOrEqual(widths.viewport + 1);
+}
+
+async function expectElementRightInsideViewport(page: Page, locator: Locator) {
+  const metrics = await locator.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    return {
+      right: rect.right,
+      viewport: document.documentElement.clientWidth,
+    };
+  });
+  expect(metrics.right).toBeLessThanOrEqual(metrics.viewport + 1);
+}
+
+async function expectFirstTableColumnReadable(locator: Locator) {
+  const width = await locator.evaluate((node) => {
+    const firstHeader = node.querySelector("th");
+    return firstHeader?.getBoundingClientRect().width ?? 0;
+  });
+  expect(width).toBeGreaterThan(80);
 }
 
 async function clearDefaultChannelMessages(page: Page) {
