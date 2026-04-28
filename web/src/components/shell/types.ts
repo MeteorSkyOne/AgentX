@@ -17,6 +17,7 @@ import type {
   User,
   UserPreferences,
   Workspace,
+  WorkspaceEntryType,
   WorkspaceTreeEntry,
 } from "../../api/types";
 import type { ThemeMode } from "../../theme";
@@ -129,6 +130,13 @@ export interface ShellProps {
   onReadWorkspaceFile: (workspaceID: string, path: string) => Promise<string>;
   onWriteWorkspaceFile: (workspaceID: string, path: string, body: string) => Promise<void>;
   onDeleteWorkspaceFile: (workspaceID: string, path: string) => Promise<void>;
+  onCreateWorkspaceEntry: (
+    workspaceID: string,
+    path: string,
+    type: WorkspaceEntryType
+  ) => Promise<void>;
+  onMoveWorkspaceEntry: (workspaceID: string, path: string, newPath: string) => Promise<void>;
+  onDeleteWorkspaceEntry: (workspaceID: string, path: string) => Promise<void>;
   onUpdateMessage: (messageID: string, body: string) => Promise<Message>;
   onDeleteMessage: (message: Message) => Promise<void>;
   onLoadOlderMessages: () => boolean;

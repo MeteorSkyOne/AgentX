@@ -187,6 +187,13 @@ export interface Project {
   updated_at: string;
 }
 
+export type WorkspaceEntryType = "file" | "directory";
+
+export interface WorkspaceEntry {
+  path: string;
+  type: WorkspaceEntryType;
+}
+
 export interface Thread {
   id: string;
   organization_id: string;

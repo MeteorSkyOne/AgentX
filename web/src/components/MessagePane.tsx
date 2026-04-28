@@ -1123,6 +1123,7 @@ export function createReadOnlyAttachmentEditorController(
     fileLoadError: null,
     fileSaving: false,
     fileDeleting: false,
+    entryActionPending: false,
     workspaceStatus: null,
     fileOpenPosition: undefined,
     fileOpenRequestID: 0,
@@ -1135,6 +1136,10 @@ export function createReadOnlyAttachmentEditorController(
     loadFile: asyncNoop,
     saveFile: asyncNoop,
     deleteFile: asyncNoop,
+    createEntry: async () => null,
+    renameEntry: async () => null,
+    deleteEntry: asyncNoop,
+    moveEntry: async () => null,
   };
 }
 

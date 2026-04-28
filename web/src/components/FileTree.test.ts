@@ -66,6 +66,54 @@ describe("FileTree helpers", () => {
     expect(onLoadDirectory).not.toHaveBeenCalled();
     expect(screen.getByRole("treeitem", { name: "components" })).toBeTruthy();
   });
+
+  it("moves a dragged entry onto a directory", () => {
+    const onMoveEntry = vi.fn();
+    const transfer = dragDataTransfer();
+
+    render(
+      createElement(FileTree, {
+        tree: workspaceTree(),
+        onSelectFile: vi.fn(),
+        onMoveEntry,
+      })
+    );
+
+    fireEvent.dragStart(screen.getByRole("treeitem", { name: "README.md" }), {
+      dataTransfer: transfer,
+    });
+    fireEvent.dragOver(screen.getByRole("treeitem", { name: "src" }), {
+      dataTransfer: transfer,
+    });
+    fireEvent.drop(screen.getByRole("treeitem", { name: "src" }), {
+      dataTransfer: transfer,
+    });
+
+    expect(onMoveEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "README.md" }),
+      "src"
+    );
+  });
+
+  it("opens the root context menu from blank tree space", async () => {
+    const onCreateEntry = vi.fn();
+
+    render(
+      createElement(FileTree, {
+        tree: workspaceTree(),
+        onSelectFile: vi.fn(),
+        onCreateEntry,
+      })
+    );
+
+    const treeTrigger = screen.getByRole("tree").closest("[data-slot='context-menu-trigger']");
+    expect(treeTrigger).toBeTruthy();
+
+    fireEvent.contextMenu(treeTrigger as HTMLElement);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New file" }));
+
+    expect(onCreateEntry).toHaveBeenCalledWith("", "file");
+  });
 });
 
 function workspaceTree(): FileTreeEntry {
@@ -123,5 +171,28 @@ function lazyWorkspaceTree(): FileTreeEntry {
         type: "file"
       }
     ]
+  };
+}
+
+function dragDataTransfer(): DataTransfer {
+  const values = new Map<string, string>();
+  return {
+    dropEffect: "none",
+    effectAllowed: "all",
+    files: [] as unknown as FileList,
+    items: [] as unknown as DataTransferItemList,
+    types: [],
+    clearData: vi.fn((type?: string) => {
+      if (type) {
+        values.delete(type);
+        return;
+      }
+      values.clear();
+    }),
+    getData: vi.fn((type: string) => values.get(type) ?? ""),
+    setData: vi.fn((type: string, value: string) => {
+      values.set(type, value);
+    }),
+    setDragImage: vi.fn(),
   };
 }

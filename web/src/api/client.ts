@@ -23,6 +23,8 @@ import type {
   User,
   UserPreferences,
   Workspace,
+  WorkspaceEntry,
+  WorkspaceEntryType,
   WorkspaceFile,
   WorkspaceTreeEntry
 } from "./types";
@@ -410,6 +412,45 @@ export function deleteWorkspaceFile(workspaceID: string, path: string): Promise<
   const params = new URLSearchParams({ path });
   return request<void>(
     `/api/workspaces/${encodeURIComponent(workspaceID)}/files?${params.toString()}`,
+    {
+      method: "DELETE"
+    }
+  );
+}
+
+export function createWorkspaceEntry(
+  workspaceID: string,
+  path: string,
+  type: WorkspaceEntryType,
+  body?: string
+): Promise<WorkspaceEntry> {
+  return request<WorkspaceEntry>(
+    `/api/workspaces/${encodeURIComponent(workspaceID)}/entries`,
+    {
+      method: "POST",
+      body: JSON.stringify({ path, type, body })
+    }
+  );
+}
+
+export function moveWorkspaceEntry(
+  workspaceID: string,
+  path: string,
+  newPath: string
+): Promise<WorkspaceEntry> {
+  return request<WorkspaceEntry>(
+    `/api/workspaces/${encodeURIComponent(workspaceID)}/entries`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ path, new_path: newPath })
+    }
+  );
+}
+
+export function deleteWorkspaceEntry(workspaceID: string, path: string): Promise<void> {
+  const params = new URLSearchParams({ path });
+  return request<void>(
+    `/api/workspaces/${encodeURIComponent(workspaceID)}/entries?${params.toString()}`,
     {
       method: "DELETE"
     }

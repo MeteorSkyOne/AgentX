@@ -10,11 +10,13 @@ import {
   createChannel,
   createProject,
   createThread,
+  createWorkspaceEntry,
   deleteAgent,
   deleteChannel,
   deleteMessage,
   deleteProject,
   deleteThread,
+  deleteWorkspaceEntry,
   deleteWorkspaceFile,
   getToken,
   logout as logoutRequest,
@@ -24,6 +26,7 @@ import {
   projectChannels,
   projects,
   putWorkspaceFile,
+  moveWorkspaceEntry,
   serverSettings,
   setChannelAgents,
   testNotificationSettings,
@@ -56,6 +59,7 @@ import type {
   TeamMetadata,
   Thread,
   UserPreferences,
+  WorkspaceEntryType,
   WorkspaceTreeEntry
 } from "./api/types";
 import { LoginView } from "./components/LoginView";
@@ -764,6 +768,22 @@ export default function App() {
     await deleteWorkspaceFile(workspaceID, path);
   }
 
+  async function handleCreateWorkspaceEntry(
+    workspaceID: string,
+    path: string,
+    type: WorkspaceEntryType
+  ) {
+    await createWorkspaceEntry(workspaceID, path, type);
+  }
+
+  async function handleMoveWorkspaceEntry(workspaceID: string, path: string, newPath: string) {
+    await moveWorkspaceEntry(workspaceID, path, newPath);
+  }
+
+  async function handleDeleteWorkspaceEntry(workspaceID: string, path: string) {
+    await deleteWorkspaceEntry(workspaceID, path);
+  }
+
   const handleToggleTheme = useCallback(() => {
     setTheme((current) => (current === "dark" ? "light" : "dark"));
   }, []);
@@ -845,6 +865,9 @@ export default function App() {
       onReadWorkspaceFile={handleReadWorkspaceFile}
       onWriteWorkspaceFile={handleWriteWorkspaceFile}
       onDeleteWorkspaceFile={handleDeleteWorkspaceFile}
+      onCreateWorkspaceEntry={handleCreateWorkspaceEntry}
+      onMoveWorkspaceEntry={handleMoveWorkspaceEntry}
+      onDeleteWorkspaceEntry={handleDeleteWorkspaceEntry}
       onUpdateMessage={handleUpdateMessage}
       onDeleteMessage={handleDeleteMessage}
       onLoadOlderMessages={handleLoadOlderMessages}

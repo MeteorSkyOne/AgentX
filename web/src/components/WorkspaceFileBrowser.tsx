@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { FormEvent, ReactNode } from "react";
 import { Database, FileText, FolderOpen, RefreshCw, Save, Trash2, X } from "lucide-react";
-import type { WorkspaceTreeEntry } from "@/api/types";
+import type { WorkspaceEntryType, WorkspaceTreeEntry } from "@/api/types";
 import type { ThemeMode } from "@/theme";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,9 @@ export interface WorkspaceFileBrowserActions {
   onReadFile: (workspaceID: string, path: string) => Promise<string>;
   onWriteFile: (workspaceID: string, path: string, body: string) => Promise<void>;
   onDeleteFile: (workspaceID: string, path: string) => Promise<void>;
+  onCreateEntry?: (workspaceID: string, path: string, type: WorkspaceEntryType) => Promise<void>;
+  onMoveEntry?: (workspaceID: string, path: string, newPath: string) => Promise<void>;
+  onDeleteEntry?: (workspaceID: string, path: string) => Promise<void>;
 }
 
 export interface WorkspaceFilePosition {
@@ -62,6 +65,7 @@ export interface WorkspaceFileBrowserController {
   fileLoadError: string | null;
   fileSaving: boolean;
   fileDeleting: boolean;
+  entryActionPending: boolean;
   workspaceStatus: string | null;
   fileOpenPosition?: WorkspaceFilePosition;
   fileOpenRequestID: number;
@@ -74,6 +78,14 @@ export interface WorkspaceFileBrowserController {
   loadFile: (path?: string, options?: WorkspaceFileOpenOptions) => Promise<void>;
   saveFile: () => Promise<void>;
   deleteFile: () => Promise<void>;
+  createEntry: (
+    parentPath: string,
+    name: string,
+    type: WorkspaceEntryType
+  ) => Promise<string | null>;
+  renameEntry: (entry: WorkspaceTreeEntry, name: string) => Promise<string | null>;
+  deleteEntry: (entry: WorkspaceTreeEntry) => Promise<void>;
+  moveEntry: (entry: WorkspaceTreeEntry, targetDirectoryPath: string) => Promise<string | null>;
 }
 
 export function useWorkspaceFileBrowser({
@@ -84,6 +96,9 @@ export function useWorkspaceFileBrowser({
   onReadFile,
   onWriteFile,
   onDeleteFile,
+  onCreateEntry,
+  onMoveEntry,
+  onDeleteEntry,
 }: Omit<WorkspaceFileBrowserProps, "theme">): WorkspaceFileBrowserController {
   const [filePath, setFilePath] = useState(initialPath);
   const [fileBody, setFileBody] = useState("");
@@ -97,6 +112,7 @@ export function useWorkspaceFileBrowser({
   const [fileLoadError, setFileLoadError] = useState<string | null>(null);
   const [fileSaving, setFileSaving] = useState(false);
   const [fileDeleting, setFileDeleting] = useState(false);
+  const [entryActionPending, setEntryActionPending] = useState(false);
   const [workspaceStatus, setWorkspaceStatus] = useState<string | null>(null);
   const [fileOpenPosition, setFileOpenPosition] = useState<WorkspaceFilePosition>();
   const [fileOpenRequestID, setFileOpenRequestID] = useState(0);
@@ -199,6 +215,24 @@ export function useWorkspaceFileBrowser({
     [loadDirectory, loadTree, tree]
   );
 
+  const refreshTreeForEntryPaths = useCallback(
+    async (paths: string[]) => {
+      const parentPaths = new Set(
+        paths.map((path) => parentWorkspaceDirectoryPath(path))
+      );
+      if (parentPaths.has("")) {
+        await loadTree({ quiet: true });
+        parentPaths.delete("");
+      }
+      for (const parentPath of parentPaths) {
+        if (workspaceTreeDirectoryLoaded(tree, parentPath)) {
+          await loadDirectory(parentPath, { quiet: true, force: true });
+        }
+      }
+    },
+    [loadDirectory, loadTree, tree]
+  );
+
   const loadFile = useCallback(
     async (path = filePath, options: WorkspaceFileOpenOptions = {}) => {
       const targetPath = path.trim();
@@ -264,6 +298,142 @@ export function useWorkspaceFileBrowser({
     }
   }, [filePath, onDeleteFile, refreshTreeForFilePath, workspaceID]);
 
+  const createEntry = useCallback(
+    async (parentPath: string, name: string, type: WorkspaceEntryType) => {
+      if (!workspaceID) return null;
+      const entryName = normalizeWorkspaceEntryName(name);
+      const targetPath = joinWorkspacePath(parentPath, entryName);
+      setEntryActionPending(true);
+      try {
+        if (onCreateEntry) {
+          await onCreateEntry(workspaceID, targetPath, type);
+        } else if (type === "file") {
+          await onWriteFile(workspaceID, targetPath, "");
+        } else {
+          throw new Error("Folder creation is not supported");
+        }
+        await refreshTreeForEntryPaths([targetPath]);
+        if (type === "file") {
+          fileRequestRef.current += 1;
+          setFilePath(targetPath);
+          setFileBody("");
+          setFileLoadError(null);
+          setFileOpenPosition(undefined);
+          setFileOpenRequestID(fileRequestRef.current);
+        }
+        setWorkspaceStatus(type === "directory" ? "Folder created" : "File created");
+        return targetPath;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Create failed";
+        setWorkspaceStatus(message);
+        throw err;
+      } finally {
+        setEntryActionPending(false);
+      }
+    },
+    [onCreateEntry, onWriteFile, refreshTreeForEntryPaths, workspaceID]
+  );
+
+  const renameEntry = useCallback(
+    async (entry: WorkspaceTreeEntry, name: string) => {
+      if (!workspaceID) return null;
+      const entryName = normalizeWorkspaceEntryName(name);
+      const targetPath = joinWorkspacePath(parentWorkspaceDirectoryPath(entry.path), entryName);
+      if (targetPath === entry.path) return targetPath;
+      if (!onMoveEntry) {
+        const message = "Rename is not supported";
+        setWorkspaceStatus(message);
+        throw new Error(message);
+      }
+      setEntryActionPending(true);
+      try {
+        await onMoveEntry(workspaceID, entry.path, targetPath);
+        setFilePath((currentPath) => replaceMovedWorkspacePath(currentPath, entry.path, targetPath));
+        setWorkspaceStatus("Renamed");
+        await refreshTreeForEntryPaths([entry.path, targetPath]);
+        return targetPath;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Rename failed";
+        setWorkspaceStatus(message);
+        throw err;
+      } finally {
+        setEntryActionPending(false);
+      }
+    },
+    [onMoveEntry, refreshTreeForEntryPaths, workspaceID]
+  );
+
+  const deleteEntry = useCallback(
+    async (entry: WorkspaceTreeEntry) => {
+      if (!workspaceID) return;
+      setEntryActionPending(true);
+      if (entry.path === filePath.trim()) {
+        setFileDeleting(true);
+      }
+      try {
+        if (onDeleteEntry) {
+          await onDeleteEntry(workspaceID, entry.path);
+        } else if (entry.type === "file") {
+          await onDeleteFile(workspaceID, entry.path);
+        } else {
+          throw new Error("Folder deletion is not supported");
+        }
+        const openPathAffected = workspacePathIsSameOrInside(filePath.trim(), entry.path);
+        setFilePath((currentPath) =>
+          workspacePathIsSameOrInside(currentPath.trim(), entry.path) ? "" : currentPath
+        );
+        if (openPathAffected) {
+          setFileBody("");
+          setFileLoadError(null);
+        }
+        setWorkspaceStatus("Deleted");
+        await refreshTreeForEntryPaths([entry.path]);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Delete failed";
+        setWorkspaceStatus(message);
+        throw err;
+      } finally {
+        setFileDeleting(false);
+        setEntryActionPending(false);
+      }
+    },
+    [filePath, onDeleteEntry, onDeleteFile, refreshTreeForEntryPaths, workspaceID]
+  );
+
+  const moveEntry = useCallback(
+    async (entry: WorkspaceTreeEntry, targetDirectoryPath: string) => {
+      if (!workspaceID) return null;
+      const targetDirectory = normalizeWorkspaceTreePath(targetDirectoryPath);
+      if (entry.type === "directory" && workspacePathIsSameOrInside(targetDirectory, entry.path)) {
+        const message = "A folder cannot be moved into itself";
+        setWorkspaceStatus(message);
+        throw new Error(message);
+      }
+      const targetPath = joinWorkspacePath(targetDirectory, entry.name);
+      if (targetPath === entry.path) return targetPath;
+      if (!onMoveEntry) {
+        const message = "Move is not supported";
+        setWorkspaceStatus(message);
+        throw new Error(message);
+      }
+      setEntryActionPending(true);
+      try {
+        await onMoveEntry(workspaceID, entry.path, targetPath);
+        setFilePath((currentPath) => replaceMovedWorkspacePath(currentPath, entry.path, targetPath));
+        setWorkspaceStatus("Moved");
+        await refreshTreeForEntryPaths([entry.path, targetPath]);
+        return targetPath;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Move failed";
+        setWorkspaceStatus(message);
+        throw err;
+      } finally {
+        setEntryActionPending(false);
+      }
+    },
+    [onMoveEntry, refreshTreeForEntryPaths, workspaceID]
+  );
+
   useEffect(() => {
     workspaceTreeRequestRef.current += 1;
     directoryRequestRef.current = {};
@@ -280,6 +450,7 @@ export function useWorkspaceFileBrowser({
     setFileLoading(false);
     setFileSaving(false);
     setFileDeleting(false);
+    setEntryActionPending(false);
     setFileOpenPosition(undefined);
     setFileOpenRequestID(0);
     setWorkspaceStatus(null);
@@ -306,6 +477,7 @@ export function useWorkspaceFileBrowser({
     fileLoadError,
     fileSaving,
     fileDeleting,
+    entryActionPending,
     workspaceStatus,
     fileOpenPosition,
     fileOpenRequestID,
@@ -318,6 +490,10 @@ export function useWorkspaceFileBrowser({
     loadFile,
     saveFile,
     deleteFile,
+    createEntry,
+    renameEntry,
+    deleteEntry,
+    moveEntry,
   };
 }
 
@@ -334,6 +510,42 @@ function normalizeWorkspaceFilePosition(
 function normalizeWorkspaceTreePath(path: string): string {
   const normalized = path.trim().replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
   return normalized === "." ? "" : normalized;
+}
+
+function normalizeWorkspaceEntryName(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    throw new Error("Name is required");
+  }
+  if (
+    trimmed === "." ||
+    trimmed === ".." ||
+    trimmed.includes("/") ||
+    trimmed.includes("\\")
+  ) {
+    throw new Error("Use a single file or folder name");
+  }
+  return trimmed;
+}
+
+function joinWorkspacePath(parentPath: string, name: string): string {
+  const normalizedParent = normalizeWorkspaceTreePath(parentPath);
+  return normalizedParent ? `${normalizedParent}/${name}` : name;
+}
+
+function workspacePathIsSameOrInside(path: string, parentPath: string): boolean {
+  const normalizedPath = normalizeWorkspaceTreePath(path);
+  const normalizedParent = normalizeWorkspaceTreePath(parentPath);
+  if (!normalizedPath || !normalizedParent) return normalizedPath === normalizedParent;
+  return normalizedPath === normalizedParent || normalizedPath.startsWith(`${normalizedParent}/`);
+}
+
+function replaceMovedWorkspacePath(path: string, sourcePath: string, targetPath: string): string {
+  const normalizedPath = normalizeWorkspaceTreePath(path);
+  const normalizedSource = normalizeWorkspaceTreePath(sourcePath);
+  const normalizedTarget = normalizeWorkspaceTreePath(targetPath);
+  if (!workspacePathIsSameOrInside(normalizedPath, normalizedSource)) return path;
+  return `${normalizedTarget}${normalizedPath.slice(normalizedSource.length)}`;
 }
 
 function parentWorkspaceDirectoryPath(path: string): string {
@@ -360,6 +572,40 @@ function findWorkspaceTreeEntry(
     }
   }
   return undefined;
+}
+
+function uniqueWorkspaceChildName(
+  tree: WorkspaceTreeEntry | undefined,
+  parentPath: string,
+  baseName: string
+): string {
+  const parent = findWorkspaceTreeEntry(tree, normalizeWorkspaceTreePath(parentPath));
+  const names = new Set((parent?.children ?? []).map((child) => child.name));
+  if (!names.has(baseName)) return baseName;
+
+  const dotIndex = baseName.lastIndexOf(".");
+  const hasExtension = dotIndex > 0 && dotIndex < baseName.length - 1;
+  const stem = hasExtension ? baseName.slice(0, dotIndex) : baseName;
+  const extension = hasExtension ? baseName.slice(dotIndex) : "";
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${stem}-${index}${extension}`;
+    if (!names.has(candidate)) return candidate;
+  }
+  return `${stem}-${Date.now()}${extension}`;
+}
+
+function workspaceEntryNameValidationError(name: string): string | null {
+  const trimmed = name.trim();
+  if (!trimmed) return "Name is required";
+  if (
+    trimmed === "." ||
+    trimmed === ".." ||
+    trimmed.includes("/") ||
+    trimmed.includes("\\")
+  ) {
+    return "Use a single file or folder name";
+  }
+  return null;
 }
 
 function mergeWorkspaceTreeEntry(
@@ -443,23 +689,235 @@ export function WorkspaceFileTree({
   className?: string;
   onFileSelected?: () => void;
 }) {
+  const [entryDialog, setEntryDialog] = useState<WorkspaceEntryDialog | null>(null);
+  const [entryName, setEntryName] = useState("");
+  const [entryDialogError, setEntryDialogError] = useState<string | null>(null);
+
+  const nameDialog = entryDialog?.kind === "create" || entryDialog?.kind === "rename"
+    ? entryDialog
+    : null;
+  const deleteDialog = entryDialog?.kind === "delete" ? entryDialog : null;
+
+  function openCreateDialog(parentPath: string, type: WorkspaceEntryType) {
+    setEntryDialog({ kind: "create", parentPath, entryType: type });
+    setEntryName(uniqueWorkspaceChildName(
+      controller.tree,
+      parentPath,
+      type === "directory" ? "new-folder" : "untitled.txt"
+    ));
+    setEntryDialogError(null);
+  }
+
+  function openRenameDialog(entry: WorkspaceTreeEntry) {
+    setEntryDialog({ kind: "rename", entry });
+    setEntryName(entry.name);
+    setEntryDialogError(null);
+  }
+
+  function openDeleteDialog(entry: WorkspaceTreeEntry) {
+    setEntryDialog({ kind: "delete", entry });
+    setEntryDialogError(null);
+  }
+
   return (
-    <FileTree
-      tree={controller.tree}
-      selectedPath={controller.filePath}
-      loading={controller.workspaceTreeLoading}
-      error={controller.workspaceTreeError}
-      className={cn("min-h-0", className)}
-      ariaLabel={ariaLabel}
-      resetKey={controller.workspaceTreeResetKey}
-      directoryLoadingPaths={controller.directoryLoadingPaths}
-      directoryErrors={controller.directoryLoadErrors}
-      onLoadDirectory={(path) => void controller.loadDirectory(path)}
-      onSelectFile={(path) => {
-        void controller.loadFile(path);
-        onFileSelected?.();
-      }}
-    />
+    <>
+      <FileTree
+        tree={controller.tree}
+        selectedPath={controller.filePath}
+        loading={controller.workspaceTreeLoading}
+        error={controller.workspaceTreeError}
+        className={cn("min-h-0", className)}
+        ariaLabel={ariaLabel}
+        resetKey={controller.workspaceTreeResetKey}
+        directoryLoadingPaths={controller.directoryLoadingPaths}
+        directoryErrors={controller.directoryLoadErrors}
+        canManageEntries={controller.canUseWorkspace && !controller.entryActionPending}
+        onLoadDirectory={(path) => void controller.loadDirectory(path)}
+        onSelectFile={(path) => {
+          void controller.loadFile(path);
+          onFileSelected?.();
+        }}
+        onCreateEntry={openCreateDialog}
+        onRenameEntry={openRenameDialog}
+        onDeleteEntry={openDeleteDialog}
+        onMoveEntry={(entry, targetDirectoryPath) => {
+          void controller.moveEntry(entry, targetDirectoryPath).catch(() => undefined);
+        }}
+      />
+      <WorkspaceEntryNameDialog
+        dialog={nameDialog}
+        name={entryName}
+        error={entryDialogError}
+        pending={controller.entryActionPending}
+        onNameChange={(name) => {
+          setEntryName(name);
+          setEntryDialogError(null);
+        }}
+        onOpenChange={(open) => {
+          if (!open) setEntryDialog(null);
+        }}
+        onSubmit={async () => {
+          const validationError = workspaceEntryNameValidationError(entryName);
+          if (validationError) {
+            setEntryDialogError(validationError);
+            return;
+          }
+          if (!nameDialog) return;
+          try {
+            if (nameDialog.kind === "create") {
+              await controller.createEntry(
+                nameDialog.parentPath,
+                entryName,
+                nameDialog.entryType
+              );
+            } else {
+              await controller.renameEntry(nameDialog.entry, entryName);
+            }
+            setEntryDialog(null);
+          } catch (err) {
+            setEntryDialogError(err instanceof Error ? err.message : "Action failed");
+          }
+        }}
+      />
+      <WorkspaceEntryDeleteDialog
+        dialog={deleteDialog}
+        error={entryDialogError}
+        pending={controller.entryActionPending}
+        onOpenChange={(open) => {
+          if (!open) setEntryDialog(null);
+        }}
+        onDelete={async () => {
+          if (!deleteDialog) return;
+          try {
+            await controller.deleteEntry(deleteDialog.entry);
+            setEntryDialog(null);
+          } catch (err) {
+            setEntryDialogError(err instanceof Error ? err.message : "Delete failed");
+          }
+        }}
+      />
+    </>
+  );
+}
+
+type WorkspaceEntryDialog =
+  | { kind: "create"; parentPath: string; entryType: WorkspaceEntryType }
+  | { kind: "rename"; entry: WorkspaceTreeEntry }
+  | { kind: "delete"; entry: WorkspaceTreeEntry };
+
+function WorkspaceEntryNameDialog({
+  dialog,
+  name,
+  error,
+  pending,
+  onNameChange,
+  onOpenChange,
+  onSubmit,
+}: {
+  dialog: Extract<WorkspaceEntryDialog, { kind: "create" | "rename" }> | null;
+  name: string;
+  error: string | null;
+  pending: boolean;
+  onNameChange: (name: string) => void;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: () => Promise<void>;
+}) {
+  const isCreate = dialog?.kind === "create";
+  const entryType = isCreate ? dialog.entryType : dialog?.entry.type;
+  const title = isCreate
+    ? `New ${entryType === "directory" ? "folder" : "file"}`
+    : `Rename ${entryType === "directory" ? "folder" : "file"}`;
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await onSubmit();
+  }
+
+  return (
+    <Dialog open={Boolean(dialog)} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>
+            {isCreate
+              ? "Create an entry in this workspace."
+              : "Set a new name for this workspace entry."}
+          </DialogDescription>
+        </DialogHeader>
+        <form className="space-y-3" onSubmit={handleSubmit}>
+          <Input
+            value={name}
+            onChange={(event) => onNameChange(event.target.value)}
+            aria-label="Entry name"
+            autoFocus
+          />
+          {error && <p className="text-xs text-destructive">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={pending}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={pending || !name.trim()}>
+              {isCreate ? "Create" : "Rename"}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function WorkspaceEntryDeleteDialog({
+  dialog,
+  error,
+  pending,
+  onOpenChange,
+  onDelete,
+}: {
+  dialog: Extract<WorkspaceEntryDialog, { kind: "delete" }> | null;
+  error: string | null;
+  pending: boolean;
+  onOpenChange: (open: boolean) => void;
+  onDelete: () => Promise<void>;
+}) {
+  const entry = dialog?.entry;
+
+  return (
+    <Dialog open={Boolean(dialog)} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete {entry?.type === "directory" ? "folder" : "file"}?</DialogTitle>
+          <DialogDescription>
+            {entry
+              ? entry.type === "directory"
+                ? `${entry.path} and its contents will be removed from this workspace.`
+                : `${entry.path} will be removed from this workspace.`
+              : "This workspace entry will be removed."}
+          </DialogDescription>
+        </DialogHeader>
+        {error && <p className="text-xs text-destructive">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={pending}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={() => void onDelete()}
+            disabled={pending || !entry}
+          >
+            Delete
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -686,6 +1144,9 @@ export function WorkspaceFileBrowser({
   onReadFile,
   onWriteFile,
   onDeleteFile,
+  onCreateEntry,
+  onMoveEntry,
+  onDeleteEntry,
 }: WorkspaceFileBrowserProps) {
   const [fileDeleteConfirmOpen, setFileDeleteConfirmOpen] = useState(false);
   const [treeDrawerOpen, setTreeDrawerOpen] = useState(false);
@@ -700,6 +1161,9 @@ export function WorkspaceFileBrowser({
     onReadFile,
     onWriteFile,
     onDeleteFile,
+    onCreateEntry,
+    onMoveEntry,
+    onDeleteEntry,
   });
 
   useEffect(() => {

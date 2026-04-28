@@ -63,6 +63,9 @@ export function AgentDetailsPanel({
   onReadWorkspaceFile,
   onWriteWorkspaceFile,
   onDeleteWorkspaceFile,
+  onCreateWorkspaceEntry,
+  onMoveWorkspaceEntry,
+  onDeleteWorkspaceEntry,
   onCreateAgentModal,
   onClose,
   theme
@@ -78,6 +81,9 @@ export function AgentDetailsPanel({
   onReadWorkspaceFile: ShellProps["onReadWorkspaceFile"];
   onWriteWorkspaceFile: ShellProps["onWriteWorkspaceFile"];
   onDeleteWorkspaceFile: ShellProps["onDeleteWorkspaceFile"];
+  onCreateWorkspaceEntry: ShellProps["onCreateWorkspaceEntry"];
+  onMoveWorkspaceEntry: ShellProps["onMoveWorkspaceEntry"];
+  onDeleteWorkspaceEntry: ShellProps["onDeleteWorkspaceEntry"];
   onCreateAgentModal: () => void;
   onClose: () => void;
   theme: ThemeMode;
@@ -525,6 +531,9 @@ export function AgentDetailsPanel({
               onReadFile={onReadWorkspaceFile}
               onWriteFile={onWriteWorkspaceFile}
               onDeleteFile={onDeleteWorkspaceFile}
+              onCreateEntry={onCreateWorkspaceEntry}
+              onMoveEntry={onMoveWorkspaceEntry}
+              onDeleteEntry={onDeleteWorkspaceEntry}
             />
           </div>
         </TabsContent>

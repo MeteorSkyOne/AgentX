@@ -143,6 +143,9 @@ export function Shell({
   onReadWorkspaceFile,
   onWriteWorkspaceFile,
   onDeleteWorkspaceFile,
+  onCreateWorkspaceEntry,
+  onMoveWorkspaceEntry,
+  onDeleteWorkspaceEntry,
   onUpdateMessage,
   onDeleteMessage,
   onLoadOlderMessages,
@@ -259,6 +262,9 @@ export function Shell({
     onReadFile: onReadWorkspaceFile,
     onWriteFile: onWriteWorkspaceFile,
     onDeleteFile: onDeleteWorkspaceFile,
+    onCreateEntry: onCreateWorkspaceEntry,
+    onMoveEntry: onMoveWorkspaceEntry,
+    onDeleteEntry: onDeleteWorkspaceEntry,
   });
   const projectWorkspaceIDRef = useRef(projectWorkspace?.id);
   const projectLoadFileRef = useRef(projectFilesController.loadFile);
@@ -1174,6 +1180,9 @@ export function Shell({
               onReadWorkspaceFile={onReadWorkspaceFile}
               onWriteWorkspaceFile={onWriteWorkspaceFile}
               onDeleteWorkspaceFile={onDeleteWorkspaceFile}
+              onCreateWorkspaceEntry={onCreateWorkspaceEntry}
+              onMoveWorkspaceEntry={onMoveWorkspaceEntry}
+              onDeleteWorkspaceEntry={onDeleteWorkspaceEntry}
               onCreateAgentModal={() => setAgentDraftOpen(true)}
               onClose={() => setMobileAgentPanelOpen(false)}
               theme={theme}
@@ -1555,6 +1564,9 @@ export function Shell({
                 onReadWorkspaceFile={onReadWorkspaceFile}
                 onWriteWorkspaceFile={onWriteWorkspaceFile}
                 onDeleteWorkspaceFile={onDeleteWorkspaceFile}
+                onCreateWorkspaceEntry={onCreateWorkspaceEntry}
+                onMoveWorkspaceEntry={onMoveWorkspaceEntry}
+                onDeleteWorkspaceEntry={onDeleteWorkspaceEntry}
                 onCreateAgentModal={() => setAgentDraftOpen(true)}
                 onClose={() => setAgentPanelOpen(false)}
                 theme={theme}

@@ -637,6 +637,71 @@ func TestHTTPWorkspaceFilesRejectTraversalAndRoundTripText(t *testing.T) {
 	getJSON(t, fileURL, bootstrap.SessionToken, http.StatusNotFound, nil)
 }
 
+func TestHTTPWorkspaceEntriesManageFilesAndDirectories(t *testing.T) {
+	ts := newTestServer(t)
+
+	bootstrap := setupHTTP(t, ts.URL)
+	entriesURL := ts.URL + "/api/workspaces/" + bootstrap.Workspace.ID + "/entries"
+	filesURL := ts.URL + "/api/workspaces/" + bootstrap.Workspace.ID + "/files"
+
+	var createdDir workspaceEntryResponse
+	postJSON(t, entriesURL, bootstrap.SessionToken, map[string]string{
+		"path": "src",
+		"type": "directory",
+	}, http.StatusCreated, &createdDir)
+	if createdDir.Path != "src" || createdDir.Type != "directory" {
+		t.Fatalf("created directory = %#v, want src directory", createdDir)
+	}
+
+	postJSON(t, entriesURL, bootstrap.SessionToken, map[string]string{
+		"path": "src/main.go",
+		"type": "file",
+		"body": "package main",
+	}, http.StatusCreated, nil)
+
+	var file struct {
+		Body string `json:"body"`
+	}
+	getJSON(t, filesURL+"?path=src/main.go", bootstrap.SessionToken, http.StatusOK, &file)
+	if file.Body != "package main" {
+		t.Fatalf("created file body = %q, want package main", file.Body)
+	}
+
+	var moved workspaceEntryResponse
+	patchJSON(t, entriesURL, bootstrap.SessionToken, map[string]string{
+		"path":     "src/main.go",
+		"new_path": "src/app.go",
+	}, http.StatusOK, &moved)
+	if moved.Path != "src/app.go" || moved.Type != "file" {
+		t.Fatalf("renamed file = %#v, want src/app.go file", moved)
+	}
+	getJSON(t, filesURL+"?path=src/main.go", bootstrap.SessionToken, http.StatusNotFound, nil)
+	getJSON(t, filesURL+"?path=src/app.go", bootstrap.SessionToken, http.StatusOK, &file)
+
+	postJSON(t, entriesURL, bootstrap.SessionToken, map[string]string{
+		"path": "pkg",
+		"type": "directory",
+	}, http.StatusCreated, nil)
+	patchJSON(t, entriesURL, bootstrap.SessionToken, map[string]string{
+		"path":     "src/app.go",
+		"new_path": "pkg/app.go",
+	}, http.StatusOK, nil)
+	getJSON(t, filesURL+"?path=pkg/app.go", bootstrap.SessionToken, http.StatusOK, &file)
+
+	deleteJSON(t, entriesURL+"?path=pkg", bootstrap.SessionToken, http.StatusNoContent)
+	getJSON(t, filesURL+"?path=pkg/app.go", bootstrap.SessionToken, http.StatusNotFound, nil)
+
+	postJSON(t, entriesURL, bootstrap.SessionToken, map[string]string{
+		"path": "../secret",
+		"type": "file",
+	}, http.StatusBadRequest, nil)
+	patchJSON(t, entriesURL, bootstrap.SessionToken, map[string]string{
+		"path":     "src",
+		"new_path": "src/child",
+	}, http.StatusBadRequest, nil)
+	deleteJSON(t, entriesURL+"?path=src/..", bootstrap.SessionToken, http.StatusBadRequest)
+}
+
 func TestHTTPWorkspaceTreeLazyLoadsDirectories(t *testing.T) {
 	ts := newTestServer(t)
 
