@@ -42,6 +42,7 @@ export function shouldShowBrowserNotification(
 ): boolean {
   return (
     message.sender_type === "bot" &&
+    !isTeamDiscussionMessage(message) &&
     browserNotificationPermission(runtime) === "granted" &&
     pageIsInactive(runtime)
   );
@@ -88,6 +89,11 @@ function globalWindow(): Pick<Window, "focus"> | undefined {
     return undefined;
   }
   return window;
+}
+
+function isTeamDiscussionMessage(message: Message): boolean {
+  const team = message.metadata?.team;
+  return Boolean(team?.session_id && team.phase !== "summary");
 }
 
 function notificationBody(value: string): string {

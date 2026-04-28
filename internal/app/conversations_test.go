@@ -760,6 +760,55 @@ func TestAgentMessageWebhookPostsSignedPayload(t *testing.T) {
 	}
 }
 
+func TestTeamDiscussionMessageDoesNotNotify(t *testing.T) {
+	discussion := domain.Message{
+		ID:             "msg_discussion",
+		SenderType:     domain.SenderBot,
+		OrganizationID: "org_1",
+		Metadata: map[string]any{
+			"team": domain.TeamMetadata{
+				SessionID:     "team_1",
+				RootMessageID: "msg_root",
+				LeaderAgentID: "agt_1",
+				Phase:         "discussion",
+				Turn:          1,
+			},
+		},
+	}
+	if !isTeamDiscussionMessage(discussion) {
+		t.Fatal("discussion team message should be suppressed")
+	}
+
+	summary := discussion
+	summary.ID = "msg_summary"
+	summary.Metadata = map[string]any{
+		"team": domain.TeamMetadata{
+			SessionID:     "team_1",
+			RootMessageID: "msg_root",
+			LeaderAgentID: "agt_1",
+			Phase:         "summary",
+			Turn:          2,
+		},
+	}
+	if isTeamDiscussionMessage(summary) {
+		t.Fatal("summary team message should notify")
+	}
+
+	decodedDiscussion := discussion
+	decodedDiscussion.Metadata = map[string]any{
+		"team": map[string]any{
+			"session_id":      "team_1",
+			"root_message_id": "msg_root",
+			"leader_agent_id": "agt_1",
+			"phase":           "leader",
+			"turn":            float64(1),
+		},
+	}
+	if !isTeamDiscussionMessage(decodedDiscussion) {
+		t.Fatal("decoded discussion team message should be suppressed")
+	}
+}
+
 func TestRenderWebhookURLSubstitutesAndTruncatesPlaceholders(t *testing.T) {
 	longBody := strings.Repeat("x", webhookURLBodyLimit+10)
 	got, err := renderWebhookURL("https://example.com/${title}/${body}", AgentMessageWebhookPayload{
@@ -969,7 +1018,8 @@ func TestAgentTeamHandoffRunsMemberAndLeaderSummary(t *testing.T) {
 
 	rt := &teamScriptRuntime{handlers: map[string]func(agentruntime.Input) string{
 		bootstrap.Agent.ID: func(input agentruntime.Input) string {
-			if strings.Contains(input.Prompt, "team discussion is complete") {
+			if strings.Contains(input.Prompt, "Review the team discussion") ||
+				strings.Contains(input.Prompt, "team discussion is complete") {
 				return "Final summary"
 			}
 			return "@agent_two evaluate the storage plan"
@@ -1030,6 +1080,212 @@ func TestAgentTeamHandoffRunsMemberAndLeaderSummary(t *testing.T) {
 		!strings.Contains(inputs[0].input.Context, "@agent_two") ||
 		!strings.Contains(inputs[0].input.Prompt, "evaluate the storage plan") {
 		t.Fatalf("member input = %#v", inputs[0])
+	}
+}
+
+func TestAgentTeamDoesNotRepeatInitiallyMentionedAgent(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	second, err := app.CreateAgent(ctx, AgentCreateRequest{
+		UserID:         bootstrap.User.ID,
+		OrganizationID: bootstrap.Organization.ID,
+		Name:           "Agent Two",
+		Handle:         "agent_two",
+		Kind:           domain.AgentKindFake,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SetChannelAgents(ctx, bootstrap.Channel.ID, []domain.ChannelAgent{
+		{AgentID: bootstrap.Agent.ID},
+		{AgentID: second.ID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := &teamScriptRuntime{handlers: map[string]func(agentruntime.Input) string{
+		bootstrap.Agent.ID: func(input agentruntime.Input) string {
+			if strings.Contains(input.Prompt, "Review the team discussion") ||
+				strings.Contains(input.Prompt, "team discussion is complete") {
+				return "Final summary"
+			}
+			return "@agent_two evaluate the storage plan"
+		},
+		second.ID: func(input agentruntime.Input) string {
+			return "Member initial"
+		},
+	}}
+	app.opts.Runtimes[domain.AgentKindFake] = rt
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "@" + bootstrap.Agent.Handle + " @agent_two plan the team feature",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	requireEventuallyApp(t, time.Second, func() bool {
+		messages, err := app.ListMessages(ctx, domain.ConversationChannel, bootstrap.Channel.ID, 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return messageBodyFromSender(messages, bootstrap.Agent.BotUserID, "Final summary")
+	})
+
+	if got := len(rt.inputsForAgent(second.ID)); got != 1 {
+		t.Fatalf("second agent inputs = %d, want 1", got)
+	}
+	messages, err := app.ListMessages(ctx, domain.ConversationChannel, bootstrap.Channel.ID, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := countBotMessagesFrom(messages, "Member initial", second.BotUserID); got != 1 {
+		t.Fatalf("second agent messages = %d, want 1", got)
+	}
+}
+
+func TestAgentTeamIgnoresMemberHandoffForScheduling(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	second, err := app.CreateAgent(ctx, AgentCreateRequest{
+		UserID:         bootstrap.User.ID,
+		OrganizationID: bootstrap.Organization.ID,
+		Name:           "Agent Two",
+		Handle:         "agent_two",
+		Kind:           domain.AgentKindFake,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := app.CreateAgent(ctx, AgentCreateRequest{
+		UserID:         bootstrap.User.ID,
+		OrganizationID: bootstrap.Organization.ID,
+		Name:           "Agent Three",
+		Handle:         "agent_three",
+		Kind:           domain.AgentKindFake,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SetChannelAgents(ctx, bootstrap.Channel.ID, []domain.ChannelAgent{
+		{AgentID: bootstrap.Agent.ID},
+		{AgentID: second.ID},
+		{AgentID: third.ID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := &teamScriptRuntime{handlers: map[string]func(agentruntime.Input) string{
+		bootstrap.Agent.ID: func(input agentruntime.Input) string {
+			if strings.Contains(input.Prompt, "Review the team discussion") ||
+				strings.Contains(input.Prompt, "team discussion is complete") {
+				return "Final summary"
+			}
+			return "@agent_two evaluate the storage plan"
+		},
+		second.ID: func(input agentruntime.Input) string {
+			return "@agent_three this member handoff should not schedule"
+		},
+		third.ID: func(input agentruntime.Input) string {
+			return "Should not run"
+		},
+	}}
+	app.opts.Runtimes[domain.AgentKindFake] = rt
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "@" + bootstrap.Agent.Handle + " plan the team feature",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	requireEventuallyApp(t, time.Second, func() bool {
+		messages, err := app.ListMessages(ctx, domain.ConversationChannel, bootstrap.Channel.ID, 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return messageBodyFromSender(messages, bootstrap.Agent.BotUserID, "Final summary")
+	})
+
+	if got := len(rt.inputsForAgent(third.ID)); got != 0 {
+		t.Fatalf("third agent inputs = %d, want 0", got)
+	}
+}
+
+func TestAgentTeamLeaderCanContinueAfterMemberRound(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	second, err := app.CreateAgent(ctx, AgentCreateRequest{
+		UserID:         bootstrap.User.ID,
+		OrganizationID: bootstrap.Organization.ID,
+		Name:           "Agent Two",
+		Handle:         "agent_two",
+		Kind:           domain.AgentKindFake,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SetChannelAgents(ctx, bootstrap.Channel.ID, []domain.ChannelAgent{
+		{AgentID: bootstrap.Agent.ID},
+		{AgentID: second.ID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := &teamScriptRuntime{handlers: map[string]func(agentruntime.Input) string{
+		bootstrap.Agent.ID: func(input agentruntime.Input) string {
+			if strings.Contains(input.Prompt, "team discussion is complete") {
+				return "Final summary"
+			}
+			if strings.Contains(input.Prompt, "Second follow-up") {
+				return "Final summary"
+			}
+			if strings.Contains(input.Prompt, "Second analysis") {
+				return "@agent_two refine the storage risk"
+			}
+			return "@agent_two evaluate the storage plan"
+		},
+		second.ID: func(input agentruntime.Input) string {
+			if strings.Contains(input.Prompt, "refine the storage risk") {
+				return "Second follow-up"
+			}
+			return "Second analysis"
+		},
+	}}
+	app.opts.Runtimes[domain.AgentKindFake] = rt
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "@" + bootstrap.Agent.Handle + " plan the team feature",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	requireEventuallyApp(t, time.Second, func() bool {
+		messages, err := app.ListMessages(ctx, domain.ConversationChannel, bootstrap.Channel.ID, 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return messageBodyFromSender(messages, bootstrap.Agent.BotUserID, "Final summary")
+	})
+
+	if got := len(rt.inputsForAgent(bootstrap.Agent.ID)); got != 3 {
+		t.Fatalf("leader inputs = %d, want initial, continuation, and summary", got)
+	}
+	if got := len(rt.inputsForAgent(second.ID)); got != 2 {
+		t.Fatalf("second inputs = %d, want 2", got)
 	}
 }
 

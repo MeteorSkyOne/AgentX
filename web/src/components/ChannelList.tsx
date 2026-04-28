@@ -143,25 +143,45 @@ export function ChannelList({ channels, selectedChannelID, metricsActive = false
                   className="h-9 flex-1 px-2 text-sm md:h-7"
                   autoFocus
                 />
-                <div className="grid grid-cols-[1fr_1fr_auto_auto] items-center gap-1">
-                  <Input
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={draftBatches}
-                    onChange={(e) => setDraftBatches(e.target.value)}
-                    aria-label="Team max batches"
-                    className="h-8 px-2 text-xs"
-                  />
-                  <Input
-                    type="number"
-                    min={1}
-                    max={50}
-                    value={draftRuns}
-                    onChange={(e) => setDraftRuns(e.target.value)}
-                    aria-label="Team max runs"
-                    className="h-8 px-2 text-xs"
-                  />
+                <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto] items-end gap-1">
+                  <div className="min-w-0 space-y-1">
+                    <label
+                      htmlFor={`channel-${channel.id}-team-rounds`}
+                      className="block truncate text-[10px] font-medium text-muted-foreground"
+                    >
+                      Rounds
+                    </label>
+                    <Input
+                      id={`channel-${channel.id}-team-rounds`}
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={draftBatches}
+                      onChange={(e) => setDraftBatches(e.target.value)}
+                      aria-label="Team discussion rounds"
+                      title="Maximum leader-led discussion rounds before the final answer."
+                      className="h-8 px-2 text-xs"
+                    />
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <label
+                      htmlFor={`channel-${channel.id}-team-runs`}
+                      className="block truncate text-[10px] font-medium text-muted-foreground"
+                    >
+                      Agent runs
+                    </label>
+                    <Input
+                      id={`channel-${channel.id}-team-runs`}
+                      type="number"
+                      min={1}
+                      max={50}
+                      value={draftRuns}
+                      onChange={(e) => setDraftRuns(e.target.value)}
+                      aria-label="Team agent run budget"
+                      title="Maximum sequential agent replies across the leader-led discussion."
+                      className="h-8 px-2 text-xs"
+                    />
+                  </div>
                   <Button
                     variant="ghost"
                     size="icon"

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/meteorsky/agentx/internal/domain"
 	"github.com/meteorsky/agentx/internal/id"
@@ -22,7 +21,6 @@ type teamBatchItem struct {
 }
 
 type teamBatchResult struct {
-	Index   int
 	Target  ConversationAgentContext
 	Message domain.Message
 	Err     error
@@ -60,28 +58,32 @@ func (a *App) runAgentTeamForMessage(ctx context.Context, rootMessage domain.Mes
 	runsUsed := 0
 	batchesUsed := 0
 	var transcript []teamTranscriptEntry
-	discussionStarted := len(initialTargets) > 1
 
-	initialItems := make([]teamBatchItem, 0, len(initialTargets))
-	for _, target := range initialTargets {
-		if runsUsed >= budget.MaxRuns {
-			break
-		}
-		initialItems = append(initialItems, teamBatchItem{Target: target, Prompt: rootMessage.Body})
-		runsUsed++
+	if runsUsed >= budget.MaxRuns {
+		return
 	}
-	if len(initialItems) == 0 {
+	runsUsed++
+	initialTeam := teamMetadata(sessionID, rootMessage.ID, leader.Agent.ID, "leader", 1, "")
+	initialResult := a.runTeamItem(ctx, rootMessage, roster, leader, teamBatchItem{
+		Target: leader,
+		Prompt: rootMessage.Body,
+	}, budget, runsUsed, batchesUsed, nil, func(body string) *domain.TeamMetadata {
+		if len(leaderHandoffsFromBody(roster, leader, "", body)) == 0 {
+			return nil
+		}
+		return initialTeam
+	})
+	transcript = append(transcript, transcriptEntriesFromResults([]teamBatchResult{initialResult})...)
+	if initialResult.Err != nil {
 		return
 	}
 
-	batchesUsed++
-	initialResults := a.runTeamBatch(ctx, rootMessage, roster, leader, sessionID, initialItems, batchesUsed, teamPhaseForInitialBatch(discussionStarted), discussionStarted, budget, runsUsed, batchesUsed)
-	transcript = append(transcript, transcriptEntriesFromResults(initialResults)...)
-	handoffs := handoffsFromResults(roster, initialResults)
-	if len(handoffs) > 0 {
-		discussionStarted = true
+	handoffs := leaderHandoffsFromMessage(roster, leader, initialResult.Message)
+	if len(handoffs) == 0 {
+		return
 	}
 
+	discussionStarted := true
 	stopReason := "no new team handoffs"
 	for len(handoffs) > 0 {
 		if batchesUsed >= budget.MaxBatches {
@@ -113,9 +115,33 @@ func (a *App) runAgentTeamForMessage(ctx context.Context, rootMessage domain.Mes
 		batchesUsed++
 		results := a.runTeamBatch(ctx, rootMessage, roster, leader, sessionID, items, batchesUsed, "discussion", true, budget, runsUsed, batchesUsed)
 		transcript = append(transcript, transcriptEntriesFromResults(results)...)
-		handoffs = handoffsFromResults(roster, results)
+
+		if runsUsed >= budget.MaxRuns {
+			stopReason = "team run budget reached"
+			break
+		}
+		runsUsed++
+		decisionTurn := batchesUsed + 1
+		decisionTeam := teamMetadata(sessionID, rootMessage.ID, leader.Agent.ID, "discussion", decisionTurn, "")
+		summaryTeam := teamMetadata(sessionID, rootMessage.ID, leader.Agent.ID, "summary", decisionTurn, "")
+		leaderResult := a.runTeamItem(ctx, rootMessage, roster, leader, teamBatchItem{
+			Target: leader,
+			Prompt: teamLeaderDecisionPrompt(rootMessage, transcript),
+		}, budget, runsUsed, batchesUsed, decisionTeam, func(body string) *domain.TeamMetadata {
+			if len(leaderHandoffsFromBody(roster, leader, "", body)) > 0 {
+				return decisionTeam
+			}
+			return summaryTeam
+		})
+		transcript = append(transcript, transcriptEntriesFromResults([]teamBatchResult{leaderResult})...)
+		if leaderResult.Err != nil {
+			stopReason = "leader decision failed"
+			break
+		}
+
+		handoffs = leaderHandoffsFromMessage(roster, leader, leaderResult.Message)
 		if len(handoffs) == 0 {
-			stopReason = "no new team handoffs"
+			return
 		}
 	}
 
@@ -161,58 +187,48 @@ func teamBudgetForScope(scope conversationScope) teamBudget {
 	return teamBudget{MaxBatches: maxBatches, MaxRuns: maxRuns}
 }
 
-func teamPhaseForInitialBatch(discussionStarted bool) string {
-	if discussionStarted {
-		return "discussion"
-	}
-	return "leader"
-}
-
 func (a *App) runTeamBatch(ctx context.Context, rootMessage domain.Message, roster []ConversationAgentContext, leader ConversationAgentContext, sessionID string, items []teamBatchItem, turn int, phase string, includeTeamMetadata bool, budget teamBudget, runsUsed int, batchesUsed int) []teamBatchResult {
 	results := make([]teamBatchResult, len(items))
-	var wg sync.WaitGroup
-	out := make(chan teamBatchResult, len(items))
 	for index, item := range items {
-		index, item := index, item
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			var team *domain.TeamMetadata
-			if includeTeamMetadata {
-				team = &domain.TeamMetadata{
-					SessionID:       sessionID,
-					RootMessageID:   rootMessage.ID,
-					LeaderAgentID:   leader.Agent.ID,
-					Phase:           phase,
-					Turn:            turn,
-					SourceMessageID: item.SourceMessageID,
-				}
-			}
-			result := make(chan agentRunResult, 1)
-			a.runAgentForMessageWithTarget(ctx, rootMessage, item.Target, id.New("run"), agentRunOptions{
-				Prompt: item.Prompt,
-				Context: teamProtocolContext(teamProtocolContextInput{
-					RootMessage: rootMessage,
-					Roster:      roster,
-					Leader:      leader,
-					Speaker:     item.Target,
-					Budget:      budget,
-					RunsUsed:    runsUsed,
-					BatchesUsed: batchesUsed,
-				}),
-				Result: result,
-				Team:   team,
-			})
-			runResult := <-result
-			out <- teamBatchResult{Index: index, Target: item.Target, Message: runResult.Message, Err: runResult.Err}
-		}()
-	}
-	wg.Wait()
-	close(out)
-	for result := range out {
-		results[result.Index] = result
+		var team *domain.TeamMetadata
+		if includeTeamMetadata {
+			team = teamMetadata(sessionID, rootMessage.ID, leader.Agent.ID, phase, turn, item.SourceMessageID)
+		}
+		results[index] = a.runTeamItem(ctx, rootMessage, roster, leader, item, budget, runsUsed, batchesUsed, team, nil)
 	}
 	return results
+}
+
+func (a *App) runTeamItem(ctx context.Context, rootMessage domain.Message, roster []ConversationAgentContext, leader ConversationAgentContext, item teamBatchItem, budget teamBudget, runsUsed int, batchesUsed int, team *domain.TeamMetadata, teamForCompletion func(string) *domain.TeamMetadata) teamBatchResult {
+	result := make(chan agentRunResult, 1)
+	a.runAgentForMessageWithTarget(ctx, rootMessage, item.Target, id.New("run"), agentRunOptions{
+		Prompt: item.Prompt,
+		Context: teamProtocolContext(teamProtocolContextInput{
+			RootMessage: rootMessage,
+			Roster:      roster,
+			Leader:      leader,
+			Speaker:     item.Target,
+			Budget:      budget,
+			RunsUsed:    runsUsed,
+			BatchesUsed: batchesUsed,
+		}),
+		Result:            result,
+		Team:              team,
+		TeamForCompletion: teamForCompletion,
+	})
+	runResult := <-result
+	return teamBatchResult{Target: item.Target, Message: runResult.Message, Err: runResult.Err}
+}
+
+func teamMetadata(sessionID string, rootMessageID string, leaderAgentID string, phase string, turn int, sourceMessageID string) *domain.TeamMetadata {
+	return &domain.TeamMetadata{
+		SessionID:       sessionID,
+		RootMessageID:   rootMessageID,
+		LeaderAgentID:   leaderAgentID,
+		Phase:           phase,
+		Turn:            turn,
+		SourceMessageID: sourceMessageID,
+	}
 }
 
 func transcriptEntriesFromResults(results []teamBatchResult) []teamTranscriptEntry {
@@ -230,15 +246,12 @@ func transcriptEntriesFromResults(results []teamBatchResult) []teamTranscriptEnt
 	return entries
 }
 
-func handoffsFromResults(roster []ConversationAgentContext, results []teamBatchResult) []teamHandoff {
-	var handoffs []teamHandoff
-	for _, result := range results {
-		if result.Err != nil {
-			continue
-		}
-		handoffs = append(handoffs, teamHandoffsFromBody(roster, result.Target.Agent.ID, result.Message.ID, result.Message.Body)...)
-	}
-	return dedupeTeamHandoffs(handoffs)
+func leaderHandoffsFromMessage(roster []ConversationAgentContext, leader ConversationAgentContext, message domain.Message) []teamHandoff {
+	return leaderHandoffsFromBody(roster, leader, message.ID, message.Body)
+}
+
+func leaderHandoffsFromBody(roster []ConversationAgentContext, leader ConversationAgentContext, sourceMessageID string, body string) []teamHandoff {
+	return dedupeTeamHandoffs(teamHandoffsFromBody(roster, leader.Agent.ID, sourceMessageID, body))
 }
 
 func dedupeTeamHandoffs(handoffs []teamHandoff) []teamHandoff {
@@ -390,13 +403,32 @@ func teamProtocolContext(input teamProtocolContextInput) string {
 		}
 		return strings.TrimSpace(b.String())
 	}
+	if input.Speaker.Agent.ID != input.Leader.Agent.ID {
+		b.WriteString("- Answer the leader's current handoff directly.\n")
+		b.WriteString("- Do not hand off to another agent and do not write @handle delegation lines.\n")
+		b.WriteString("- The leader will decide whether the discussion should continue after your reply.\n")
+		return strings.TrimSpace(b.String())
+	}
 	b.WriteString("- Answer the current task directly when you can.\n")
+	b.WriteString("- You control whether team discussion continues after each round.\n")
 	b.WriteString("- Only involve another member when their configured responsibility is needed.\n")
 	b.WriteString("- To involve a member, put each handoff on its own line starting with @handle followed by a concrete task.\n")
 	b.WriteString("- Do not use @handle for casual mentions, acknowledgements, or final answers.\n")
-	b.WriteString("- Do not hand off to yourself. Avoid repeating a handoff already answered in this discussion.\n")
+	b.WriteString("- Do not hand off to yourself. Do not repeat the same request to a member who already answered it; use a new concrete follow-up when another turn is needed.\n")
 	b.WriteString("- If budget is nearly exhausted, prefer a concise answer over another handoff.\n")
 	return strings.TrimSpace(b.String())
+}
+
+func teamLeaderDecisionPrompt(rootMessage domain.Message, transcript []teamTranscriptEntry) string {
+	var b strings.Builder
+	b.WriteString("Review the team discussion so far and decide the next step.\n\n")
+	b.WriteString("Original user request:\n")
+	b.WriteString(runtimeMessageBody(rootMessage.Body))
+	b.WriteString("\n\nTeam discussion so far:\n")
+	b.WriteString(teamTranscriptText(transcript))
+	b.WriteString("\n\nIf another team member needs to respond, write one or more @handle handoff lines with concrete follow-up tasks.")
+	b.WriteString("\nIf the discussion is sufficient, write the final answer for the user and do not include @handle handoff lines.")
+	return b.String()
 }
 
 func teamSummaryPrompt(rootMessage domain.Message, transcript []teamTranscriptEntry, stopReason string) string {

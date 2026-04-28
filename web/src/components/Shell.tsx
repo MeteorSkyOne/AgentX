@@ -1812,30 +1812,42 @@ export function Shell({
                 <option value="thread">Forum</option>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label htmlFor="channel-team-batches">Team batches</Label>
-                <Input
-                  id="channel-team-batches"
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={channelTeamMaxBatches}
-                  onChange={(e) => setChannelTeamMaxBatches(e.target.value)}
-                  aria-label="Team max batches"
-                />
+            <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3">
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Team discussion budget</p>
+                <p className="text-xs leading-5 text-muted-foreground">
+                  Used when a message mentions agents. The first mentioned agent leads each round, and agent runs cap total sequential replies before the final answer.
+                </p>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="channel-team-runs">Team runs</Label>
-                <Input
-                  id="channel-team-runs"
-                  type="number"
-                  min={1}
-                  max={50}
-                  value={channelTeamMaxRuns}
-                  onChange={(e) => setChannelTeamMaxRuns(e.target.value)}
-                  aria-label="Team max runs"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="channel-team-batches">Discussion rounds</Label>
+                  <Input
+                    id="channel-team-batches"
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={channelTeamMaxBatches}
+                    onChange={(e) => setChannelTeamMaxBatches(e.target.value)}
+                    aria-label="Team discussion rounds"
+                    title="Maximum leader-led discussion rounds before the final answer."
+                  />
+                  <p className="text-[11px] leading-4 text-muted-foreground">1-20 handoff rounds.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="channel-team-runs">Agent run budget</Label>
+                  <Input
+                    id="channel-team-runs"
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={channelTeamMaxRuns}
+                    onChange={(e) => setChannelTeamMaxRuns(e.target.value)}
+                    aria-label="Team agent run budget"
+                    title="Maximum sequential agent replies across the leader-led discussion."
+                  />
+                  <p className="text-[11px] leading-4 text-muted-foreground">1-50 discussion replies.</p>
+                </div>
               </div>
             </div>
           </div>

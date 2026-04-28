@@ -20,12 +20,13 @@ const runtimeContextMessageLimit = 40
 const runtimeContextBodyLimit = 4000
 
 type agentRunOptions struct {
-	Prompt         string
-	Context        string
-	PermissionMode string
-	OnCompleted    func(context.Context) error
-	Result         chan<- agentRunResult
-	Team           *domain.TeamMetadata
+	Prompt            string
+	Context           string
+	PermissionMode    string
+	OnCompleted       func(context.Context) error
+	Result            chan<- agentRunResult
+	Team              *domain.TeamMetadata
+	TeamForCompletion func(body string) *domain.TeamMetadata
 }
 
 type agentRunResult struct {
@@ -270,13 +271,17 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 						thinkingBuf.WriteString(evt.Thinking)
 					}
 					processBuf = append(processBuf, runtimeProcessItems(evt)...)
+					team := opts.Team
+					if opts.TeamForCompletion != nil {
+						team = opts.TeamForCompletion(evt.Text)
+					}
 					botMessage, err := a.completeAgentRun(ctx, userMessage, agent, runID, session.CurrentSessionID(), evt.Text, thinkingBuf.String(), processBuf, runTracker.metric(agentRunMetricInput{
 						Status:            "completed",
 						ProviderSessionID: session.CurrentSessionID(),
 						FirstTokenAt:      firstTokenAt,
 						CompletedAt:       completedAt,
 						Usage:             usage,
-					}), opts.Team)
+					}), team)
 					if err != nil {
 						sendResult(domain.Message{}, err)
 						_ = session.Close(context.WithoutCancel(ctx))
