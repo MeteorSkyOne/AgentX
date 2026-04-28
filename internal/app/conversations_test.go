@@ -760,6 +760,90 @@ func TestAgentMessageWebhookPostsSignedPayload(t *testing.T) {
 	}
 }
 
+func TestWebhookPayloadCompactsLargeAgentMessage(t *testing.T) {
+	ctx := context.Background()
+	requests := make(chan webhookRequest, 1)
+	webhookServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		if len(body) > 4096 {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			return
+		}
+		requests <- webhookRequest{header: r.Header.Clone(), requestURI: r.RequestURI, body: body}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer webhookServer.Close()
+
+	application := &App{opts: Options{WebhookTimeout: time.Second}}
+	payload := AgentMessageWebhookPayload{
+		Event:          AgentMessageCreatedWebhookEvent,
+		Title:          "Codex",
+		OrganizationID: "org_test",
+		Message: domain.Message{
+			ID:               "msg_large",
+			OrganizationID:   "org_test",
+			ConversationType: domain.ConversationChannel,
+			ConversationID:   "chn_test",
+			SenderType:       domain.SenderBot,
+			SenderID:         "bot_test",
+			Kind:             domain.MessageText,
+			Body:             strings.Repeat("x", webhookMessageBodyLimit+1000),
+			Metadata: map[string]any{
+				"thinking": strings.Repeat("t", 10000),
+				"process": []domain.ProcessItem{{
+					Type:   "tool_result",
+					Output: strings.Repeat("o", 20000),
+					Raw:    map[string]any{"output": strings.Repeat("r", 20000)},
+				}},
+				"metrics": domain.MessageMetricsSummary{RunID: "run_test"},
+			},
+			ReplyTo: &domain.MessageReference{
+				MessageID: "msg_reply",
+				Body:      strings.Repeat("reply", 200),
+			},
+			CreatedAt: time.Now().UTC(),
+		},
+	}
+	if err := application.postWebhook(ctx, domain.NotificationSettings{WebhookURL: webhookServer.URL}, payload); err != nil {
+		t.Fatal(err)
+	}
+
+	var got webhookRequest
+	select {
+	case got = <-requests:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for compact webhook request")
+	}
+	if len(got.body) > 4096 {
+		t.Fatalf("webhook body length = %d, want <= 4096", len(got.body))
+	}
+
+	var delivered AgentMessageWebhookPayload
+	if err := json.Unmarshal(got.body, &delivered); err != nil {
+		t.Fatal(err)
+	}
+	if len([]rune(delivered.Message.Body)) != webhookMessageBodyLimit || !strings.HasSuffix(delivered.Message.Body, "...") {
+		t.Fatalf("delivered body was not truncated to limit: %d", len([]rune(delivered.Message.Body)))
+	}
+	if _, ok := delivered.Message.Metadata["thinking"]; ok {
+		t.Fatalf("delivered metadata kept thinking: %#v", delivered.Message.Metadata)
+	}
+	if _, ok := delivered.Message.Metadata["process"]; ok {
+		t.Fatalf("delivered metadata kept process: %#v", delivered.Message.Metadata)
+	}
+	if _, ok := delivered.Message.Metadata["metrics"]; !ok {
+		t.Fatalf("delivered metadata dropped metrics: %#v", delivered.Message.Metadata)
+	}
+	if delivered.Message.ReplyTo == nil || len([]rune(delivered.Message.ReplyTo.Body)) > webhookReplyBodyLimit {
+		t.Fatalf("delivered reply reference was not compacted: %#v", delivered.Message.ReplyTo)
+	}
+}
+
 func TestTeamDiscussionMessageDoesNotNotify(t *testing.T) {
 	discussion := domain.Message{
 		ID:             "msg_discussion",

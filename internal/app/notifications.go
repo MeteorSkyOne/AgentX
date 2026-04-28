@@ -25,7 +25,11 @@ import (
 const AgentMessageCreatedWebhookEvent = "agent.message.created"
 
 const defaultWebhookTimeout = 5 * time.Second
-const webhookURLBodyLimit = 180
+const webhookURLBodyLimit = 50
+const webhookMessageBodyLimit = 50
+const webhookReplyBodyLimit = 50
+const webhookPayloadBodyLimit = 8192
+const webhookMinimalBodyLimit = 50
 
 var ErrWebhookDeliveryFailed = errors.New("webhook delivery failed")
 
@@ -187,11 +191,22 @@ func (a *App) postWebhook(ctx context.Context, settings domain.NotificationSetti
 	if payload.CreatedAt.IsZero() {
 		payload.CreatedAt = time.Now().UTC()
 	}
-	webhookURL, err := renderWebhookURL(settings.WebhookURL, payload)
+	payload = compactWebhookPayload(payload, webhookMessageBodyLimit)
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(payload)
+	if len(body) > webhookPayloadBodyLimit {
+		payload = compactWebhookPayload(payload, webhookMinimalBodyLimit)
+		payload.Message.Metadata = nil
+		payload.Message.ReplyTo = nil
+		payload.Message.Attachments = nil
+		body, err = json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+	}
+	webhookURL, err := renderWebhookURL(settings.WebhookURL, payload)
 	if err != nil {
 		return err
 	}
@@ -228,6 +243,41 @@ func (a *App) postWebhook(ctx context.Context, settings domain.NotificationSetti
 		return fmt.Errorf("%w: status %d", ErrWebhookDeliveryFailed, resp.StatusCode)
 	}
 	return nil
+}
+
+func compactWebhookPayload(payload AgentMessageWebhookPayload, bodyLimit int) AgentMessageWebhookPayload {
+	payload.Message = compactWebhookMessage(payload.Message, bodyLimit)
+	return payload
+}
+
+func compactWebhookMessage(message domain.Message, bodyLimit int) domain.Message {
+	message.Body, _ = truncateWebhookText(message.Body, bodyLimit)
+	message.Metadata = compactWebhookMetadata(message.Metadata)
+	if message.ReplyTo != nil {
+		replyTo := *message.ReplyTo
+		replyTo.Body, _ = truncateWebhookText(replyTo.Body, webhookReplyBodyLimit)
+		message.ReplyTo = &replyTo
+	}
+	return message
+}
+
+func compactWebhookMetadata(metadata map[string]any) map[string]any {
+	if len(metadata) == 0 {
+		return nil
+	}
+	compact := make(map[string]any, len(metadata))
+	for key, value := range metadata {
+		switch key {
+		case "thinking", "process":
+			continue
+		default:
+			compact[key] = value
+		}
+	}
+	if len(compact) == 0 {
+		return nil
+	}
+	return compact
 }
 
 func signWebhookPayload(secret string, timestamp string, body []byte) string {
@@ -310,6 +360,20 @@ func truncateWebhookURLBody(value string) string {
 		return value
 	}
 	return string(runes[:webhookURLBodyLimit-3]) + "..."
+}
+
+func truncateWebhookText(value string, limit int) (string, bool) {
+	if limit <= 0 {
+		return "", value != ""
+	}
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value, false
+	}
+	if limit <= 3 {
+		return string(runes[:limit]), true
+	}
+	return string(runes[:limit-3]) + "...", true
 }
 
 func defaultNotificationSettings(orgID string) domain.NotificationSettings {
