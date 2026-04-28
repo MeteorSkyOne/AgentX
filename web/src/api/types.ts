@@ -178,6 +178,34 @@ export interface Agent {
   updated_at: string;
 }
 
+export type AgentProviderLimitStatus = "ok" | "unavailable" | "error";
+
+export interface AgentProviderLimitAuth {
+  logged_in: boolean;
+  method?: string;
+  provider?: string;
+  plan?: string;
+}
+
+export interface AgentProviderLimitWindow {
+  kind: string;
+  label: string;
+  used_percent: number | null;
+  window_minutes: number;
+  resets_at: string | null;
+}
+
+export interface AgentProviderLimits {
+  agent_id: string;
+  provider: string;
+  status: AgentProviderLimitStatus;
+  auth: AgentProviderLimitAuth;
+  windows: AgentProviderLimitWindow[];
+  fetched_at: string;
+  cache_ttl_seconds: number;
+  message?: string;
+}
+
 export interface Workspace {
   id: string;
   organization_id: string;

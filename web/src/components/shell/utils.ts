@@ -47,6 +47,10 @@ export function defaultAgentInstructionPath(kind?: string): string {
   return kind === "claude" ? "CLAUDE.md" : "AGENTS.md";
 }
 
+export function isProviderLimitAgent(kind?: string): boolean {
+  return kind === "codex" || kind === "claude";
+}
+
 export function blurActiveElement() {
   const active = document.activeElement;
   if (active instanceof HTMLElement) {

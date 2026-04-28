@@ -19,14 +19,16 @@ type Options struct {
 	DefaultAgentName  string
 	DefaultAgentModel string
 	Runtimes          map[string]agentruntime.Runtime
+	ProviderLimits    ProviderLimitOptions
 	WebhookHTTPClient *http.Client
 	WebhookTimeout    time.Duration
 }
 
 type App struct {
-	store store.Store
-	bus   *eventbus.Bus
-	opts  Options
+	store          store.Store
+	bus            *eventbus.Bus
+	opts           Options
+	providerLimits *providerLimitService
 }
 
 func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
@@ -35,7 +37,7 @@ func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
 			domain.AgentKindFake: fake.New(),
 		}
 	}
-	return &App{store: st, bus: bus, opts: opts}
+	return &App{store: st, bus: bus, opts: opts, providerLimits: newProviderLimitService(opts.ProviderLimits)}
 }
 
 func (a *App) runtimeForAgent(agent domain.Agent) (agentruntime.Runtime, bool) {

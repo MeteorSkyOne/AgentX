@@ -4,6 +4,7 @@ import type {
   AuthStatus,
   Agent,
   AgentChannelContext,
+  AgentProviderLimits,
   Channel,
   ConversationAgentContext,
   ConversationContext,
@@ -316,6 +317,14 @@ export function deleteAgent(agentID: string): Promise<void> {
 
 export function agentChannels(agentID: string): Promise<AgentChannelContext[]> {
   return request<AgentChannelContext[]>(`/api/agents/${encodeURIComponent(agentID)}/channels`);
+}
+
+export function agentLimits(
+  agentID: string,
+  options: { force?: boolean } = {}
+): Promise<AgentProviderLimits> {
+  const params = options.force ? "?force=true" : "";
+  return request<AgentProviderLimits>(`/api/agents/${encodeURIComponent(agentID)}/limits${params}`);
 }
 
 export function channelAgents(channelID: string): Promise<ConversationAgentContext[]> {

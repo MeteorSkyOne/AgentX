@@ -195,6 +195,25 @@ func (s *Server) handleAgentChannels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, channels)
 }
 
+func (s *Server) handleAgentLimits(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	agent, ok, err := s.authorizedAgent(r, userID, chi.URLParam(r, "agentID"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	force := r.URL.Query().Get("force") == "true"
+	writeJSON(w, http.StatusOK, s.app.AgentProviderLimits(r.Context(), agent, force))
+}
+
 func (s *Server) handleChannelAgents(w http.ResponseWriter, r *http.Request) {
 	userID, ok := userIDFromContext(r.Context())
 	if !ok {

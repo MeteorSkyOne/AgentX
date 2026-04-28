@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bot,
   Database,
@@ -12,7 +12,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { agentChannels as fetchAgentChannels } from "../../api/client";
+import { agentChannels as fetchAgentChannels, agentLimits as fetchAgentLimits } from "../../api/client";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,12 +41,14 @@ import {
   setAgentAvatar,
 } from "../AgentAvatar";
 import { WorkspaceFileBrowser } from "../WorkspaceFileBrowser";
+import { AgentProviderLimitsView } from "./AgentProviderLimits";
 import type { ShellProps } from "./types";
 import {
   AGENT_EFFORT_OPTIONS,
   agentKindLabel,
   agentToneColor,
   defaultAgentInstructionPath,
+  isProviderLimitAgent,
 } from "./utils";
 
 export function AgentDetailsPanel({
@@ -97,6 +99,8 @@ export function AgentDetailsPanel({
   const [status, setStatus] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const queryClient = useQueryClient();
+  const forceNextLimitsFetch = useRef(false);
 
   const selected = agents.find((a) => a.id === agentID) ?? selectedAgent;
   const selectedBinding = boundAgents.find((item) => item.agent.id === selected?.id);
@@ -105,6 +109,18 @@ export function AgentDetailsPanel({
     queryKey: ["agent-channels", selectedAgentID],
     queryFn: () => fetchAgentChannels(selectedAgentID),
     enabled: Boolean(selectedAgentID),
+  });
+  const supportsProviderLimits = isProviderLimitAgent(selected?.kind);
+  const agentLimitsQuery = useQuery({
+    queryKey: ["agent-limits", selectedAgentID],
+    queryFn: () => {
+      const force = forceNextLimitsFetch.current;
+      forceNextLimitsFetch.current = false;
+      return fetchAgentLimits(selectedAgentID, { force });
+    },
+    enabled: Boolean(selectedAgentID && supportsProviderLimits),
+    refetchInterval: supportsProviderLimits ? 60_000 : false,
+    refetchIntervalInBackground: false,
   });
   const joinedChannels = agentChannelsQuery.data ?? [];
   const selectedConfigWorkspaceID = selected?.config_workspace_id ?? "";
@@ -153,6 +169,7 @@ export function AgentDetailsPanel({
   async function saveAgent() {
     if (!selected) return;
     await onUpdateAgent(selected.id, { name, description, handle, kind, model, effort, enabled, fast_mode: fastMode, yolo_mode: yoloMode });
+    await queryClient.invalidateQueries({ queryKey: ["agent-limits", selected.id] });
     setAgentAvatar(selected.id, avatarEmoji ? { emoji: avatarEmoji, color: avatarColor || agentKindColor(kind) } : null);
     setStatus("Saved");
   }
@@ -300,6 +317,19 @@ export function AgentDetailsPanel({
                   ))}
                 </Select>
               </div>
+
+              {selected && supportsProviderLimits && (
+                <AgentProviderLimitsView
+                  limits={agentLimitsQuery.data}
+                  error={agentLimitsQuery.error}
+                  isLoading={agentLimitsQuery.isLoading}
+                  isFetching={agentLimitsQuery.isFetching}
+                  onRefresh={() => {
+                    forceNextLimitsFetch.current = true;
+                    return agentLimitsQuery.refetch();
+                  }}
+                />
+              )}
 
               {/* Edit Fields */}
               <div className="space-y-2">

@@ -79,6 +79,10 @@ func main() {
 		DataDir:           cfg.DataDir,
 		DefaultAgentKind:  cfg.DefaultAgentKind,
 		DefaultAgentModel: cfg.DefaultAgentModel,
+		ProviderLimits: app.ProviderLimitOptions{
+			CodexCommand:  cfg.CodexCommand,
+			ClaudeCommand: cfg.ClaudeCommand,
+		},
 		Runtimes: map[string]runtime.Runtime{
 			domain.AgentKindFake: fake.New(),
 			domain.AgentKindCodex: codex.New(codex.Options{
