@@ -72,6 +72,10 @@ func (s *Store) Messages() store.MessageStore {
 	return messageRepo{q: s.db}
 }
 
+func (s *Store) MessageAttachments() store.MessageAttachmentStore {
+	return messageAttachmentRepo{q: s.db}
+}
+
 func (s *Store) BotUsers() store.BotUserStore {
 	return botUserRepo{q: s.db}
 }
@@ -130,6 +134,10 @@ func (t *txStore) Threads() store.ThreadStore {
 
 func (t *txStore) Messages() store.MessageStore {
 	return messageRepo{q: t.tx}
+}
+
+func (t *txStore) MessageAttachments() store.MessageAttachmentStore {
+	return messageAttachmentRepo{q: t.tx}
 }
 
 func (t *txStore) BotUsers() store.BotUserStore {

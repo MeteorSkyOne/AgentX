@@ -3,6 +3,7 @@ import { Composer } from "../Composer";
 import { MessagePane } from "../MessagePane";
 import type { Channel, ConversationAgentContext, Message, Thread, UserPreferences } from "../../api/types";
 import type { ComposerConversation, ShellProps, StreamingMessage } from "./types";
+import type { ThemeMode } from "../../theme";
 import { ThreadForum } from "./ThreadForum";
 
 export function ConversationPanel({
@@ -16,6 +17,7 @@ export function ConversationPanel({
   streaming,
   boundAgents,
   preferences,
+  theme,
   composerConversation,
   onSelectThread,
   onCreateThread,
@@ -36,6 +38,7 @@ export function ConversationPanel({
   streaming: StreamingMessage[];
   boundAgents: ConversationAgentContext[];
   preferences: UserPreferences;
+  theme: ThemeMode;
   composerConversation?: ComposerConversation;
   onSelectThread: ShellProps["onSelectThread"];
   onCreateThread: ShellProps["onCreateThread"];
@@ -108,6 +111,7 @@ export function ConversationPanel({
         streaming={streaming}
         agents={boundAgents}
         preferences={preferences}
+        theme={theme}
         onUpdateMessage={onUpdateMessage}
         onDeleteMessage={onDeleteMessage}
         onLoadOlder={onLoadOlderMessages}

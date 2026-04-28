@@ -72,6 +72,7 @@ func NewRouter(a *app.App, bus *eventbus.Bus) http.Handler {
 			r.Get("/conversations/{type}/{id}/context", s.handleConversationContext)
 			r.Get("/conversations/{type}/{id}/metrics", s.handleConversationMetrics)
 			r.Post("/conversations/{type}/{id}/messages", s.handleSendMessage)
+			r.Get("/attachments/{attachmentID}/content", s.handleAttachmentContent)
 			r.Patch("/messages/{messageID}", s.handleUpdateMessage)
 			r.Delete("/messages/{messageID}", s.handleDeleteMessage)
 		})

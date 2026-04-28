@@ -1,7 +1,9 @@
 package claude
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,6 +83,73 @@ func TestBuildArgsStartsAndResumesClaudePrint(t *testing.T) {
 	assertArgs(t, args, want)
 	if got := rt.buildEnv(req)["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"]; got != "1" {
 		t.Fatalf("CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD = %q, want 1", got)
+	}
+}
+
+func TestBuildArgsAndStdinForClaudeImageAttachments(t *testing.T) {
+	dir := t.TempDir()
+	imagePath := filepath.Join(dir, "image.png")
+	if err := os.WriteFile(imagePath, []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := Runtime{opts: Options{PermissionMode: "acceptEdits"}}
+	input := runtime.Input{
+		Prompt: "describe this",
+		Attachments: []runtime.Attachment{{
+			ID:          "att_1",
+			Filename:    "image.png",
+			ContentType: "image/png",
+			Kind:        "image",
+			SizeBytes:   8,
+			LocalPath:   imagePath,
+		}},
+	}
+	args := rt.buildArgs(runtime.StartSessionRequest{}, input)
+	if got := argAfter(t, args, "--input-format"); got != "stream-json" {
+		t.Fatalf("input format = %q, want stream-json in args %#v", got, args)
+	}
+	if got := argAfter(t, args, "--add-dir"); got != dir {
+		t.Fatalf("add-dir = %q, want %q in args %#v", got, dir, args)
+	}
+	for _, arg := range args {
+		if strings.Contains(arg, "describe this") {
+			t.Fatalf("stream-json args unexpectedly include prompt: %#v", args)
+		}
+	}
+
+	stdin, err := claudeStreamJSONInput(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(stdin), &payload); err != nil {
+		t.Fatal(err)
+	}
+	message := payload["message"].(map[string]any)
+	content := message["content"].([]any)
+	if len(content) != 2 {
+		t.Fatalf("content = %#v, want text and image blocks", content)
+	}
+	image := content[1].(map[string]any)
+	source := image["source"].(map[string]any)
+	if image["type"] != "image" || source["media_type"] != "image/png" || source["data"] == "" {
+		t.Fatalf("image block = %#v", image)
+	}
+}
+
+func TestClaudeStreamJSONInputRejectsImageAttachmentWithoutLocalPath(t *testing.T) {
+	_, err := claudeStreamJSONInput(runtime.Input{
+		Prompt: "describe",
+		Attachments: []runtime.Attachment{{
+			ID:          "att_missing_path",
+			Filename:    "image.png",
+			ContentType: "image/png",
+			Kind:        "image",
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "has no local path") {
+		t.Fatalf("error = %v, want missing local path error", err)
 	}
 }
 

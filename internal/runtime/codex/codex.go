@@ -47,21 +47,34 @@ func (r Runtime) StartSession(ctx context.Context, req runtime.StartSessionReque
 		fallbackID = "codex:" + req.AgentID
 	}
 	handler := newLineHandler(fallbackID)
-	build := func(input runtime.Input) cli.Command {
+	build := func(input runtime.Input) (cli.Command, error) {
+		args, stdin := r.buildArgsAndStdin(req, input)
 		return cli.Command{
-			Name: r.opts.Command,
-			Args: r.buildArgs(req, input),
-			Dir:  workspace,
-			Env:  mergeMaps(r.opts.Env, req.Env),
-		}
+			Name:  r.opts.Command,
+			Args:  args,
+			Dir:   workspace,
+			Env:   mergeMaps(r.opts.Env, req.Env),
+			Stdin: stdin,
+		}, nil
 	}
 	return cli.NewSession(fallbackID, build, handler), nil
 }
 
 func (r Runtime) buildArgs(req runtime.StartSessionRequest, input runtime.Input) []string {
+	args, _ := r.buildArgsAndStdin(req, input)
+	return args
+}
+
+func (r Runtime) buildArgsAndStdin(req runtime.StartSessionRequest, input runtime.Input) ([]string, []byte) {
 	var args []string
 	args = append(args, "exec")
 	previousSessionID := usablePreviousSessionID(req.PreviousSessionID)
+	additionalDirs := attachmentDirs(input)
+	if previousSessionID != "" {
+		for _, dir := range additionalDirs {
+			args = append(args, "--add-dir", dir)
+		}
+	}
 	if previousSessionID != "" {
 		args = append(args, "resume")
 	}
@@ -87,11 +100,63 @@ func (r Runtime) buildArgs(req runtime.StartSessionRequest, input runtime.Input)
 	if r.opts.SkipGitRepoCheck {
 		args = append(args, "--skip-git-repo-check")
 	}
+	if previousSessionID == "" {
+		for _, dir := range additionalDirs {
+			args = append(args, "--add-dir", dir)
+		}
+	}
+	for _, attachment := range input.Attachments {
+		if isImageAttachment(attachment) {
+			if path := strings.TrimSpace(attachment.LocalPath); path != "" {
+				args = append(args, "--image", path)
+			}
+		}
+	}
 	args = append(args, r.opts.ExtraArgs...)
+	prompt := input.RenderedPrompt()
+	if hasImageAttachments(input) {
+		if previousSessionID != "" {
+			args = append(args, "--", previousSessionID, "-")
+		} else {
+			args = append(args, "--", "-")
+		}
+		return args, []byte(prompt)
+	}
 	if previousSessionID != "" {
 		args = append(args, previousSessionID)
 	}
-	return append(args, input.RenderedPrompt())
+	return append(args, prompt), nil
+}
+
+func hasImageAttachments(input runtime.Input) bool {
+	for _, attachment := range input.Attachments {
+		if isImageAttachment(attachment) {
+			return true
+		}
+	}
+	return false
+}
+
+func isImageAttachment(attachment runtime.Attachment) bool {
+	return attachment.Kind == "image" || strings.HasPrefix(strings.ToLower(attachment.ContentType), "image/")
+}
+
+func attachmentDirs(input runtime.Input) []string {
+	dirs := make([]string, 0, len(input.Attachments))
+	seen := make(map[string]bool, len(input.Attachments))
+	for _, attachment := range input.Attachments {
+		path := strings.TrimSpace(attachment.LocalPath)
+		if path == "" {
+			continue
+		}
+		dir := filepath.Clean(filepath.Dir(path))
+		if seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		dirs = append(dirs, dir)
+	}
+	return dirs
 }
 
 func codexDeveloperInstructions(req runtime.StartSessionRequest) string {

@@ -48,6 +48,127 @@ func TestBuildArgsStartsAndResumesCodexExec(t *testing.T) {
 	assertArgs(t, args, want)
 }
 
+func TestBuildArgsAddsCodexAttachmentDirsAndImages(t *testing.T) {
+	dir := t.TempDir()
+	imagePath := filepath.Join(dir, "image.png")
+	textPath := filepath.Join(dir, "notes.txt")
+	rt := Runtime{opts: Options{FullAuto: true}}
+	args, stdin := rt.buildArgsAndStdin(runtime.StartSessionRequest{}, runtime.Input{
+		Prompt: "use these",
+		Attachments: []runtime.Attachment{
+			{ID: "att_img", Filename: "image.png", ContentType: "image/png", Kind: "image", LocalPath: imagePath},
+			{ID: "att_txt", Filename: "notes.txt", ContentType: "text/plain", Kind: "text", LocalPath: textPath},
+		},
+	})
+	if got := countArg(args, "--add-dir"); got != 1 {
+		t.Fatalf("args = %#v, want one --add-dir, got %d", args, got)
+	}
+	if got := argAfter(t, args, "--add-dir"); got != dir {
+		t.Fatalf("add-dir = %q, want %q in args %#v", got, dir, args)
+	}
+	if got := argAfter(t, args, "--image"); got != imagePath {
+		t.Fatalf("image path = %q, want %q in args %#v", got, imagePath, args)
+	}
+	assertArgsSuffix(t, args, []string{"--", "-"})
+	prompt := string(stdin)
+	if !strings.Contains(prompt, "image.png") || !strings.Contains(prompt, "notes.txt") || !strings.Contains(prompt, textPath) {
+		t.Fatalf("stdin prompt = %q, want attachment references", prompt)
+	}
+}
+
+func TestBuildArgsUsesStdinPromptAfterCodexImages(t *testing.T) {
+	dir := t.TempDir()
+	imagePath := filepath.Join(dir, "image.png")
+	rt := Runtime{opts: Options{SkipGitRepoCheck: true}}
+	args, stdin := rt.buildArgsAndStdin(runtime.StartSessionRequest{
+		Model:             "gpt-test",
+		PreviousSessionID: "0199a213-81c0-7800-8aa1-bbab2a035a53",
+	}, runtime.Input{
+		Prompt: "describe this image",
+		Attachments: []runtime.Attachment{{
+			ID:          "att_img",
+			Filename:    "image.png",
+			ContentType: "image/png",
+			Kind:        "image",
+			LocalPath:   imagePath,
+		}},
+	})
+
+	wantSuffix := []string{"--", "0199a213-81c0-7800-8aa1-bbab2a035a53", "-"}
+	assertArgsSuffix(t, args, wantSuffix)
+	assertArgBefore(t, args, "--add-dir", "resume")
+	if got := argAfter(t, args, "--add-dir"); got != dir {
+		t.Fatalf("add-dir = %q, want %q in args %#v", got, dir, args)
+	}
+	if got := argAfter(t, args, "--image"); got != imagePath {
+		t.Fatalf("image path = %q, want %q in args %#v", got, imagePath, args)
+	}
+	if strings.Contains(strings.Join(args, "\n"), "describe this image") {
+		t.Fatalf("args = %#v, prompt should be passed via stdin", args)
+	}
+	if prompt := string(stdin); !strings.Contains(prompt, "describe this image") || !strings.Contains(prompt, imagePath) {
+		t.Fatalf("stdin prompt = %q, want rendered prompt with attachment path", prompt)
+	}
+}
+
+func TestBuildArgsSupportsMultipleCodexImages(t *testing.T) {
+	dir := t.TempDir()
+	firstImagePath := filepath.Join(dir, "first.png")
+	secondImagePath := filepath.Join(dir, "second.webp")
+	rt := Runtime{opts: Options{SkipGitRepoCheck: true}}
+	args, stdin := rt.buildArgsAndStdin(runtime.StartSessionRequest{}, runtime.Input{
+		Prompt: "compare these images",
+		Attachments: []runtime.Attachment{
+			{ID: "att_first", Filename: "first.png", ContentType: "image/png", Kind: "image", LocalPath: firstImagePath},
+			{ID: "att_second", Filename: "second.webp", ContentType: "image/webp", Kind: "image", LocalPath: secondImagePath},
+		},
+	})
+
+	if got := countArg(args, "--image"); got != 2 {
+		t.Fatalf("args = %#v, want two --image args, got %d", args, got)
+	}
+	imagePaths := argsAfter(t, args, "--image")
+	wantImages := []string{firstImagePath, secondImagePath}
+	assertArgs(t, imagePaths, wantImages)
+	assertArgsSuffix(t, args, []string{"--", "-"})
+	prompt := string(stdin)
+	if !strings.Contains(prompt, "compare these images") || !strings.Contains(prompt, firstImagePath) || !strings.Contains(prompt, secondImagePath) {
+		t.Fatalf("stdin prompt = %q, want both image paths", prompt)
+	}
+}
+
+func TestBuildArgsSupportsMultipleCodexImagesWhenResuming(t *testing.T) {
+	dir := t.TempDir()
+	firstImagePath := filepath.Join(dir, "first.png")
+	secondImagePath := filepath.Join(dir, "second.png")
+	rt := Runtime{opts: Options{SkipGitRepoCheck: true}}
+	args, stdin := rt.buildArgsAndStdin(runtime.StartSessionRequest{
+		PreviousSessionID: "0199a213-81c0-7800-8aa1-bbab2a035a53",
+	}, runtime.Input{
+		Prompt: "compare these images",
+		Attachments: []runtime.Attachment{
+			{ID: "att_first", Filename: "first.png", ContentType: "image/png", Kind: "image", LocalPath: firstImagePath},
+			{ID: "att_second", Filename: "second.png", ContentType: "image/png", Kind: "image", LocalPath: secondImagePath},
+		},
+	})
+
+	assertArgBefore(t, args, "--add-dir", "resume")
+	if got := argAfter(t, args, "--add-dir"); got != dir {
+		t.Fatalf("add-dir = %q, want %q in args %#v", got, dir, args)
+	}
+	if got := countArg(args, "--image"); got != 2 {
+		t.Fatalf("args = %#v, want two --image args, got %d", args, got)
+	}
+	imagePaths := argsAfter(t, args, "--image")
+	wantImages := []string{firstImagePath, secondImagePath}
+	assertArgs(t, imagePaths, wantImages)
+	assertArgsSuffix(t, args, []string{"--", "0199a213-81c0-7800-8aa1-bbab2a035a53", "-"})
+	prompt := string(stdin)
+	if !strings.Contains(prompt, "compare these images") || !strings.Contains(prompt, firstImagePath) || !strings.Contains(prompt, secondImagePath) {
+		t.Fatalf("stdin prompt = %q, want both image paths", prompt)
+	}
+}
+
 func TestLineHandlerParsesCodexJSONEvents(t *testing.T) {
 	handler := newLineHandler("fallback")
 
@@ -351,6 +472,63 @@ printf '%s\n' '{"type":"turn.completed"}'
 	}
 }
 
+func TestRuntimePassesCodexImagePromptViaStdin(t *testing.T) {
+	tempDir := t.TempDir()
+	command := writeExecutable(t, tempDir, "codex", `#!/bin/sh
+printf '%s\n' "$*" > "$AGENTX_ARGS_FILE"
+cat > "$AGENTX_STDIN_FILE"
+printf '%s\n' '{"type":"thread.started","thread_id":"thread_image"}'
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+printf '%s\n' '{"type":"turn.completed"}'
+`)
+	workspace := filepath.Join(tempDir, "workspace")
+	if err := os.Mkdir(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	imagePath := filepath.Join(tempDir, "image.png")
+	if err := os.WriteFile(imagePath, []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	argsFile := filepath.Join(tempDir, "args")
+	stdinFile := filepath.Join(tempDir, "stdin")
+
+	rt := New(Options{Command: command})
+	session, err := rt.StartSession(context.Background(), runtime.StartSessionRequest{
+		AgentID:   "agt_test",
+		Workspace: workspace,
+		Env: map[string]string{
+			"AGENTX_ARGS_FILE":  argsFile,
+			"AGENTX_STDIN_FILE": stdinFile,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := session.Send(context.Background(), runtime.Input{
+		Prompt: "describe this image",
+		Attachments: []runtime.Attachment{{
+			ID:          "att_img",
+			Filename:    "image.png",
+			ContentType: "image/png",
+			Kind:        "image",
+			LocalPath:   imagePath,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	completed := waitForCompleted(t, session.Events())
+	if completed.Text != "ok" {
+		t.Fatalf("completed text = %q", completed.Text)
+	}
+	if got := readTrimmed(t, argsFile); got != "exec --json --add-dir "+tempDir+" --image "+imagePath+" -- -" {
+		t.Fatalf("args = %q", got)
+	}
+	stdin := readFile(t, stdinFile)
+	if !strings.Contains(stdin, "describe this image") || !strings.Contains(stdin, imagePath) {
+		t.Fatalf("stdin = %q, want rendered prompt with attachment path", stdin)
+	}
+}
+
 func assertArgs(t *testing.T, got []string, want []string) {
 	t.Helper()
 	if len(got) != len(want) {
@@ -361,6 +539,71 @@ func assertArgs(t *testing.T, got []string, want []string) {
 			t.Fatalf("args = %#v, want %#v", got, want)
 		}
 	}
+}
+
+func assertArgsSuffix(t *testing.T, got []string, want []string) {
+	t.Helper()
+	if len(got) < len(want) {
+		t.Fatalf("args = %#v, want suffix %#v", got, want)
+	}
+	suffix := got[len(got)-len(want):]
+	for i := range want {
+		if suffix[i] != want[i] {
+			t.Fatalf("args suffix = %#v, want %#v in args %#v", suffix, want, got)
+		}
+	}
+}
+
+func assertArgBefore(t *testing.T, args []string, before string, after string) {
+	t.Helper()
+	beforeIndex := -1
+	afterIndex := -1
+	for i, arg := range args {
+		if arg == before && beforeIndex == -1 {
+			beforeIndex = i
+		}
+		if arg == after && afterIndex == -1 {
+			afterIndex = i
+		}
+	}
+	if beforeIndex == -1 || afterIndex == -1 || beforeIndex >= afterIndex {
+		t.Fatalf("args = %#v, want %q before %q", args, before, after)
+	}
+}
+
+func argAfter(t *testing.T, args []string, flag string) string {
+	t.Helper()
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == flag {
+			return args[i+1]
+		}
+	}
+	t.Fatalf("flag %s missing in args %#v", flag, args)
+	return ""
+}
+
+func argsAfter(t *testing.T, args []string, flag string) []string {
+	t.Helper()
+	var values []string
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == flag {
+			values = append(values, args[i+1])
+		}
+	}
+	if len(values) == 0 {
+		t.Fatalf("flag %s missing in args %#v", flag, args)
+	}
+	return values
+}
+
+func countArg(args []string, want string) int {
+	var count int
+	for _, arg := range args {
+		if arg == want {
+			count++
+		}
+	}
+	return count
 }
 
 func writeExecutable(t *testing.T, dir string, name string, body string) string {
@@ -395,11 +638,16 @@ func waitForCompleted(t *testing.T, events <-chan runtime.Event) runtime.Event {
 
 func readTrimmed(t *testing.T, path string) string {
 	t.Helper()
+	return strings.TrimSpace(readFile(t, path))
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return strings.TrimSpace(string(content))
+	return string(content)
 }
 
 func ptrValue(value *int64) int64 {

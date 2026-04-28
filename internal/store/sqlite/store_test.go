@@ -195,6 +195,77 @@ func TestMessageReplyToMessageIDRoundTripsAndSurvivesUpdate(t *testing.T) {
 	}
 }
 
+func TestMessageAttachmentsRoundTripAndCascadeDelete(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	defer st.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_attachment", DisplayName: "Attachment", CreatedAt: now}
+	org := domain.Organization{ID: "org_attachment", Name: "Attachment", CreatedAt: now}
+	channel := domain.Channel{ID: "chn_attachment", OrganizationID: org.ID, Name: "attachment", CreatedAt: now}
+	message := domain.Message{
+		ID: "msg_attachment", OrganizationID: org.ID, ConversationType: domain.ConversationChannel,
+		ConversationID: channel.ID, SenderType: domain.SenderUser, SenderID: user.ID,
+		Kind: domain.MessageText, Body: "", CreatedAt: now,
+	}
+	attachment := domain.MessageAttachment{
+		ID: "att_1", MessageID: message.ID, OrganizationID: org.ID,
+		ConversationType: domain.ConversationChannel, ConversationID: channel.ID,
+		Filename: "notes.txt", ContentType: "text/plain", Kind: domain.MessageAttachmentText,
+		SizeBytes: 5, StoragePath: filepath.Join(t.TempDir(), "notes.txt"), CreatedAt: now,
+	}
+
+	err := st.Tx(ctx, func(tx store.Tx) error {
+		if err := tx.Users().Create(ctx, user); err != nil {
+			return err
+		}
+		if err := tx.Organizations().Create(ctx, org); err != nil {
+			return err
+		}
+		if err := tx.Organizations().AddMember(ctx, org.ID, user.ID, domain.RoleOwner); err != nil {
+			return err
+		}
+		if err := tx.Channels().Create(ctx, channel); err != nil {
+			return err
+		}
+		if err := tx.Messages().Create(ctx, message); err != nil {
+			return err
+		}
+		return tx.MessageAttachments().Create(ctx, attachment)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byID, err := st.MessageAttachments().ByID(ctx, attachment.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byID.Filename != attachment.Filename || byID.StoragePath != attachment.StoragePath || byID.Kind != attachment.Kind {
+		t.Fatalf("attachment by id = %#v, want %#v", byID, attachment)
+	}
+
+	attachments, err := st.MessageAttachments().ListByMessage(ctx, message.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attachments) != 1 || attachments[0].ID != attachment.ID {
+		t.Fatalf("attachments = %#v, want one %s", attachments, attachment.ID)
+	}
+
+	if err := st.Messages().Delete(ctx, message.ID); err != nil {
+		t.Fatal(err)
+	}
+	attachments, err = st.MessageAttachments().ListByMessage(ctx, message.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attachments) != 0 {
+		t.Fatalf("attachments after message delete = %#v, want none", attachments)
+	}
+}
+
 func TestMessagesListRecentReturnsLatestMessagesChronologically(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)

@@ -46,6 +46,7 @@ export interface MessageReference {
   sender_type?: SenderType;
   sender_id?: string;
   body?: string;
+  attachment_count?: number;
   created_at?: string;
 }
 
@@ -243,6 +244,17 @@ export interface Message {
   metadata?: MessageMetadata;
   reply_to_message_id?: string;
   reply_to?: MessageReference;
+  attachments?: MessageAttachment[];
+  created_at: string;
+}
+
+export interface MessageAttachment {
+  id: string;
+  message_id: string;
+  filename: string;
+  content_type: string;
+  kind: "image" | "text";
+  size_bytes: number;
   created_at: string;
 }
 

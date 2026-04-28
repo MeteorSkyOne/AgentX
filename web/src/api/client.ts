@@ -39,8 +39,9 @@ export function clearToken(): void {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers = new Headers(init.headers);
+  const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
 
-  if (init.body && !headers.has("Content-Type")) {
+  if (init.body && !headers.has("Content-Type") && !isFormData) {
     headers.set("Content-Type", "application/json");
   }
   if (token) {
@@ -402,8 +403,26 @@ export function sendMessage(
   type: ConversationType,
   id: string,
   body: string,
-  options: { replyToMessageID?: string } = {}
+  options: { replyToMessageID?: string; files?: File[] } = {}
 ): Promise<Message> {
+  if (options.files && options.files.length > 0) {
+    const form = new FormData();
+    form.set("body", body);
+    if (options.replyToMessageID) {
+      form.set("reply_to_message_id", options.replyToMessageID);
+    }
+    for (const file of options.files) {
+      form.append("files[]", file);
+    }
+    return request<Message>(
+      `/api/conversations/${encodeURIComponent(type)}/${encodeURIComponent(id)}/messages`,
+      {
+        method: "POST",
+        body: form
+      }
+    );
+  }
+
   const payload: { body: string; reply_to_message_id?: string } = { body };
   if (options.replyToMessageID) {
     payload.reply_to_message_id = options.replyToMessageID;
@@ -415,6 +434,23 @@ export function sendMessage(
       body: JSON.stringify(payload)
     }
   );
+}
+
+export async function fetchAttachmentBlob(attachmentID: string): Promise<Blob> {
+  const token = getToken();
+  const headers = new Headers();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  const response = await fetch(
+    `/api/attachments/${encodeURIComponent(attachmentID)}/content`,
+    { headers }
+  );
+  if (!response.ok) {
+    const message = await errorMessage(response);
+    throw new Error(message);
+  }
+  return response.blob();
 }
 
 export function updateMessage(messageID: string, body: string): Promise<Message> {

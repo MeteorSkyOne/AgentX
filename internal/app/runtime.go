@@ -125,6 +125,14 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 		failRun(ctx, "", err)
 		return
 	}
+	if len(userMessage.Attachments) == 0 {
+		attachments, err := a.store.MessageAttachments().ListByMessage(ctx, userMessage.ID)
+		if err != nil {
+			failRun(ctx, "", err)
+			return
+		}
+		userMessage.Attachments = attachments
+	}
 
 	prompt := opts.Prompt
 	if prompt == "" {
@@ -175,7 +183,11 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 			})
 		}
 
-		if err := session.Send(ctx, agentruntime.Input{Prompt: prompt, Context: runtimeContext}); err != nil {
+		if err := session.Send(ctx, agentruntime.Input{
+			Prompt:      prompt,
+			Context:     runtimeContext,
+			Attachments: runtimeAttachmentsFromMessage(userMessage),
+		}); err != nil {
 			slog.Error("agent runtime send failed", append(runAttrs, "provider_session_id", session.CurrentSessionID(), "error", err)...)
 			failRun(ctx, session.CurrentSessionID(), err)
 			_ = session.Close(context.WithoutCancel(ctx))
@@ -378,6 +390,24 @@ func runtimeMessageBody(body string) string {
 		return body
 	}
 	return string(runes[:runtimeContextBodyLimit]) + "\n[truncated]"
+}
+
+func runtimeAttachmentsFromMessage(message domain.Message) []agentruntime.Attachment {
+	if len(message.Attachments) == 0 {
+		return nil
+	}
+	attachments := make([]agentruntime.Attachment, 0, len(message.Attachments))
+	for _, attachment := range message.Attachments {
+		attachments = append(attachments, agentruntime.Attachment{
+			ID:          attachment.ID,
+			Filename:    attachment.Filename,
+			ContentType: attachment.ContentType,
+			Kind:        string(attachment.Kind),
+			SizeBytes:   attachment.SizeBytes,
+			LocalPath:   attachment.StoragePath,
+		})
+	}
+	return attachments
 }
 
 func (a *App) firstAgentIDForFailedResolution(ctx context.Context, scope conversationScope) string {

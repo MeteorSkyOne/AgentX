@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -186,6 +187,231 @@ func TestSendReplyMessageRejectsInvalidReference(t *testing.T) {
 		ReplyToMessageID: otherMessage.ID,
 	}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("cross-conversation reference error = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestSendAttachmentOnlyMessagePersistsAndPassesFilesToRuntime(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	capture := &capturingRuntime{sends: make(chan capturedInput, 2)}
+	application := New(st, eventbus.New(), Options{
+		AdminToken:       "secret",
+		DataDir:          t.TempDir(),
+		DefaultAgentKind: "capture",
+		Runtimes: map[string]agentruntime.Runtime{
+			"capture": capture,
+		},
+	})
+	bootstrap, err := application.Bootstrap(ctx, testSetupRequest("Meteorsky"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	message, err := application.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Attachments: []AttachmentUpload{{
+			Filename:    "notes.txt",
+			ContentType: "text/plain",
+			Data:        []byte("important context\n"),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.Body != "" || len(message.Attachments) != 1 {
+		t.Fatalf("message = %#v, want attachment-only message", message)
+	}
+
+	captured := readCapturedInput(t, capture.sends)
+	if len(captured.input.Attachments) != 1 {
+		t.Fatalf("runtime attachments = %#v, want one", captured.input.Attachments)
+	}
+	attachment := captured.input.Attachments[0]
+	if attachment.Filename != "notes.txt" || attachment.Kind != string(domain.MessageAttachmentText) || attachment.LocalPath == "" {
+		t.Fatalf("runtime attachment = %#v", attachment)
+	}
+	if _, err := os.Stat(attachment.LocalPath); err != nil {
+		t.Fatalf("runtime attachment path missing: %v", err)
+	}
+	if rendered := captured.input.RenderedPrompt(); !strings.Contains(rendered, "notes.txt") || !strings.Contains(rendered, attachment.LocalPath) {
+		t.Fatalf("rendered prompt = %q, want attachment filename and path", rendered)
+	}
+
+	if err := application.DeleteMessage(ctx, message.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(attachment.LocalPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("attachment file after delete stat err = %v, want not exist", err)
+	}
+}
+
+func TestSendMessageRejectsInvalidAttachmentsAndSlashCommandAttachments(t *testing.T) {
+	ctx := context.Background()
+	application, _, bootstrap := newConversationTestApp(t, ctx)
+
+	if _, err := application.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "binary",
+		Attachments: []AttachmentUpload{{
+			Filename:    "blob.bin",
+			ContentType: "application/octet-stream",
+			Data:        []byte{0x00, 0x01, 0x02},
+		}},
+	}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("binary attachment error = %v, want ErrInvalidInput", err)
+	}
+
+	if _, err := application.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/effort high",
+		Attachments: []AttachmentUpload{{
+			Filename:    "notes.txt",
+			ContentType: "text/plain",
+			Data:        []byte("text"),
+		}},
+	}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("slash attachment error = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestDeleteMessagePublishesEventWhenAttachmentFileCleanupFails(t *testing.T) {
+	ctx := context.Background()
+	application, bus, bootstrap := newConversationTestApp(t, ctx)
+
+	events, unsubscribe := bus.Subscribe(ctx, eventbus.Filter{
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+	})
+	defer unsubscribe()
+
+	now := time.Now().UTC()
+	message := domain.Message{
+		ID:               "msg_cleanup_failure",
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		SenderType:       domain.SenderUser,
+		SenderID:         bootstrap.User.ID,
+		Kind:             domain.MessageText,
+		Body:             "delete me",
+		CreatedAt:        now,
+	}
+	nonEmptyDir := filepath.Join(t.TempDir(), "stored-attachment")
+	if err := os.MkdirAll(nonEmptyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nonEmptyDir, "child"), []byte("keep directory non-empty"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	attachment := domain.MessageAttachment{
+		ID:               "att_cleanup_failure",
+		MessageID:        message.ID,
+		OrganizationID:   message.OrganizationID,
+		ConversationType: message.ConversationType,
+		ConversationID:   message.ConversationID,
+		Filename:         "broken.txt",
+		ContentType:      "text/plain",
+		Kind:             domain.MessageAttachmentText,
+		SizeBytes:        4,
+		StoragePath:      nonEmptyDir,
+		CreatedAt:        now,
+	}
+	if err := application.store.Tx(ctx, func(tx store.Tx) error {
+		if err := tx.Messages().Create(ctx, message); err != nil {
+			return err
+		}
+		return tx.MessageAttachments().Create(ctx, attachment)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := application.DeleteMessage(ctx, message.ID); err != nil {
+		t.Fatalf("DeleteMessage returned cleanup error: %v", err)
+	}
+	select {
+	case evt := <-events:
+		if evt.Type != domain.EventMessageDeleted {
+			t.Fatalf("event type = %s, want %s", evt.Type, domain.EventMessageDeleted)
+		}
+		payload := evt.Payload.(domain.MessageDeletedPayload)
+		if payload.MessageID != message.ID {
+			t.Fatalf("deleted message id = %q, want %q", payload.MessageID, message.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for message deleted event")
+	}
+	if _, err := application.store.Messages().ByID(ctx, message.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("message lookup after delete error = %v, want sql.ErrNoRows", err)
+	}
+	if _, err := application.store.MessageAttachments().ByID(ctx, attachment.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("attachment lookup after delete error = %v, want sql.ErrNoRows", err)
+	}
+}
+
+func TestRunAgentReloadsStoredAttachmentsForEmptyAttachmentSlice(t *testing.T) {
+	ctx := context.Background()
+	application, _, bootstrap := newConversationTestApp(t, ctx)
+	capture := &capturingRuntime{sends: make(chan capturedInput, 2)}
+	application.opts.Runtimes[domain.AgentKindFake] = capture
+
+	now := time.Now().UTC()
+	message := domain.Message{
+		ID:               "msg_reload_attachments",
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		SenderType:       domain.SenderUser,
+		SenderID:         bootstrap.User.ID,
+		Kind:             domain.MessageText,
+		Body:             "use stored attachment",
+		Attachments:      []domain.MessageAttachment{},
+		CreatedAt:        now,
+	}
+	storedFile := filepath.Join(t.TempDir(), "stored.txt")
+	if err := os.WriteFile(storedFile, []byte("stored attachment"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	attachment := domain.MessageAttachment{
+		ID:               "att_reload_attachments",
+		MessageID:        message.ID,
+		OrganizationID:   message.OrganizationID,
+		ConversationType: message.ConversationType,
+		ConversationID:   message.ConversationID,
+		Filename:         "stored.txt",
+		ContentType:      "text/plain",
+		Kind:             domain.MessageAttachmentText,
+		SizeBytes:        17,
+		StoragePath:      storedFile,
+		CreatedAt:        now,
+	}
+	if err := application.store.Tx(ctx, func(tx store.Tx) error {
+		if err := tx.Messages().Create(ctx, message); err != nil {
+			return err
+		}
+		return tx.MessageAttachments().Create(ctx, attachment)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	application.runAgentForMessage(ctx, message)
+	captured := readCapturedInput(t, capture.sends)
+	if len(captured.input.Attachments) != 1 || captured.input.Attachments[0].LocalPath != storedFile {
+		t.Fatalf("captured attachments = %#v, want stored attachment path %q", captured.input.Attachments, storedFile)
 	}
 }
 

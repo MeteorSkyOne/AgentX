@@ -180,18 +180,40 @@ type ChannelAgent struct {
 }
 
 type Message struct {
-	ID               string            `json:"id"`
-	OrganizationID   string            `json:"organization_id"`
-	ConversationType ConversationType  `json:"conversation_type"`
-	ConversationID   string            `json:"conversation_id"`
-	SenderType       SenderType        `json:"sender_type"`
-	SenderID         string            `json:"sender_id"`
-	Kind             MessageKind       `json:"kind"`
-	Body             string            `json:"body"`
-	Metadata         map[string]any    `json:"metadata,omitempty"`
-	ReplyToMessageID string            `json:"reply_to_message_id,omitempty"`
-	ReplyTo          *MessageReference `json:"reply_to,omitempty"`
-	CreatedAt        time.Time         `json:"created_at"`
+	ID               string              `json:"id"`
+	OrganizationID   string              `json:"organization_id"`
+	ConversationType ConversationType    `json:"conversation_type"`
+	ConversationID   string              `json:"conversation_id"`
+	SenderType       SenderType          `json:"sender_type"`
+	SenderID         string              `json:"sender_id"`
+	Kind             MessageKind         `json:"kind"`
+	Body             string              `json:"body"`
+	Metadata         map[string]any      `json:"metadata,omitempty"`
+	ReplyToMessageID string              `json:"reply_to_message_id,omitempty"`
+	ReplyTo          *MessageReference   `json:"reply_to,omitempty"`
+	Attachments      []MessageAttachment `json:"attachments,omitempty"`
+	CreatedAt        time.Time           `json:"created_at"`
+}
+
+type MessageAttachmentKind string
+
+const (
+	MessageAttachmentImage MessageAttachmentKind = "image"
+	MessageAttachmentText  MessageAttachmentKind = "text"
+)
+
+type MessageAttachment struct {
+	ID               string                `json:"id"`
+	MessageID        string                `json:"message_id"`
+	OrganizationID   string                `json:"-"`
+	ConversationType ConversationType      `json:"-"`
+	ConversationID   string                `json:"-"`
+	Filename         string                `json:"filename"`
+	ContentType      string                `json:"content_type"`
+	Kind             MessageAttachmentKind `json:"kind"`
+	SizeBytes        int64                 `json:"size_bytes"`
+	StoragePath      string                `json:"-"`
+	CreatedAt        time.Time             `json:"created_at"`
 }
 
 type MetricsUsage struct {
@@ -260,12 +282,13 @@ type AgentRunMetric struct {
 }
 
 type MessageReference struct {
-	MessageID  string     `json:"message_id"`
-	Deleted    bool       `json:"deleted,omitempty"`
-	SenderType SenderType `json:"sender_type,omitempty"`
-	SenderID   string     `json:"sender_id,omitempty"`
-	Body       string     `json:"body,omitempty"`
-	CreatedAt  *time.Time `json:"created_at,omitempty"`
+	MessageID       string     `json:"message_id"`
+	Deleted         bool       `json:"deleted,omitempty"`
+	SenderType      SenderType `json:"sender_type,omitempty"`
+	SenderID        string     `json:"sender_id,omitempty"`
+	Body            string     `json:"body,omitempty"`
+	AttachmentCount int        `json:"attachment_count,omitempty"`
+	CreatedAt       *time.Time `json:"created_at,omitempty"`
 }
 
 type ProcessItem struct {

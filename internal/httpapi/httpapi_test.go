@@ -5,8 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +21,7 @@ import (
 	"github.com/meteorsky/agentx/internal/domain"
 	"github.com/meteorsky/agentx/internal/eventbus"
 	"github.com/meteorsky/agentx/internal/id"
+	"github.com/meteorsky/agentx/internal/store"
 	sqlitestore "github.com/meteorsky/agentx/internal/store/sqlite"
 	"nhooyr.io/websocket"
 )
@@ -536,6 +543,143 @@ func TestHTTPSendReplyMessageReturnsResolvedReferenceAndRejectsInvalidTarget(t *
 		"body":                "bad reply",
 		"reply_to_message_id": "msg_missing",
 	}, http.StatusBadRequest, nil)
+}
+
+func TestHTTPMultipartAttachmentsCanBeSentDownloadedAndAuthorized(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	bootstrap := setupHTTP(t, env.server.URL)
+
+	var sent domain.Message
+	postMultipartMessage(t, env.server.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages", bootstrap.SessionToken, map[string]string{
+		"body": "",
+	}, []multipartTestFile{{
+		Field:       "files[]",
+		Filename:    "notes.txt",
+		ContentType: "text/plain",
+		Body:        []byte("hello attachment"),
+	}}, http.StatusOK, &sent)
+	if sent.Body != "" || len(sent.Attachments) != 1 {
+		t.Fatalf("sent message = %#v, want attachment-only message", sent)
+	}
+	attachment := sent.Attachments[0]
+	if attachment.Filename != "notes.txt" || attachment.Kind != domain.MessageAttachmentText || attachment.StoragePath != "" {
+		t.Fatalf("attachment response = %#v, want redacted text attachment", attachment)
+	}
+
+	status, headers, body := getRaw(t, env.server.URL+"/api/attachments/"+attachment.ID+"/content", bootstrap.SessionToken)
+	if status != http.StatusOK {
+		t.Fatalf("attachment content status = %d, body = %s", status, string(body))
+	}
+	if string(body) != "hello attachment" {
+		t.Fatalf("attachment body = %q", string(body))
+	}
+	if contentType := headers.Get("Content-Type"); !strings.HasPrefix(contentType, "text/plain") {
+		t.Fatalf("content-type = %q, want text/plain", contentType)
+	}
+	if disposition := headers.Get("Content-Disposition"); !strings.Contains(disposition, "notes.txt") {
+		t.Fatalf("content-disposition = %q, want filename", disposition)
+	}
+	if csp := headers.Get("Content-Security-Policy"); csp != "default-src 'none'; sandbox" {
+		t.Fatalf("content-security-policy = %q, want locked down attachment policy", csp)
+	}
+	if cacheControl := headers.Get("Cache-Control"); cacheControl != "private, no-store" {
+		t.Fatalf("cache-control = %q, want private, no-store", cacheControl)
+	}
+
+	var htmlMessage domain.Message
+	postMultipartMessage(t, env.server.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages", bootstrap.SessionToken, map[string]string{
+		"body": "html attachment",
+	}, []multipartTestFile{{
+		Field:       "files[]",
+		Filename:    "page.html",
+		ContentType: "text/html",
+		Body:        []byte(`<script>window.evil = true</script>`),
+	}}, http.StatusOK, &htmlMessage)
+	if len(htmlMessage.Attachments) != 1 || htmlMessage.Attachments[0].ContentType != "text/html" {
+		t.Fatalf("html attachment message = %#v, want text/html attachment", htmlMessage)
+	}
+	status, headers, _ = getRaw(t, env.server.URL+"/api/attachments/"+htmlMessage.Attachments[0].ID+"/content", bootstrap.SessionToken)
+	if status != http.StatusOK {
+		t.Fatalf("html attachment content status = %d", status)
+	}
+	if csp := headers.Get("Content-Security-Policy"); csp != "default-src 'none'; sandbox" {
+		t.Fatalf("html content-security-policy = %q, want locked down attachment policy", csp)
+	}
+
+	otherOrg := domain.Organization{ID: "org_other_attachment", Name: "Other", CreatedAt: time.Now().UTC()}
+	otherWorkspace := domain.Workspace{
+		ID: "wks_other_attachment", OrganizationID: otherOrg.ID, Type: "project", Name: "Other Workspace",
+		Path: filepath.Join(t.TempDir(), "other"), CreatedBy: bootstrap.User.ID, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	otherProject := domain.Project{
+		ID: "prj_other_attachment", OrganizationID: otherOrg.ID, Name: "Other", WorkspaceID: otherWorkspace.ID,
+		CreatedBy: bootstrap.User.ID, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	otherChannel := domain.Channel{
+		ID: "chn_other_attachment", OrganizationID: otherOrg.ID, ProjectID: otherProject.ID,
+		Type: domain.ChannelTypeText, Name: "Other", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	otherMessage := domain.Message{
+		ID: "msg_other_attachment", OrganizationID: otherOrg.ID, ConversationType: domain.ConversationChannel,
+		ConversationID: otherChannel.ID, SenderType: domain.SenderUser, SenderID: bootstrap.User.ID,
+		Kind: domain.MessageText, Body: "other", CreatedAt: time.Now().UTC(),
+	}
+	otherPath := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(otherPath, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	otherAttachment := domain.MessageAttachment{
+		ID: "att_other_attachment", MessageID: otherMessage.ID, OrganizationID: otherOrg.ID,
+		ConversationType: domain.ConversationChannel, ConversationID: otherChannel.ID,
+		Filename: "secret.txt", ContentType: "text/plain", Kind: domain.MessageAttachmentText,
+		SizeBytes: 6, StoragePath: otherPath, CreatedAt: time.Now().UTC(),
+	}
+	if err := env.store.Tx(ctx, func(tx store.Tx) error {
+		if err := tx.Organizations().Create(ctx, otherOrg); err != nil {
+			return err
+		}
+		if err := tx.Workspaces().Create(ctx, otherWorkspace); err != nil {
+			return err
+		}
+		if err := tx.Projects().Create(ctx, otherProject); err != nil {
+			return err
+		}
+		if err := tx.Channels().Create(ctx, otherChannel); err != nil {
+			return err
+		}
+		if err := tx.Messages().Create(ctx, otherMessage); err != nil {
+			return err
+		}
+		return tx.MessageAttachments().Create(ctx, otherAttachment)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status, _, _ = getRaw(t, env.server.URL+"/api/attachments/"+otherAttachment.ID+"/content", bootstrap.SessionToken)
+	if status != http.StatusNotFound {
+		t.Fatalf("cross-org attachment status = %d, want 404", status)
+	}
+}
+
+func TestHTTPMalformedMultipartMessageReturnsStableError(t *testing.T) {
+	env := newTestEnv(t)
+	bootstrap := setupHTTP(t, env.server.URL)
+
+	req, err := http.NewRequest(
+		http.MethodPost,
+		env.server.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages",
+		strings.NewReader("not a valid multipart body"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+bootstrap.SessionToken)
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=agentx")
+	var response errorResponse
+	doJSON(t, req, http.StatusBadRequest, &response)
+	if response.Error != "malformed multipart form" {
+		t.Fatalf("multipart error = %q, want stable malformed multipart form", response.Error)
+	}
 }
 
 func TestWebSocketReceivesMessageCreated(t *testing.T) {
@@ -1113,6 +1257,55 @@ func postJSON(t *testing.T, url string, token string, body any, wantStatus int, 
 	doJSON(t, req, wantStatus, dst)
 }
 
+type multipartTestFile struct {
+	Field       string
+	Filename    string
+	ContentType string
+	Body        []byte
+}
+
+func postMultipartMessage(t *testing.T, url string, token string, fields map[string]string, files []multipartTestFile, wantStatus int, dst any) {
+	t.Helper()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	for key, value := range fields {
+		if err := writer.WriteField(key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range files {
+		header := make(textproto.MIMEHeader)
+		header.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{
+			"name":     file.Field,
+			"filename": file.Filename,
+		}))
+		if file.ContentType != "" {
+			header.Set("Content-Type", file.ContentType)
+		}
+		part, err := writer.CreatePart(header)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write(file.Body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, &body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	doJSON(t, req, wantStatus, dst)
+}
+
 func putJSON(t *testing.T, url string, token string, body any, wantStatus int, dst any) {
 	t.Helper()
 
@@ -1173,6 +1366,28 @@ func getJSON(t *testing.T, url string, token string, wantStatus int, dst any) {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	doJSON(t, req, wantStatus, dst)
+}
+
+func getRaw(t *testing.T, url string, token string) (int, http.Header, []byte) {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp.StatusCode, resp.Header.Clone(), body
 }
 
 func doJSON(t *testing.T, req *http.Request, wantStatus int, dst any) {

@@ -20,13 +20,14 @@ var ErrSessionClosed = errors.New("cli runtime session closed")
 var ErrSessionAlreadyStarted = errors.New("cli runtime session already started")
 
 type Command struct {
-	Name string
-	Args []string
-	Dir  string
-	Env  map[string]string
+	Name  string
+	Args  []string
+	Dir   string
+	Env   map[string]string
+	Stdin []byte
 }
 
-type CommandBuilder func(input runtime.Input) Command
+type CommandBuilder func(input runtime.Input) (Command, error)
 
 type LineHandler interface {
 	HandleLine(line []byte) ([]runtime.Event, error)
@@ -78,13 +79,21 @@ func (s *Session) Send(ctx context.Context, input runtime.Input) error {
 	s.cancel = cancel
 	s.mu.Unlock()
 
-	command := s.build(input)
+	command, err := s.build(input)
+	if err != nil {
+		slog.Error("agent cli command build failed", "session_id", s.fallbackID, "error", err)
+		s.finishStartFailure(cancel)
+		return err
+	}
 	slog.Info("agent cli command starting", "session_id", s.fallbackID, "command", command.Name, "args", safeCommandArgs(command.Args), "dir", command.Dir)
 	cmd := exec.CommandContext(runCtx, command.Name, command.Args...)
 	if command.Dir != "" {
 		cmd.Dir = command.Dir
 	}
 	cmd.Env = mergeEnv(os.Environ(), command.Env)
+	if command.Stdin != nil {
+		cmd.Stdin = bytes.NewReader(command.Stdin)
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

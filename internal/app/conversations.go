@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ type SendMessageRequest struct {
 	ConversationID   string
 	Body             string
 	ReplyToMessageID string
+	Attachments      []AttachmentUpload
 }
 
 type ConversationAgentContext struct {
@@ -131,7 +133,7 @@ func (a *App) ConversationContext(ctx context.Context, conversationType domain.C
 
 func (a *App) SendMessage(ctx context.Context, req SendMessageRequest) (domain.Message, error) {
 	body := strings.TrimSpace(req.Body)
-	if body == "" {
+	if body == "" && len(req.Attachments) == 0 {
 		return domain.Message{}, ErrEmptyMessage
 	}
 	scope, err := a.conversationScope(ctx, req.ConversationType, req.ConversationID)
@@ -150,6 +152,9 @@ func (a *App) SendMessage(ctx context.Context, req SendMessageRequest) (domain.M
 	if command, ok, err := parseSlashCommand(body); ok {
 		if err != nil {
 			return domain.Message{}, err
+		}
+		if len(req.Attachments) > 0 {
+			return domain.Message{}, invalidInput("slash commands cannot include attachments")
 		}
 		return a.dispatchSlashCommand(ctx, req, agents, command)
 	}
@@ -224,6 +229,11 @@ func (a *App) resolveMessageReferences(ctx context.Context, messages []domain.Me
 }
 
 func (a *App) resolveMessageReference(ctx context.Context, message domain.Message) (domain.Message, error) {
+	attachments, err := a.store.MessageAttachments().ListByMessage(ctx, message.ID)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	message.Attachments = attachments
 	message.ReplyTo = nil
 	message.ReplyToMessageID = strings.TrimSpace(message.ReplyToMessageID)
 	if message.ReplyToMessageID == "" {
@@ -243,6 +253,11 @@ func (a *App) resolveMessageReference(ctx context.Context, message domain.Messag
 		message.ReplyTo = &domain.MessageReference{MessageID: message.ReplyToMessageID, Deleted: true}
 		return message, nil
 	}
+	referencedAttachments, err := a.store.MessageAttachments().ListByMessage(ctx, referenced.ID)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	referenced.Attachments = referencedAttachments
 	message.ReplyTo = messageReferenceFromMessage(referenced)
 	return message, nil
 }
@@ -250,11 +265,12 @@ func (a *App) resolveMessageReference(ctx context.Context, message domain.Messag
 func messageReferenceFromMessage(message domain.Message) *domain.MessageReference {
 	createdAt := message.CreatedAt
 	return &domain.MessageReference{
-		MessageID:  message.ID,
-		SenderType: message.SenderType,
-		SenderID:   message.SenderID,
-		Body:       message.Body,
-		CreatedAt:  &createdAt,
+		MessageID:       message.ID,
+		SenderType:      message.SenderType,
+		SenderID:        message.SenderID,
+		Body:            message.Body,
+		AttachmentCount: len(message.Attachments),
+		CreatedAt:       &createdAt,
 	}
 }
 
@@ -263,8 +279,15 @@ func (a *App) DeleteMessage(ctx context.Context, messageID string) error {
 	if err != nil {
 		return err
 	}
+	attachments, err := a.store.MessageAttachments().ListByMessage(ctx, messageID)
+	if err != nil {
+		return err
+	}
 	if err := a.store.Messages().Delete(ctx, messageID); err != nil {
 		return err
+	}
+	if err := removeAttachmentFiles(attachments); err != nil {
+		slog.Warn("failed to remove attachment files", "message_id", messageID, "error", err)
 	}
 	a.publishConversationEvent(domain.Event{
 		Type:             domain.EventMessageDeleted,

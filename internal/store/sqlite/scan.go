@@ -22,6 +22,21 @@ func scanMessages(rows *sql.Rows) ([]domain.Message, error) {
 	return messages, nil
 }
 
+func scanMessageAttachments(rows *sql.Rows) ([]domain.MessageAttachment, error) {
+	var attachments []domain.MessageAttachment
+	for rows.Next() {
+		attachment, err := scanMessageAttachment(rows)
+		if err != nil {
+			return nil, err
+		}
+		attachments = append(attachments, attachment)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return attachments, nil
+}
+
 func scanOrganization(scanner interface {
 	Scan(dest ...any) error
 }) (domain.Organization, error) {
@@ -200,6 +215,29 @@ func scanMessage(scanner interface {
 		return domain.Message{}, err
 	}
 	return message, nil
+}
+
+func scanMessageAttachment(scanner interface {
+	Scan(dest ...any) error
+}) (domain.MessageAttachment, error) {
+	var attachment domain.MessageAttachment
+	var conversationType, kind, createdAt string
+	if err := scanner.Scan(
+		&attachment.ID, &attachment.MessageID, &attachment.OrganizationID,
+		&conversationType, &attachment.ConversationID, &attachment.Filename,
+		&attachment.ContentType, &kind, &attachment.SizeBytes, &attachment.StoragePath,
+		&createdAt,
+	); err != nil {
+		return domain.MessageAttachment{}, err
+	}
+	attachment.ConversationType = domain.ConversationType(conversationType)
+	attachment.Kind = domain.MessageAttachmentKind(kind)
+	var err error
+	attachment.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return domain.MessageAttachment{}, err
+	}
+	return attachment, nil
 }
 
 func scanAgent(scanner interface {

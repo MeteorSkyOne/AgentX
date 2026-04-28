@@ -782,6 +782,7 @@ export function Shell({
             streaming={streaming}
             boundAgents={boundAgents}
             preferences={preferences}
+            theme={theme}
             composerConversation={composerConversation}
             onSelectThread={onSelectThread}
             onCreateThread={onCreateThread}
@@ -1369,6 +1370,7 @@ export function Shell({
               streaming={streaming}
               boundAgents={boundAgents}
               preferences={preferences}
+              theme={theme}
               composerConversation={composerConversation}
               onSelectThread={onSelectThread}
               onCreateThread={onCreateThread}

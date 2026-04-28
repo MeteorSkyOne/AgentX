@@ -3,8 +3,14 @@ package httpapi
 import (
 	"database/sql"
 	"errors"
+	"io"
+	"log/slog"
+	"mime"
+	"mime/multipart"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/meteorsky/agentx/internal/app"
@@ -140,9 +146,9 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req sendMessageRequest
-	if err := readJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "malformed JSON")
+	req, attachments, err := s.readSendMessageRequest(w, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -163,6 +169,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		ConversationID:   chi.URLParam(r, "id"),
 		Body:             req.Body,
 		ReplyToMessageID: req.ReplyToMessageID,
+		Attachments:      attachments,
 	})
 	if err != nil {
 		if errors.Is(err, app.ErrEmptyMessage) {
@@ -178,7 +185,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, app.ErrInvalidInput) {
-			writeError(w, http.StatusBadRequest, "invalid input")
+			writeError(w, http.StatusBadRequest, app.InvalidInputMessage(err))
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal server error")
@@ -186,6 +193,114 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, message)
+}
+
+func (s *Server) readSendMessageRequest(w http.ResponseWriter, r *http.Request) (sendMessageRequest, []app.AttachmentUpload, error) {
+	contentType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if strings.EqualFold(contentType, "multipart/form-data") {
+		return readMultipartSendMessageRequest(w, r)
+	}
+
+	var req sendMessageRequest
+	if err := readJSON(r, &req); err != nil {
+		return sendMessageRequest{}, nil, errors.New("malformed JSON")
+	}
+	return req, nil, nil
+}
+
+func readMultipartSendMessageRequest(w http.ResponseWriter, r *http.Request) (sendMessageRequest, []app.AttachmentUpload, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, app.MaxMessageAttachmentTotalBytes+1024*1024)
+	if err := r.ParseMultipartForm(app.MaxMessageAttachmentTotalBytes + 1024*1024); err != nil {
+		return sendMessageRequest{}, nil, errors.New("malformed multipart form")
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+
+	req := sendMessageRequest{
+		Body:             r.FormValue("body"),
+		ReplyToMessageID: r.FormValue("reply_to_message_id"),
+	}
+	var headers []*multipart.FileHeader
+	if r.MultipartForm != nil {
+		headers = append(headers, r.MultipartForm.File["files[]"]...)
+		headers = append(headers, r.MultipartForm.File["files"]...)
+	}
+	attachments := make([]app.AttachmentUpload, 0, len(headers))
+	for _, header := range headers {
+		file, err := header.Open()
+		if err != nil {
+			slog.Warn("failed to open uploaded attachment", "filename", header.Filename, "error", err)
+			return sendMessageRequest{}, nil, errors.New("failed to read attachment")
+		}
+		data, readErr := io.ReadAll(io.LimitReader(file, app.MaxAttachmentBytes+1))
+		closeErr := file.Close()
+		if readErr != nil {
+			slog.Warn("failed to read uploaded attachment", "filename", header.Filename, "error", readErr)
+			return sendMessageRequest{}, nil, errors.New("failed to read attachment")
+		}
+		if closeErr != nil {
+			slog.Warn("failed to close uploaded attachment", "filename", header.Filename, "error", closeErr)
+			return sendMessageRequest{}, nil, errors.New("failed to read attachment")
+		}
+		if int64(len(data)) > app.MaxAttachmentBytes {
+			return sendMessageRequest{}, nil, errors.New("attachment exceeds 10 MiB")
+		}
+		attachments = append(attachments, app.AttachmentUpload{
+			Filename:    header.Filename,
+			ContentType: header.Header.Get("Content-Type"),
+			Data:        data,
+		})
+	}
+	return req, attachments, nil
+}
+
+func (s *Server) handleAttachmentContent(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	attachment, err := s.app.Attachment(r.Context(), chi.URLParam(r, "attachmentID"))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "attachment not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if orgID, ok, err := s.authorizedConversationOrganizationID(r, userID, attachment.ConversationType, attachment.ConversationID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	} else if !ok || orgID != attachment.OrganizationID {
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
+
+	file, err := os.Open(attachment.StoragePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeError(w, http.StatusNotFound, "attachment content not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	defer file.Close()
+
+	stat, err := file.Stat()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	w.Header().Set("Content-Type", attachment.ContentType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": attachment.Filename}))
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeContent(w, r, "", stat.ModTime(), file)
 }
 
 func (s *Server) handleUpdateMessage(w http.ResponseWriter, r *http.Request) {

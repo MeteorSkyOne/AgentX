@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import type { Message } from "../src/api/types";
 import {
   createChannelViaAPI,
   e2ePassword,
@@ -110,6 +111,121 @@ test("sends messages from the composer and receives agent output", async ({ page
   await expect(messages.getByText("line one line two", { exact: true })).toBeVisible();
   await expect(messages.getByText("Echo: line one line two", { exact: true })).toBeVisible();
   await expect(composer).toHaveValue("");
+});
+
+test("uploads and downloads a text attachment from the composer", async ({ page }) => {
+  await signIn(page);
+  const channel = await createChannelViaAPI(page, test.info(), { prefix: "attachments" });
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+  await page.getByRole("button", { name: channel.name, exact: true }).click();
+
+  const attachmentName = "attachment-e2e-notes.txt";
+  const attachmentBody = "hello from an e2e attachment";
+  await page.locator('input[type="file"]').setInputFiles({
+    name: attachmentName,
+    mimeType: "text/plain",
+    buffer: Buffer.from(attachmentBody),
+  });
+  await expect(page.getByText(attachmentName, { exact: true })).toBeVisible();
+
+  const messageResponse = page.waitForResponse((response) => {
+    return (
+      response.request().method() === "POST" &&
+      response.url().includes(`/api/conversations/channel/${channel.id}/messages`) &&
+      response.status() === 200
+    );
+  });
+  await page.getByRole("textbox", { name: "Message" }).fill("please read the attachment");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const sent = (await (await messageResponse).json()) as Message;
+  expect(sent.attachments).toHaveLength(1);
+  const [attachment] = sent.attachments ?? [];
+  expect(attachment).toBeDefined();
+  if (!attachment) throw new Error("missing attachment in sent message");
+  expect(attachment.filename).toBe(attachmentName);
+  expect(attachment.kind).toBe("text");
+
+  const messages = page.getByLabel("Messages");
+  await expect(messages.getByText("please read the attachment", { exact: true })).toBeVisible();
+  await expect(messages.getByText(attachmentName, { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Preview attachment" }).click();
+  const previewDialog = page.getByRole("dialog");
+  await expect(previewDialog.getByText(attachmentName, { exact: true })).toBeVisible();
+  await expect(previewDialog.getByTestId("workspace-file-editor")).toBeVisible();
+  await expectMonacoEditorText(previewDialog, attachmentBody);
+
+  const content = await page.evaluate(async (attachmentID) => {
+    const token = localStorage.getItem("agentx.session_token");
+    if (!token) throw new Error("missing session token");
+    const response = await fetch(`/api/attachments/${encodeURIComponent(attachmentID)}/content`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return {
+      status: response.status,
+      text: await response.text(),
+      contentType: response.headers.get("Content-Type"),
+      contentSecurityPolicy: response.headers.get("Content-Security-Policy"),
+      cacheControl: response.headers.get("Cache-Control"),
+    };
+  }, attachment.id);
+
+  expect(content.status).toBe(200);
+  expect(content.text).toBe(attachmentBody);
+  expect(content.contentType).toContain("text/plain");
+  expect(content.contentSecurityPolicy).toBe("default-src 'none'; sandbox");
+  expect(content.cacheControl).toBe("private, no-store");
+});
+
+test("opens image attachments in an in-app preview dialog", async ({ page }) => {
+  await signIn(page);
+  const channel = await createChannelViaAPI(page, test.info(), { prefix: "image attachments" });
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+  await page.getByRole("button", { name: channel.name, exact: true }).click();
+
+  const imageName = "attachment-e2e-image.png";
+  await page.locator('input[type="file"]').setInputFiles({
+    name: imageName,
+    mimeType: "image/png",
+    buffer: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      "base64"
+    ),
+  });
+  await expect(page.getByText(imageName, { exact: true })).toBeVisible();
+
+  await page.getByRole("textbox", { name: "Message" }).fill("please inspect the image");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const messages = page.getByLabel("Messages");
+  await expect(messages.getByText("please inspect the image", { exact: true })).toBeVisible();
+  await messages.getByRole("button", { name: `Preview ${imageName}` }).click();
+
+  const previewDialog = page.getByRole("dialog");
+  await expect(previewDialog.getByText(imageName, { exact: true })).toBeVisible();
+  const previewImage = previewDialog.getByRole("img", { name: imageName });
+  await expect(previewImage).toBeVisible();
+  await expect(previewImage).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
+
+  await previewDialog.getByTestId("image-preview-canvas").hover();
+  await page.mouse.wheel(0, -600);
+  await expect.poll(() => previewImage.evaluate((node) => getComputedStyle(node).transform)).not.toBe(
+    "matrix(1, 0, 0, 1, 0, 0)"
+  );
+  const zoomedTransform = await previewImage.evaluate((node) => getComputedStyle(node).transform);
+
+  const canvasBox = await previewDialog.getByTestId("image-preview-canvas").boundingBox();
+  if (!canvasBox) throw new Error("missing image preview canvas box");
+  await page.mouse.move(canvasBox.x + canvasBox.width / 2, canvasBox.y + canvasBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(canvasBox.x + canvasBox.width / 2 + 80, canvasBox.y + canvasBox.height / 2 + 40);
+  await page.mouse.up();
+  await expect.poll(() => previewImage.evaluate((node) => getComputedStyle(node).transform)).not.toBe(
+    zoomedTransform
+  );
 });
 
 test("opens and closes the bound agent details panel", async ({ page }) => {

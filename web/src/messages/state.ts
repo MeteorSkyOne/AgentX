@@ -67,13 +67,17 @@ function refreshReplyReferences(messages: Message[], updatedMessages: Message[])
 }
 
 function referenceFromMessage(message: Message): MessageReference {
-  return {
+  const reference: MessageReference = {
     message_id: message.id,
     sender_type: message.sender_type,
     sender_id: message.sender_id,
     body: message.body,
     created_at: message.created_at
   };
+  if (message.attachments && message.attachments.length > 0) {
+    reference.attachment_count = message.attachments.length;
+  }
+  return reference;
 }
 
 export function eventMatchesActiveConversation(

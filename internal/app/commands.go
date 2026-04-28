@@ -9,6 +9,7 @@ import (
 
 	"github.com/meteorsky/agentx/internal/domain"
 	"github.com/meteorsky/agentx/internal/id"
+	"github.com/meteorsky/agentx/internal/store"
 )
 
 var ErrUnknownCommand = errors.New("unknown command")
@@ -347,8 +348,10 @@ func (a *App) createCommandSystemMessage(ctx context.Context, req SendMessageReq
 
 func (a *App) createConversationMessage(ctx context.Context, req SendMessageRequest, senderType domain.SenderType, senderID string, body string, metadata map[string]any) (domain.Message, error) {
 	replyToMessageID := ""
+	var uploads []AttachmentUpload
 	if senderType == domain.SenderUser {
 		replyToMessageID = req.ReplyToMessageID
+		uploads = req.Attachments
 	}
 	message := domain.Message{
 		ID:               id.New("msg"),
@@ -363,10 +366,32 @@ func (a *App) createConversationMessage(ctx context.Context, req SendMessageRequ
 		ReplyToMessageID: replyToMessageID,
 		CreatedAt:        time.Now().UTC(),
 	}
-	if err := a.store.Messages().Create(ctx, message); err != nil {
+	attachments, err := a.prepareMessageAttachments(message, uploads)
+	if err != nil {
 		return domain.Message{}, err
 	}
-	message, err := a.resolveMessageReference(ctx, message)
+	cleanupFiles := true
+	defer func() {
+		if cleanupFiles {
+			_ = removeAttachmentFiles(attachments)
+		}
+	}()
+
+	if err := a.store.Tx(ctx, func(tx store.Tx) error {
+		if err := tx.Messages().Create(ctx, message); err != nil {
+			return err
+		}
+		for _, attachment := range attachments {
+			if err := tx.MessageAttachments().Create(ctx, attachment); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return domain.Message{}, err
+	}
+	cleanupFiles = false
+	message, err = a.resolveMessageReference(ctx, message)
 	if err != nil {
 		return domain.Message{}, err
 	}

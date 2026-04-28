@@ -17,6 +17,7 @@ type Store interface {
 	Channels() ChannelStore
 	Threads() ThreadStore
 	Messages() MessageStore
+	MessageAttachments() MessageAttachmentStore
 	BotUsers() BotUserStore
 	Agents() AgentStore
 	Workspaces() WorkspaceStore
@@ -35,6 +36,7 @@ type Tx interface {
 	Channels() ChannelStore
 	Threads() ThreadStore
 	Messages() MessageStore
+	MessageAttachments() MessageAttachmentStore
 	BotUsers() BotUserStore
 	Agents() AgentStore
 	Workspaces() WorkspaceStore
@@ -107,6 +109,13 @@ type MessageStore interface {
 	List(ctx context.Context, conversationType domain.ConversationType, conversationID string, limit int) ([]domain.Message, error)
 	ListRecent(ctx context.Context, conversationType domain.ConversationType, conversationID string, limit int) ([]domain.Message, error)
 	ListRecentBefore(ctx context.Context, conversationType domain.ConversationType, conversationID string, before time.Time, limit int) ([]domain.Message, error)
+}
+
+type MessageAttachmentStore interface {
+	Create(ctx context.Context, attachment domain.MessageAttachment) error
+	ByID(ctx context.Context, id string) (domain.MessageAttachment, error)
+	ListByMessage(ctx context.Context, messageID string) ([]domain.MessageAttachment, error)
+	DeleteByMessage(ctx context.Context, messageID string) error
 }
 
 type BotUserStore interface {
