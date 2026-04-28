@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import type { Message } from "../src/api/types";
 import {
+  createAgentViaAPI,
   createChannelViaAPI,
   e2ePassword,
   e2eSetupToken,
@@ -9,6 +12,7 @@ import {
   expectMonacoEditorText,
   firstEnabledAgent,
   firstProject,
+  request,
   readWorkspaceFile,
   setMonacoEditorValue,
   signIn,
@@ -119,6 +123,96 @@ test("sends messages from the composer and receives agent output", async ({ page
   await expect(messages.getByText("line one line two", { exact: true })).toBeVisible();
   await expect(messages.getByText("Echo: line one line two", { exact: true })).toBeVisible();
   await expect(composer).toHaveValue("");
+});
+
+test("autocompletes skills for a targeted agent", async ({ page }, testInfo) => {
+  await signIn(page);
+
+  const defaultAgent = await firstEnabledAgent(page);
+  const handle = uniqueHandle(testInfo, "skill_agent");
+  const claudeHome = testInfo.outputPath(`claude-home-${handle}`);
+  const skillAgent = await createAgentViaAPI(page, testInfo, {
+    name: uniqueName(testInfo, "Skill Agent"),
+    handle,
+    kind: "claude",
+    env: {
+      HOME: claudeHome,
+    },
+  });
+  const skillPath = path.join(
+    claudeHome,
+    ".claude",
+    "plugins",
+    "marketplaces",
+    "local",
+    "plugins",
+    "review-tools",
+    "skills",
+    "reviewer",
+    "SKILL.md"
+  );
+  const claudeConfig = path.join(claudeHome, ".claude");
+  await mkdir(path.dirname(skillPath), { recursive: true });
+  await writeFile(
+    skillPath,
+    [
+      "---",
+      "name: reviewer",
+      "description: Review with context",
+      "---",
+      "Review the selected work carefully.",
+    ].join("\n")
+  );
+  await mkdir(path.join(claudeConfig, "plugins"), { recursive: true });
+  await writeFile(
+    path.join(claudeConfig, "plugins", "known_marketplaces.json"),
+    JSON.stringify(
+      {
+        local: {
+          installLocation: path.join(claudeConfig, "plugins", "marketplaces", "local"),
+        },
+      },
+      null,
+      2
+    )
+  );
+  await writeFile(
+    path.join(claudeConfig, "settings.json"),
+    JSON.stringify({ enabledPlugins: { "review-tools@local": true } }, null, 2)
+  );
+
+  const channel = await createChannelViaAPI(page, testInfo, {
+    prefix: "skills",
+    bindDefaultAgent: false,
+  });
+  await request(page, `/api/channels/${encodeURIComponent(channel.id)}/agents`, {
+    method: "PUT",
+    body: JSON.stringify({
+      agents: [{ agent_id: defaultAgent.id }, { agent_id: skillAgent.id }],
+    }),
+  });
+
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+  await page.getByRole("button", { name: channel.name, exact: true }).click();
+
+  const composer = page.getByRole("textbox", { name: "Message" });
+  await composer.fill("/rev");
+  const reviewerOption = page
+    .locator("button")
+    .filter({ hasText: "/reviewer" })
+    .filter({ hasText: `@${handle}` });
+  await expect(reviewerOption).toBeVisible();
+  await expect(reviewerOption).toContainText("Review with context");
+
+  await reviewerOption.click();
+  await expect(composer).toHaveValue(`/reviewer @${handle} `);
+
+  await composer.fill(`/skills @${handle}`);
+  await page.getByRole("button", { name: "Send" }).click();
+  const messages = page.getByLabel("Messages");
+  await expect(messages.getByText(`Skills for @${handle}:`)).toBeVisible();
+  await expect(messages.getByText("/reviewer - Review with context")).toBeVisible();
 });
 
 test("uploads and downloads a text attachment from the composer", async ({ page }) => {

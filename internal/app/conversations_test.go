@@ -1717,6 +1717,252 @@ func TestSlashModelAndEffortPersistAgentConfig(t *testing.T) {
 	}
 }
 
+func TestSlashSkillsListsSkillsForSingleAndTargetedMultiAgentConversation(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+	emptyHome := t.TempDir()
+	if _, err := app.UpdateAgent(ctx, bootstrap.Agent.ID, AgentUpdateRequest{
+		Kind:   stringPtr(domain.AgentKindCodex),
+		EnvSet: true,
+		Env:    map[string]string{"CODEX_HOME": filepath.Join(emptyHome, "codex"), "HOME": emptyHome},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	writeAppSkill(t, filepath.Join(bootstrap.Workspace.Path, ".codex", "skills", "reviewer", "SKILL.md"), `---
+name: reviewer
+description: Review code
+---
+Review code carefully.
+`)
+
+	message, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/skills",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.SenderType != domain.SenderSystem || !strings.Contains(message.Body, "Skills for @"+bootstrap.Agent.Handle) || !strings.Contains(message.Body, "/reviewer - Review code") {
+		t.Fatalf("/skills message = %#v", message)
+	}
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/skill",
+	}); !errors.Is(err, ErrUnknownCommand) {
+		t.Fatalf("/skill error = %v, want ErrUnknownCommand", err)
+	}
+
+	second, err := app.CreateAgent(ctx, AgentCreateRequest{
+		UserID:         bootstrap.User.ID,
+		OrganizationID: bootstrap.Organization.ID,
+		Name:           "Agent Two",
+		Handle:         "agent_two",
+		Kind:           domain.AgentKindCodex,
+		Env:            map[string]string{"CODEX_HOME": filepath.Join(emptyHome, "codex-two"), "HOME": emptyHome},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondWorkspace, err := app.store.Workspaces().ByID(ctx, second.ConfigWorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeAppSkill(t, filepath.Join(secondWorkspace.Path, ".codex", "skills", "tester", "SKILL.md"), `---
+name: tester
+description: Run focused tests
+---
+Run tests.
+`)
+	if _, err := app.SetChannelAgents(ctx, bootstrap.Channel.ID, []domain.ChannelAgent{
+		{AgentID: bootstrap.Agent.ID},
+		{AgentID: second.ID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/skills",
+	}); !IsCommandInputError(err) {
+		t.Fatalf("/skills without target error = %v, want command input error", err)
+	}
+
+	message, err = app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/skills @agent_two",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(message.Body, "Skills for @agent_two") || !strings.Contains(message.Body, "/tester - Run focused tests") {
+		t.Fatalf("targeted /skills message = %#v", message)
+	}
+}
+
+func TestSlashSkillInvocationBuildsPromptAndTargetsAgent(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	capture := &capturingRuntime{sends: make(chan capturedInput, 4)}
+	app := New(st, eventbus.New(), Options{
+		AdminToken:       "secret",
+		DataDir:          t.TempDir(),
+		DefaultAgentKind: domain.AgentKindCodex,
+		Runtimes: map[string]agentruntime.Runtime{
+			domain.AgentKindCodex: capture,
+		},
+	})
+	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyHome := t.TempDir()
+	if _, err := app.UpdateAgent(ctx, bootstrap.Agent.ID, AgentUpdateRequest{
+		EnvSet: true,
+		Env:    map[string]string{"CODEX_HOME": filepath.Join(emptyHome, "codex-one"), "HOME": emptyHome},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := app.CreateAgent(ctx, AgentCreateRequest{
+		UserID:         bootstrap.User.ID,
+		OrganizationID: bootstrap.Organization.ID,
+		Name:           "Agent Two",
+		Handle:         "agent_two",
+		Kind:           domain.AgentKindCodex,
+		Env:            map[string]string{"CODEX_HOME": filepath.Join(emptyHome, "codex-two"), "HOME": emptyHome},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondWorkspace, err := app.store.Workspaces().ByID(ctx, second.ConfigWorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeAppSkill(t, filepath.Join(secondWorkspace.Path, ".codex", "skills", "reviewer", "SKILL.md"), `---
+name: reviewer
+description: Review code
+---
+Review code carefully and cite files.
+`)
+	if _, err := app.SetChannelAgents(ctx, bootstrap.Channel.ID, []domain.ChannelAgent{
+		{AgentID: bootstrap.Agent.ID},
+		{AgentID: second.ID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	message, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/reviewer @agent_two check the API",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := readCapturedInput(t, capture.sends)
+	if input.agentID != second.ID {
+		t.Fatalf("captured agentID = %q, want %q", input.agentID, second.ID)
+	}
+	if !strings.Contains(input.input.Prompt, "Review code carefully and cite files.") || !strings.Contains(input.input.Prompt, "check the API") {
+		t.Fatalf("skill prompt = %q", input.input.Prompt)
+	}
+	if strings.Contains(input.input.Prompt, "@agent_two") {
+		t.Fatalf("skill prompt = %q, want target stripped from request args", input.input.Prompt)
+	}
+
+	messages, err := app.ListMessages(ctx, domain.ConversationChannel, bootstrap.Channel.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved bool
+	for _, item := range messages {
+		if item.ID == message.ID && item.Body == "/reviewer @agent_two check the API" {
+			saved = true
+		}
+	}
+	if !saved {
+		t.Fatalf("saved original user message missing from %#v", messages)
+	}
+}
+
+func TestSlashSkillUnknownAndBuiltinPrecedence(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	capture := &capturingRuntime{sends: make(chan capturedInput, 4)}
+	app := New(st, eventbus.New(), Options{
+		AdminToken:       "secret",
+		DataDir:          t.TempDir(),
+		DefaultAgentKind: domain.AgentKindCodex,
+		Runtimes: map[string]agentruntime.Runtime{
+			domain.AgentKindCodex: capture,
+		},
+	})
+	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyHome := t.TempDir()
+	if _, err := app.UpdateAgent(ctx, bootstrap.Agent.ID, AgentUpdateRequest{
+		EnvSet: true,
+		Env:    map[string]string{"CODEX_HOME": filepath.Join(emptyHome, "codex"), "HOME": emptyHome},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/does-not-exist",
+	}); !errors.Is(err, ErrUnknownCommand) {
+		t.Fatalf("unknown slash error = %v, want ErrUnknownCommand", err)
+	}
+
+	writeAppSkill(t, filepath.Join(bootstrap.Workspace.Path, ".codex", "skills", "review", "SKILL.md"), `---
+name: review
+description: Conflicting review skill
+---
+Use this skill body only if dynamic skills beat built-ins.
+`)
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/review check the diff",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	input := readCapturedInput(t, capture.sends)
+	if !strings.Contains(input.input.Prompt, "Review the current workspace changes.") || strings.Contains(input.input.Prompt, "Use this skill body") {
+		t.Fatalf("review prompt = %q, want built-in command prompt", input.input.Prompt)
+	}
+}
+
 func TestSlashNewResetsProviderSessionAndFiltersOldContext(t *testing.T) {
 	ctx := context.Background()
 	st, err := sqlitestore.Open(ctx, ":memory:")
@@ -2548,6 +2794,16 @@ func readCapturedInput(t *testing.T, sends <-chan capturedInput) capturedInput {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for captured runtime input")
 		return capturedInput{}
+	}
+}
+
+func writeAppSkill(t *testing.T, path string, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

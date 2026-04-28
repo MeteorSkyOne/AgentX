@@ -308,6 +308,20 @@ export interface ConversationContext {
   workspace: Workspace;
 }
 
+export interface ConversationSkill {
+  name: string;
+  display_name: string;
+  description: string;
+  conflicts_with_builtin: boolean;
+}
+
+export interface ConversationAgentSkills {
+  agent_id: string;
+  agent_handle: string;
+  agent_name: string;
+  skills: ConversationSkill[];
+}
+
 export interface Message {
   id: string;
   organization_id: string;

@@ -176,6 +176,59 @@ func TestHTTPSlashCommandErrorsAndSuccess(t *testing.T) {
 	}
 }
 
+func TestHTTPConversationSkillsReturnsSummariesOnly(t *testing.T) {
+	ts := newTestServer(t)
+
+	bootstrap := setupHTTP(t, ts.URL)
+	emptyHome := t.TempDir()
+	patchJSON(t, ts.URL+"/api/agents/"+bootstrap.Agent.ID, bootstrap.SessionToken, map[string]any{
+		"kind": "codex",
+		"env": map[string]string{
+			"CODEX_HOME": filepath.Join(emptyHome, "codex"),
+			"HOME":       emptyHome,
+		},
+	}, http.StatusOK, nil)
+	writeHTTPSkill(t, filepath.Join(bootstrap.Workspace.Path, ".codex", "skills", "reviewer", "SKILL.md"), `---
+name: reviewer
+description: Review code
+---
+Keep this prompt private.
+`)
+	writeHTTPSkill(t, filepath.Join(bootstrap.Workspace.Path, ".codex", "skills", "review", "SKILL.md"), `---
+name: review
+description: Conflicts with a built-in
+---
+Private conflict prompt.
+`)
+
+	var groups []app.ConversationAgentSkills
+	getJSON(t, ts.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/skills", bootstrap.SessionToken, http.StatusOK, &groups)
+	if len(groups) != 1 || groups[0].AgentID != bootstrap.Agent.ID || groups[0].AgentHandle != bootstrap.Agent.Handle {
+		t.Fatalf("skill groups = %#v", groups)
+	}
+	var sawReviewer bool
+	var sawReviewConflict bool
+	for _, skill := range groups[0].Skills {
+		if skill.Name == "reviewer" && skill.Description == "Review code" {
+			sawReviewer = true
+		}
+		if skill.Name == "review" && skill.ConflictsWithBuiltin {
+			sawReviewConflict = true
+		}
+	}
+	if !sawReviewer || !sawReviewConflict {
+		t.Fatalf("skills = %#v, want reviewer and built-in conflict", groups[0].Skills)
+	}
+
+	body, err := json.Marshal(groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "Keep this prompt private") || strings.Contains(string(body), bootstrap.Workspace.Path) {
+		t.Fatalf("skills response leaked prompt or source path: %s", string(body))
+	}
+}
+
 func TestHTTPMessagesCanBeUpdatedAndDeleted(t *testing.T) {
 	ts := newTestServer(t)
 
@@ -1327,6 +1380,16 @@ func newTestEnv(t *testing.T) testEnv {
 	ts := httptest.NewServer(NewRouter(a, bus))
 	t.Cleanup(ts.Close)
 	return testEnv{server: ts, store: st, app: a, bus: bus}
+}
+
+func writeHTTPSkill(t *testing.T, path string, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func requireWebSocketSubscribed(t *testing.T, ctx context.Context, conn *websocket.Conn) {
