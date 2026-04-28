@@ -7,6 +7,7 @@ import type {
   AgentProviderLimits,
   Channel,
   ConversationAgentContext,
+  ConversationAgentSkills,
   ConversationContext,
   ConversationType,
   CreateThreadResponse,
@@ -394,6 +395,15 @@ export function conversationContext(
 ): Promise<ConversationContext> {
   return request<ConversationContext>(
     `/api/conversations/${encodeURIComponent(type)}/${encodeURIComponent(id)}/context`
+  );
+}
+
+export function conversationSkills(
+  type: ConversationType,
+  id: string
+): Promise<ConversationAgentSkills[]> {
+  return request<ConversationAgentSkills[]>(
+    `/api/conversations/${encodeURIComponent(type)}/${encodeURIComponent(id)}/skills`
   );
 }
 

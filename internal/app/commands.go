@@ -39,6 +39,7 @@ type slashCommand struct {
 
 var builtinSlashCommands = map[string]struct{}{
 	"new":     {},
+	"skills":  {},
 	"compact": {},
 	"plan":    {},
 	"init":    {},
@@ -47,6 +48,14 @@ var builtinSlashCommands = map[string]struct{}{
 	"commit":  {},
 	"push":    {},
 	"review":  {},
+}
+
+func builtinSlashCommandNames() []string {
+	names := make([]string, 0, len(builtinSlashCommands))
+	for name := range builtinSlashCommands {
+		names = append(names, name)
+	}
+	return names
 }
 
 func parseSlashCommand(body string) (slashCommand, bool, error) {
@@ -59,7 +68,7 @@ func parseSlashCommand(body string) (slashCommand, bool, error) {
 		return slashCommand{}, true, ErrUnknownCommand
 	}
 	name := strings.ToLower(strings.TrimPrefix(fields[0], "/"))
-	if _, ok := builtinSlashCommands[name]; !ok {
+	if name == "" {
 		return slashCommand{}, true, ErrUnknownCommand
 	}
 
@@ -105,6 +114,8 @@ func (a *App) dispatchSlashCommand(ctx context.Context, req SendMessageRequest, 
 	}
 
 	switch command.Name {
+	case "skills":
+		return a.handleListSkillsCommand(ctx, req, target)
 	case "compact":
 		return a.handleCompactCommand(ctx, req, target, command.Args)
 	case "model":
@@ -118,7 +129,7 @@ func (a *App) dispatchSlashCommand(ctx context.Context, req SendMessageRequest, 
 		}
 		return a.createCommandRun(ctx, req, target, prompt, permissionMode, nil)
 	default:
-		return domain.Message{}, ErrUnknownCommand
+		return a.handleSkillCommand(ctx, req, target, command)
 	}
 }
 

@@ -18,6 +18,9 @@ interface ChannelSeed {
 
 export interface AgentSeed {
   id: string;
+  name: string;
+  handle: string;
+  kind: string;
   enabled: boolean;
   config_workspace_id: string;
   default_workspace_id: string;
@@ -243,6 +246,33 @@ export async function createChannelViaAPI(
     );
   }
   return channel;
+}
+
+export async function createAgentViaAPI(
+  page: Page,
+  testInfo: TestInfo,
+  options: {
+    name?: string;
+    handle?: string;
+    kind?: string;
+    env?: Record<string, string>;
+  } = {}
+): Promise<AgentSeed> {
+  const organizationID = await firstOrganizationID(page);
+  const name = options.name ?? uniqueName(testInfo, "Agent");
+  return request<AgentSeed>(
+    page,
+    `/api/organizations/${encodeURIComponent(organizationID)}/agents`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        handle: options.handle,
+        kind: options.kind,
+        env: options.env,
+      }),
+    }
+  );
 }
 
 export async function seedDenseNavigation(page: Page, testInfo: TestInfo): Promise<DenseNavigationSeed> {

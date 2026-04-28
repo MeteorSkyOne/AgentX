@@ -133,6 +133,38 @@ func (s *Server) handleConversationContext(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, redactConversationContext(result))
 }
 
+func (s *Server) handleConversationSkills(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	conversationType, ok := parseConversationType(chi.URLParam(r, "type"))
+	if !ok {
+		writeError(w, http.StatusBadRequest, "unknown conversation type")
+		return
+	}
+	if _, ok, err := s.authorizedConversationOrganizationID(r, userID, conversationType, chi.URLParam(r, "id")); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	} else if !ok {
+		writeError(w, http.StatusNotFound, "conversation not found")
+		return
+	}
+
+	result, err := s.app.ConversationSkills(r.Context(), conversationType, chi.URLParam(r, "id"))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "conversation skills not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	userID, ok := userIDFromContext(r.Context())
 	if !ok {

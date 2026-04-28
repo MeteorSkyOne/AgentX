@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent } from "react";
-import { AlertCircle, FileText, Image as ImageIcon, Paperclip, Reply, Send, Terminal, X } from "lucide-react";
-import { sendMessage } from "../api/client";
-import type { Agent, ConversationType, Message } from "../api/types";
+import { useQuery } from "@tanstack/react-query";
+import { AlertCircle, BookOpen, FileText, Image as ImageIcon, Paperclip, Reply, Send, Terminal, X } from "lucide-react";
+import { conversationSkills, sendMessage } from "../api/client";
+import type { Agent, ConversationAgentSkills, ConversationSkill, ConversationType, Message } from "../api/types";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -51,21 +52,34 @@ export function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentsRef = useRef<DraftAttachment[]>([]);
   const trimmed = body.trim();
+  const skillsQuery = useQuery({
+    queryKey: ["conversation-skills", conversation?.type, conversation?.id],
+    queryFn: () => conversationSkills(conversation!.type, conversation!.id),
+    enabled: Boolean(conversation),
+    staleTime: 15_000
+  });
+  const allSlashCommands = useMemo(
+    () => buildSlashCommandOptions(skillsQuery.data ?? [], mentionAgents.length > 1),
+    [skillsQuery.data, mentionAgents.length]
+  );
   const commandToken = useMemo(() => slashCommandTokenAt(body, caret), [body, caret]);
   const commandIndicator = useMemo(
-    () => (commandToken ? slashCommandIndicatorForName(commandToken.query) : slashCommandIndicator(trimmed)),
-    [commandToken, trimmed]
+    () =>
+      commandToken
+        ? slashCommandIndicatorForName(commandToken.query, allSlashCommands)
+        : slashCommandIndicator(trimmed, allSlashCommands),
+    [allSlashCommands, commandToken, trimmed]
   );
   const commandKey = commandToken
     ? `${commandToken.start}:${commandToken.end}:${commandToken.query}`
     : null;
   const commandMatches = useMemo(() => {
     if (!commandToken) return [];
-    const query = commandToken.query.toLowerCase();
-    return slashCommands
-      .filter((command) => command.name.startsWith(query))
+    const query = commandLookupKey(commandToken.query);
+    return allSlashCommands
+      .filter((command) => commandLookupKey(command.name).startsWith(query))
       .slice(0, 8);
-  }, [commandToken]);
+  }, [allSlashCommands, commandToken]);
   const commandOpen = Boolean(
     commandToken && commandMatches.length > 0 && commandKey !== dismissedCommandKey
   );
@@ -246,7 +260,11 @@ export function Composer({
     const beforeToken = body.slice(0, commandToken.start).trim();
     const afterToken = body.slice(commandToken.end).trim();
     const args = [beforeToken, afterToken].filter(Boolean).join(" ");
-    const next = args ? `/${command.name} ${args}` : `/${command.name} `;
+    const prefix =
+      command.kind === "skill" && command.agentHandle && mentionAgents.length > 1
+        ? `/${command.name} @${command.agentHandle}`
+        : `/${command.name}`;
+    const next = args ? `${prefix} ${args}` : `${prefix} `;
     const nextCaret = next.length;
     setBody(next);
     setCaret(nextCaret);
@@ -346,7 +364,7 @@ export function Composer({
             <div className="absolute bottom-full left-0 mb-2 w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden rounded-md border border-border bg-popover shadow-lg">
               {commandMatches.map((command, index) => (
                 <button
-                  key={command.name}
+                  key={slashCommandKey(command)}
                   type="button"
                   className={cn(
                     "flex w-full items-center gap-3 px-3 py-2 text-left text-sm",
@@ -359,9 +377,20 @@ export function Composer({
                     insertCommand(command);
                   }}
                 >
-                  <Terminal className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  {command.kind === "skill" ? (
+                    <BookOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <Terminal className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  )}
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">/{command.name}</span>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate font-medium">/{command.name}</span>
+                      {command.kind === "skill" && command.agentHandle && mentionAgents.length > 1 ? (
+                        <span className="shrink-0 rounded border border-border bg-background/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                          @{command.agentHandle}
+                        </span>
+                      ) : null}
+                    </span>
                     <span className="block truncate text-xs text-muted-foreground">
                       {command.description}
                     </span>
@@ -535,30 +564,71 @@ export function Composer({
 }
 
 interface SlashCommandDefinition {
+  kind: "command" | "skill";
   name: string;
   description: string;
+  agentID?: string;
+  agentHandle?: string;
+  agentName?: string;
 }
 
 const slashCommands: SlashCommandDefinition[] = [
-  { name: "new", description: "Start fresh context" },
-  { name: "compact", description: "Compact Claude context" },
-  { name: "plan", description: "Ask for an implementation plan" },
-  { name: "init", description: "Initialize agent instructions" },
-  { name: "model", description: "Set the agent model" },
-  { name: "effort", description: "Set reasoning effort" },
-  { name: "commit", description: "Commit workspace changes" },
-  { name: "push", description: "Push the current branch" },
-  { name: "review", description: "Review workspace changes" }
+  { kind: "command", name: "new", description: "Start fresh context" },
+  { kind: "command", name: "skills", description: "List available skills" },
+  { kind: "command", name: "compact", description: "Compact Claude context" },
+  { kind: "command", name: "plan", description: "Ask for an implementation plan" },
+  { kind: "command", name: "init", description: "Initialize agent instructions" },
+  { kind: "command", name: "model", description: "Set the agent model" },
+  { kind: "command", name: "effort", description: "Set reasoning effort" },
+  { kind: "command", name: "commit", description: "Commit workspace changes" },
+  { kind: "command", name: "push", description: "Push the current branch" },
+  { kind: "command", name: "review", description: "Review workspace changes" }
 ];
 
-function slashCommandIndicator(value: string) {
+function buildSlashCommandOptions(
+  groups: ConversationAgentSkills[],
+  includeAgentLabel: boolean
+): SlashCommandDefinition[] {
+  const dynamic = groups.flatMap((group) =>
+    group.skills
+      .filter((skill) => !skill.conflicts_with_builtin)
+      .map((skill) => skillCommandOption(group, skill, includeAgentLabel))
+  );
+  return [...slashCommands, ...dynamic];
+}
+
+function skillCommandOption(
+  group: ConversationAgentSkills,
+  skill: ConversationSkill,
+  includeAgentLabel: boolean
+): SlashCommandDefinition {
+  const label = includeAgentLabel ? ` for @${group.agent_handle}` : "";
+  return {
+    kind: "skill",
+    name: skill.name,
+    description: skill.description || `Skill${label}`,
+    agentID: group.agent_id,
+    agentHandle: group.agent_handle,
+    agentName: group.agent_name
+  };
+}
+
+function slashCommandKey(command: SlashCommandDefinition): string {
+  return `${command.kind}:${command.agentID ?? ""}:${command.name}`;
+}
+
+function commandLookupKey(value: string): string {
+  return value.toLowerCase().replaceAll("_", "-");
+}
+
+function slashCommandIndicator(value: string, commands: SlashCommandDefinition[]) {
   if (!value.startsWith("/")) return null;
   const token = value.split(/\s+/, 1)[0] ?? "";
   const name = token.slice(1).toLowerCase();
-  return slashCommandIndicatorForName(name);
+  return slashCommandIndicatorForName(name, commands);
 }
 
-function slashCommandIndicatorForName(name: string) {
+function slashCommandIndicatorForName(name: string, commands: SlashCommandDefinition[]) {
   if (!name) {
     return {
       status: "pending" as const,
@@ -566,14 +636,15 @@ function slashCommandIndicatorForName(name: string) {
       title: "Slash command"
     };
   }
-  if (slashCommands.some((command) => command.name === name)) {
+  const lookupName = commandLookupKey(name);
+  if (commands.some((command) => commandLookupKey(command.name) === lookupName)) {
     return {
       status: "recognized" as const,
       label: `/${name}`,
       title: `Recognized slash command /${name}`
     };
   }
-  if (slashCommands.some((command) => command.name.startsWith(name))) {
+  if (commands.some((command) => commandLookupKey(command.name).startsWith(lookupName))) {
     return {
       status: "pending" as const,
       label: `/${name}`,
