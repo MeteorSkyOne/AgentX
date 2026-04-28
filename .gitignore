@@ -3,6 +3,7 @@
 /agentx
 /bin/
 /internal/webdist/dist/
+web/dist/
 logs/
 node_modules/
 .agentx/
