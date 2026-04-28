@@ -183,18 +183,33 @@ func (s *Session) run(ctx context.Context, cancel context.CancelFunc, cmd *exec.
 	waitErr := cmd.Wait()
 	stderrWG.Wait()
 	stderrText := stderrBuffer.String()
+	stoppedByContext := commandStoppedByContext(ctx, waitErr)
 
 	if waitErr != nil {
-		slog.Error(
-			"agent cli command failed",
-			"session_id", s.fallbackID,
-			"provider_session_id", s.CurrentSessionID(),
-			"command", command.Name,
-			"args", safeCommandArgs(command.Args),
-			"dir", command.Dir,
-			"error", waitErr,
-			"stderr", truncateForLog(stderrText, 4000),
-		)
+		if stoppedByContext {
+			slog.Info(
+				"agent cli command stopped",
+				"session_id", s.fallbackID,
+				"provider_session_id", s.CurrentSessionID(),
+				"command", command.Name,
+				"args", safeCommandArgs(command.Args),
+				"dir", command.Dir,
+				"reason", ctx.Err(),
+				"wait_error", waitErr,
+				"stderr", truncateForLog(stderrText, 4000),
+			)
+		} else {
+			slog.Error(
+				"agent cli command failed",
+				"session_id", s.fallbackID,
+				"provider_session_id", s.CurrentSessionID(),
+				"command", command.Name,
+				"args", safeCommandArgs(command.Args),
+				"dir", command.Dir,
+				"error", waitErr,
+				"stderr", truncateForLog(stderrText, 4000),
+			)
+		}
 	} else {
 		slog.Info(
 			"agent cli command completed",
@@ -205,11 +220,19 @@ func (s *Session) run(ctx context.Context, cancel context.CancelFunc, cmd *exec.
 		)
 	}
 
+	if stoppedByContext {
+		return
+	}
+
 	if !terminalEmitted {
 		if evt, ok := s.handler.Finish(stderrText, waitErr); ok {
 			s.emit(evt)
 		}
 	}
+}
+
+func commandStoppedByContext(ctx context.Context, waitErr error) bool {
+	return waitErr != nil && ctx.Err() != nil
 }
 
 func (s *Session) scanStdout(ctx context.Context, stdout io.Reader) bool {
