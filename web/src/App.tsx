@@ -49,6 +49,7 @@ import type {
   NotificationSettings,
   ProcessItem,
   Project,
+  TeamMetadata,
   Thread,
   UserPreferences,
   WorkspaceTreeEntry
@@ -83,6 +84,7 @@ interface StreamingMessage {
   thinking?: string;
   process?: ProcessItem[];
   error?: string;
+  team?: TeamMetadata;
 }
 
 function conversationKey(conversation?: ActiveConversation): string {
@@ -365,7 +367,8 @@ export default function App() {
               runID: event.payload.run_id,
               agentID: event.payload.agent_id,
               startedAt: event.created_at,
-              text: ""
+              text: "",
+              team: event.payload.team
             }
           }));
           break;
@@ -379,6 +382,7 @@ export default function App() {
                 agentID: event.payload.agent_id ?? existing?.agentID,
                 startedAt: existing?.startedAt ?? event.created_at,
                 text: `${existing?.text ?? ""}${event.payload.text}`,
+                team: event.payload.team ?? existing?.team,
                 thinking: event.payload.thinking
                   ? `${existing?.thinking ?? ""}${event.payload.thinking}`
                   : existing?.thinking,
@@ -402,8 +406,10 @@ export default function App() {
             ...current,
             [event.payload.run_id]: {
               runID: event.payload.run_id,
+              agentID: event.payload.agent_id,
               startedAt: event.created_at,
               text: "",
+              team: event.payload.team,
               error: event.payload.error || "Agent run failed"
             }
           }));
@@ -588,14 +594,22 @@ export default function App() {
     }
   }
 
-  async function handleCreateChannel(name: string, type: Channel["type"]): Promise<Channel> {
-    const created = await createChannel(selectedProjectID as string, name, type);
+  async function handleCreateChannel(
+    name: string,
+    type: Channel["type"],
+    budget?: Pick<Channel, "team_max_batches" | "team_max_runs">
+  ): Promise<Channel> {
+    const created = await createChannel(selectedProjectID as string, name, type, budget);
     await queryClient.invalidateQueries({ queryKey: ["project-channels", selectedProjectID] });
     return created;
   }
 
-  async function handleUpdateChannel(channelID: string, name: string): Promise<Channel> {
-    const updated = await updateChannel(channelID, { name });
+  async function handleUpdateChannel(
+    channelID: string,
+    name: string,
+    budget?: Pick<Channel, "team_max_batches" | "team_max_runs">
+  ): Promise<Channel> {
+    const updated = await updateChannel(channelID, { name, ...budget });
     await queryClient.invalidateQueries({ queryKey: ["project-channels", selectedProjectID] });
     await queryClient.invalidateQueries({ queryKey: ["conversation-context"] });
     return updated;

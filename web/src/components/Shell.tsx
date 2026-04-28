@@ -171,6 +171,8 @@ export function Shell({
   const [channelDraftOpen, setChannelDraftOpen] = useState(false);
   const [channelName, setChannelName] = useState("");
   const [channelType, setChannelType] = useState<Channel["type"]>("text");
+  const [channelTeamMaxBatches, setChannelTeamMaxBatches] = useState("6");
+  const [channelTeamMaxRuns, setChannelTeamMaxRuns] = useState("12");
   const [agentDraftOpen, setAgentDraftOpen] = useState(false);
   const [newAgentName, setNewAgentName] = useState("");
   const [newAgentDescription, setNewAgentDescription] = useState("");
@@ -547,9 +549,16 @@ export function Shell({
   async function submitChannel() {
     const name = channelName.trim();
     if (!name) return;
-    const created = await onCreateChannel(name, channelType);
+    const teamMaxBatches = Number.parseInt(channelTeamMaxBatches, 10);
+    const teamMaxRuns = Number.parseInt(channelTeamMaxRuns, 10);
+    const created = await onCreateChannel(name, channelType, {
+      team_max_batches: teamMaxBatches,
+      team_max_runs: teamMaxRuns,
+    });
     setChannelName("");
     setChannelType("text");
+    setChannelTeamMaxBatches("6");
+    setChannelTeamMaxRuns("12");
     setChannelDraftOpen(false);
     onSelectChannel(created);
   }
@@ -1803,10 +1812,41 @@ export function Shell({
                 <option value="thread">Forum</option>
               </Select>
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="channel-team-batches">Team batches</Label>
+                <Input
+                  id="channel-team-batches"
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={channelTeamMaxBatches}
+                  onChange={(e) => setChannelTeamMaxBatches(e.target.value)}
+                  aria-label="Team max batches"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="channel-team-runs">Team runs</Label>
+                <Input
+                  id="channel-team-runs"
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={channelTeamMaxRuns}
+                  onChange={(e) => setChannelTeamMaxRuns(e.target.value)}
+                  aria-label="Team max runs"
+                />
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setChannelDraftOpen(false)}>Cancel</Button>
-            <Button onClick={submitChannel} disabled={!channelName.trim()}>Create</Button>
+            <Button
+              onClick={submitChannel}
+              disabled={!channelName.trim() || !channelTeamMaxBatches.trim() || !channelTeamMaxRuns.trim()}
+            >
+              Create
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

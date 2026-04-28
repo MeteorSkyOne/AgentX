@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fetchAttachmentBlob } from "../api/client";
-import type { ConversationAgentContext, Message, MessageAttachment, MessageReference, ProcessItem, UserPreferences } from "../api/types";
+import type { ConversationAgentContext, Message, MessageAttachment, MessageReference, ProcessItem, TeamMetadata, UserPreferences } from "../api/types";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -58,6 +58,7 @@ interface StreamingMessage {
   thinking?: string;
   process?: ProcessItem[];
   error?: string;
+  team?: TeamMetadata;
 }
 
 interface MessagePaneProps {
@@ -81,6 +82,10 @@ type DisplayProcessItem = ProcessItem & {
   result?: ProcessItem;
 };
 
+type MessageRenderItem =
+  | { type: "message"; message: Message }
+  | { type: "team"; sessionID: string; messages: Message[] };
+
 export function MessagePane({
   messages,
   isLoading,
@@ -103,6 +108,7 @@ export function MessagePane({
   const agentByBotID = new Map(agents.map((item) => [item.agent.bot_user_id, item.agent]));
   const agentByID = new Map(agents.map((item) => [item.agent.id, item.agent]));
   const messagesByID = new Map(messages.map((message) => [message.id, message]));
+  const messageItems = groupTeamDiscussionMessages(messages);
 
   useLayoutEffect(() => {
     const anchorID = olderAnchorMessageIDRef.current;
@@ -179,7 +185,26 @@ export function MessagePane({
               Loading older messages...
             </div>
           )}
-          {messages.map((message) => {
+          {messageItems.map((item) => {
+            if (item.type === "team") {
+              return (
+                <TeamDiscussionItem
+                  key={`team:${item.sessionID}`}
+                  messages={item.messages}
+                  agentByBotID={agentByBotID}
+                  messagesByID={messagesByID}
+                  preferences={preferences}
+                  onUpdateMessage={onUpdateMessage}
+                  onDeleteMessage={onDeleteMessage}
+                  onReplyMessage={onReplyMessage}
+                  onJumpToReplyMessage={jumpToMessage}
+                  theme={theme}
+                  workspacePath={workspacePath}
+                  onOpenWorkspacePath={onOpenWorkspacePath}
+                />
+              );
+            }
+            const message = item.message;
             const agent = agentByBotID.get(message.sender_id);
             const replyAgent =
               message.reply_to?.sender_type === "bot"
@@ -286,6 +311,125 @@ async function copyTextToClipboard(text: string) {
   } finally {
     textarea.remove();
   }
+}
+
+function groupTeamDiscussionMessages(messages: Message[]): MessageRenderItem[] {
+  const items: MessageRenderItem[] = [];
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    const team = teamMetadata(message);
+    if (!isTeamDiscussion(team)) {
+      items.push({ type: "message", message });
+      continue;
+    }
+
+    const grouped = [message];
+    let nextIndex = index + 1;
+    while (nextIndex < messages.length) {
+      const next = messages[nextIndex];
+      const nextTeam = teamMetadata(next);
+      if (!isTeamDiscussion(nextTeam) || nextTeam.session_id !== team.session_id) {
+        break;
+      }
+      grouped.push(next);
+      nextIndex += 1;
+    }
+    items.push({ type: "team", sessionID: team.session_id, messages: grouped });
+    index = nextIndex - 1;
+  }
+  return items;
+}
+
+function teamMetadata(message: Message): TeamMetadata | undefined {
+  return message.metadata?.team;
+}
+
+function isTeamDiscussion(team: TeamMetadata | undefined): team is TeamMetadata {
+  return Boolean(team?.session_id && team.phase !== "summary");
+}
+
+function TeamDiscussionItem({
+  messages,
+  agentByBotID,
+  messagesByID,
+  preferences,
+  theme,
+  onUpdateMessage,
+  onDeleteMessage,
+  onReplyMessage,
+  onJumpToReplyMessage,
+  workspacePath,
+  onOpenWorkspacePath,
+}: {
+  messages: Message[];
+  agentByBotID: Map<string, ConversationAgentContext["agent"]>;
+  messagesByID: Map<string, Message>;
+  preferences: UserPreferences;
+  theme: ThemeMode;
+  onUpdateMessage: (messageID: string, body: string) => Promise<Message>;
+  onDeleteMessage: (message: Message) => Promise<void>;
+  onReplyMessage: (message: Message) => void;
+  onJumpToReplyMessage?: (messageID: string) => void;
+  workspacePath?: string;
+  onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const participants = Array.from(
+    new Set(
+      messages
+        .map((message) => agentByBotID.get(message.sender_id)?.name)
+        .filter((name): name is string => Boolean(name))
+    )
+  );
+  const title =
+    participants.length > 0
+      ? `Team discussion · ${participants.join(", ")}`
+      : "Team discussion";
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="min-w-0 border-l-2 border-border pl-2">
+      <CollapsibleTrigger asChild>
+        <button className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-muted-foreground hover:bg-accent/40 hover:text-foreground">
+          {open ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+          <MessageSquare className="h-4 w-4 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{title}</span>
+          <Badge variant="outline" className="shrink-0 text-[11px]">
+            {messages.length}
+          </Badge>
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="space-y-3 pt-2">
+        {messages.map((message) => {
+          const agent = agentByBotID.get(message.sender_id);
+          const replyAgent =
+            message.reply_to?.sender_type === "bot"
+              ? agentByBotID.get(message.reply_to.sender_id ?? "")
+              : undefined;
+          return (
+            <MessageItem
+              key={message.id}
+              message={message}
+              agentName={agent?.name}
+              agentKind={agent?.kind}
+              agentID={agent?.id}
+              replyAgentName={replyAgent?.name}
+              replyTargetLoaded={Boolean(
+                message.reply_to && messagesByID.has(message.reply_to.message_id)
+              )}
+              preferences={preferences}
+              onUpdateMessage={onUpdateMessage}
+              onDeleteMessage={onDeleteMessage}
+              onReplyMessage={onReplyMessage}
+              onJumpToReplyMessage={onJumpToReplyMessage}
+              theme={theme}
+              workspacePath={workspacePath}
+              onOpenWorkspacePath={onOpenWorkspacePath}
+            />
+          );
+        })}
+      </CollapsibleContent>
+    </Collapsible>
+  );
 }
 
 interface MessageItemProps {
@@ -1157,6 +1301,11 @@ function StreamingItem({
           {!isError && (
             <Badge variant="secondary" className="text-xs">
               BOT
+            </Badge>
+          )}
+          {item.team && (
+            <Badge variant="outline" className="text-xs">
+              TEAM
             </Badge>
           )}
           <span className="text-xs text-muted-foreground animate-pulse">streaming...</span>

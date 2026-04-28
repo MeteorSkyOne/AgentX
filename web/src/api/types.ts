@@ -33,11 +33,21 @@ export interface MessageMetricsSummary {
   cache_hit_rate?: number | null;
 }
 
+export interface TeamMetadata {
+  session_id: string;
+  root_message_id: string;
+  leader_agent_id: string;
+  phase: "leader" | "discussion" | "summary" | string;
+  turn: number;
+  source_message_id?: string;
+}
+
 export interface MessageMetadata {
   thinking?: string;
   process?: ProcessItem[];
   metrics?: MessageMetricsSummary;
-  [key: string]: JsonValue | ProcessItem[] | MessageMetricsSummary | undefined;
+  team?: TeamMetadata;
+  [key: string]: JsonValue | ProcessItem[] | MessageMetricsSummary | TeamMetadata | undefined;
 }
 
 export interface MessageReference {
@@ -124,6 +134,8 @@ export interface Channel {
   project_id: string;
   type: "text" | "thread";
   name: string;
+  team_max_batches: number;
+  team_max_runs: number;
   created_at: string;
   updated_at: string;
   archived_at?: string;

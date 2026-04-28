@@ -135,11 +135,13 @@ func scanChannel(scanner interface {
 	var archivedAt sql.NullString
 	if err := scanner.Scan(
 		&channel.ID, &channel.OrganizationID, &channel.ProjectID, &channelType, &channel.Name,
+		&channel.TeamMaxBatches, &channel.TeamMaxRuns,
 		&createdAt, &updatedAt, &archivedAt,
 	); err != nil {
 		return domain.Channel{}, err
 	}
 	channel.Type = domain.ChannelType(channelType)
+	channel = normalizeChannel(channel)
 	var err error
 	channel.CreatedAt, err = parseTime(createdAt)
 	if err != nil {

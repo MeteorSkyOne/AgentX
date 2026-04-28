@@ -21,8 +21,16 @@ const runtimeContextBodyLimit = 4000
 
 type agentRunOptions struct {
 	Prompt         string
+	Context        string
 	PermissionMode string
 	OnCompleted    func(context.Context) error
+	Result         chan<- agentRunResult
+	Team           *domain.TeamMetadata
+}
+
+type agentRunResult struct {
+	Message domain.Message
+	Err     error
 }
 
 func (a *App) runAgentForMessage(ctx context.Context, userMessage domain.Message, targets ...ConversationAgentContext) {
@@ -61,6 +69,18 @@ func (a *App) runAgentForMessage(ctx context.Context, userMessage domain.Message
 
 func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage domain.Message, target ConversationAgentContext, runID string, opts agentRunOptions) {
 	var tracker *agentRunTracker
+	resultSent := false
+	sendResult := func(message domain.Message, err error) {
+		if opts.Result == nil || resultSent {
+			return
+		}
+		resultSent = true
+		result := agentRunResult{Message: message, Err: err}
+		select {
+		case opts.Result <- result:
+		default:
+		}
+	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err := fmt.Errorf("agent run panic: %v", recovered)
@@ -70,7 +90,8 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 					CompletedAt: time.Now().UTC(),
 				}))
 			}
-			a.publishAgentRunFailed(userMessage, runID, err)
+			a.publishAgentRunFailedWithContext(userMessage, runID, target.Agent.ID, opts.Team, err)
+			sendResult(domain.Message{}, err)
 		}
 	}()
 
@@ -97,7 +118,8 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 			ProviderSessionID: providerSessionID,
 			CompletedAt:       time.Now().UTC(),
 		}))
-		a.publishAgentRunFailed(userMessage, runID, err)
+		a.publishAgentRunFailedWithContext(userMessage, runID, agent.ID, opts.Team, err)
+		sendResult(domain.Message{}, err)
 	}
 	slog.Info("agent run starting", runAttrs...)
 	if err := os.MkdirAll(workspace.Path, 0o755); err != nil {
@@ -125,6 +147,7 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 		failRun(ctx, "", err)
 		return
 	}
+	runtimeContext = joinRuntimeContext(runtimeContext, opts.Context)
 	if len(userMessage.Attachments) == 0 {
 		attachments, err := a.store.MessageAttachments().ListByMessage(ctx, userMessage.ID)
 		if err != nil {
@@ -179,7 +202,7 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 				OrganizationID:   userMessage.OrganizationID,
 				ConversationType: userMessage.ConversationType,
 				ConversationID:   userMessage.ConversationID,
-				Payload:          domain.AgentRunPayload{RunID: runID, AgentID: agent.ID},
+				Payload:          domain.AgentRunPayload{RunID: runID, AgentID: agent.ID, Team: opts.Team},
 			})
 		}
 
@@ -208,6 +231,9 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 				return
 			case evt, ok := <-session.Events():
 				if !ok {
+					err := errors.New("agent runtime event stream closed")
+					a.publishAgentRunFailedWithContext(userMessage, runID, agent.ID, opts.Team, err)
+					sendResult(domain.Message{}, err)
 					_ = session.Close(context.WithoutCancel(ctx))
 					return
 				}
@@ -233,7 +259,7 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 						OrganizationID:   userMessage.OrganizationID,
 						ConversationType: userMessage.ConversationType,
 						ConversationID:   userMessage.ConversationID,
-						Payload:          domain.AgentOutputDeltaPayload{RunID: runID, AgentID: agent.ID, Text: evt.Text, Thinking: evt.Thinking, Process: process},
+						Payload:          domain.AgentOutputDeltaPayload{RunID: runID, AgentID: agent.ID, Text: evt.Text, Thinking: evt.Thinking, Process: process, Team: opts.Team},
 					})
 				case agentruntime.EventCompleted:
 					completedAt := time.Now().UTC()
@@ -244,18 +270,27 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 						thinkingBuf.WriteString(evt.Thinking)
 					}
 					processBuf = append(processBuf, runtimeProcessItems(evt)...)
-					a.completeAgentRun(ctx, userMessage, agent, runID, session.CurrentSessionID(), evt.Text, thinkingBuf.String(), processBuf, runTracker.metric(agentRunMetricInput{
+					botMessage, err := a.completeAgentRun(ctx, userMessage, agent, runID, session.CurrentSessionID(), evt.Text, thinkingBuf.String(), processBuf, runTracker.metric(agentRunMetricInput{
 						Status:            "completed",
 						ProviderSessionID: session.CurrentSessionID(),
 						FirstTokenAt:      firstTokenAt,
 						CompletedAt:       completedAt,
 						Usage:             usage,
-					}))
+					}), opts.Team)
+					if err != nil {
+						sendResult(domain.Message{}, err)
+						_ = session.Close(context.WithoutCancel(ctx))
+						return
+					}
 					if opts.OnCompleted != nil {
 						if err := opts.OnCompleted(ctx); err != nil {
-							a.publishAgentRunFailed(userMessage, runID, err)
+							a.publishAgentRunFailedWithContext(userMessage, runID, agent.ID, opts.Team, err)
+							sendResult(domain.Message{}, err)
+							_ = session.Close(context.WithoutCancel(ctx))
+							return
 						}
 					}
+					sendResult(botMessage, nil)
 					_ = session.Close(context.WithoutCancel(ctx))
 					return
 				case agentruntime.EventFailed:
@@ -280,7 +315,8 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 						Usage:             usage,
 					}))
 					a.setFailedAgentSession(ctx, agent.ID, userMessage, session.CurrentSessionID())
-					a.publishAgentRunFailed(userMessage, runID, err)
+					a.publishAgentRunFailedWithContext(userMessage, runID, agent.ID, opts.Team, err)
+					sendResult(domain.Message{}, err)
 					_ = session.Close(context.WithoutCancel(ctx))
 					return
 				}
@@ -392,6 +428,18 @@ func runtimeMessageBody(body string) string {
 	return string(runes[:runtimeContextBodyLimit]) + "\n[truncated]"
 }
 
+func joinRuntimeContext(base string, extra string) string {
+	base = strings.TrimSpace(base)
+	extra = strings.TrimSpace(extra)
+	if base == "" {
+		return extra
+	}
+	if extra == "" {
+		return base
+	}
+	return base + "\n\n" + extra
+}
+
 func runtimeAttachmentsFromMessage(message domain.Message) []agentruntime.Attachment {
 	if len(message.Attachments) == 0 {
 		return nil
@@ -435,7 +483,7 @@ func (a *App) previousProviderSessionID(ctx context.Context, agentID string, mes
 	return session.ProviderSessionID, nil
 }
 
-func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, agent domain.Agent, runID string, providerSessionID string, body string, thinking string, process []domain.ProcessItem, metric domain.AgentRunMetric) {
+func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, agent domain.Agent, runID string, providerSessionID string, body string, thinking string, process []domain.ProcessItem, metric domain.AgentRunMetric, team *domain.TeamMetadata) (domain.Message, error) {
 	createdAt := time.Now().UTC()
 	if !createdAt.After(userMessage.CreatedAt) {
 		createdAt = userMessage.CreatedAt.Add(time.Nanosecond)
@@ -461,6 +509,9 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 		metadata = map[string]any{}
 	}
 	metadata["metrics"] = metricSummary
+	if team != nil {
+		metadata["team"] = *team
+	}
 	botMessage := domain.Message{
 		ID:               botMessageID,
 		OrganizationID:   userMessage.OrganizationID,
@@ -480,8 +531,8 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 		now := time.Now().UTC()
 		metric.CompletedAt = &now
 		a.recordAgentRunMetric(ctx, metric)
-		a.publishAgentRunFailed(userMessage, runID, err)
-		return
+		a.publishAgentRunFailedWithContext(userMessage, runID, agent.ID, team, err)
+		return domain.Message{}, err
 	}
 	a.publishConversationEvent(domain.Event{
 		Type:             domain.EventMessageCreated,
@@ -494,8 +545,8 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 	if err := a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, providerSessionID, "completed"); err != nil {
 		metric.Status = "failed"
 		a.recordAgentRunMetric(ctx, metric)
-		a.publishAgentRunFailed(userMessage, runID, err)
-		return
+		a.publishAgentRunFailedWithContext(userMessage, runID, agent.ID, team, err)
+		return domain.Message{}, err
 	}
 	a.recordAgentRunMetric(ctx, metric)
 	a.publishConversationEvent(domain.Event{
@@ -503,7 +554,7 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 		OrganizationID:   userMessage.OrganizationID,
 		ConversationType: userMessage.ConversationType,
 		ConversationID:   userMessage.ConversationID,
-		Payload:          domain.AgentRunPayload{RunID: runID, AgentID: agent.ID},
+		Payload:          domain.AgentRunPayload{RunID: runID, AgentID: agent.ID, Team: team},
 	})
 	slog.Info(
 		"agent run completed",
@@ -519,6 +570,7 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 		"thinking_chars", len([]rune(thinking)),
 		"process_items", len(process),
 	)
+	return botMessage, nil
 }
 
 func (a *App) setFailedAgentSession(ctx context.Context, agentID string, message domain.Message, providerSessionID string) {
@@ -738,6 +790,10 @@ func (a *App) recordAgentRunMetric(ctx context.Context, metric domain.AgentRunMe
 }
 
 func (a *App) publishAgentRunFailed(message domain.Message, runID string, err error) {
+	a.publishAgentRunFailedWithContext(message, runID, "", nil, err)
+}
+
+func (a *App) publishAgentRunFailedWithContext(message domain.Message, runID string, agentID string, team *domain.TeamMetadata, err error) {
 	errText := ""
 	if err != nil {
 		errText = err.Error()
@@ -756,7 +812,7 @@ func (a *App) publishAgentRunFailed(message domain.Message, runID string, err er
 		OrganizationID:   message.OrganizationID,
 		ConversationType: message.ConversationType,
 		ConversationID:   message.ConversationID,
-		Payload:          domain.AgentRunFailedPayload{RunID: runID, Error: errText},
+		Payload:          domain.AgentRunFailedPayload{RunID: runID, AgentID: agentID, Error: errText, Team: team},
 	})
 }
 

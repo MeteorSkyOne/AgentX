@@ -20,6 +20,12 @@ func normalizeChannel(channel domain.Channel) domain.Channel {
 	if channel.Type == "" {
 		channel.Type = domain.ChannelTypeText
 	}
+	if channel.TeamMaxBatches <= 0 {
+		channel.TeamMaxBatches = 6
+	}
+	if channel.TeamMaxRuns <= 0 {
+		channel.TeamMaxRuns = 12
+	}
 	if channel.UpdatedAt.IsZero() {
 		channel.UpdatedAt = channel.CreatedAt
 	}
