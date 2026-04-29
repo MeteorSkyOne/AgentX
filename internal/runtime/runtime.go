@@ -96,9 +96,10 @@ func (i Input) promptWithAttachmentReferences() string {
 type EventType string
 
 const (
-	EventDelta     EventType = "delta"
-	EventCompleted EventType = "completed"
-	EventFailed    EventType = "failed"
+	EventDelta        EventType = "delta"
+	EventCompleted    EventType = "completed"
+	EventFailed       EventType = "failed"
+	EventInputRequest EventType = "input_request"
 )
 
 type Event struct {
@@ -109,6 +110,20 @@ type Event struct {
 	Usage        *Usage
 	Error        string
 	StaleSession bool
+	InputRequest *InputRequest
+}
+
+type InputRequest struct {
+	QuestionID string               `json:"question_id"`
+	Question   string               `json:"question"`
+	ToolCallID string               `json:"tool_call_id,omitempty"`
+	RequestID  any                  `json:"request_id,omitempty"`
+	Options    []InputRequestOption `json:"options,omitempty"`
+}
+
+type InputRequestOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
 }
 
 type Usage struct {
@@ -148,6 +163,7 @@ type Session interface {
 	CurrentSessionID() string
 	Alive() bool
 	Close(ctx context.Context) error
+	RespondToInputRequest(questionID string, answer string) error
 }
 
 type Shutdowner interface {

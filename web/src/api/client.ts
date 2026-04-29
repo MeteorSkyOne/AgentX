@@ -559,6 +559,21 @@ export function deleteMessage(messageID: string): Promise<void> {
   });
 }
 
+export function respondToInputRequest(
+  type: ConversationType,
+  id: string,
+  questionID: string,
+  answer: string
+): Promise<void> {
+  return request<void>(
+    `/api/conversations/${encodeURIComponent(type)}/${encodeURIComponent(id)}/input-response`,
+    {
+      method: "POST",
+      body: JSON.stringify({ question_id: questionID, answer })
+    }
+  );
+}
+
 export function fetchMessageProcessItem(
   messageID: string,
   index: number

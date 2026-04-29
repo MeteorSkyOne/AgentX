@@ -3,14 +3,21 @@ package codexpersist
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
 
+	"github.com/meteorsky/agentx/internal/id"
 	"github.com/meteorsky/agentx/internal/runtime"
 	"github.com/meteorsky/agentx/internal/runtime/procpool"
 )
+
+type inputAnswer struct {
+	questionID string
+	answer     string
+}
 
 type persistentSession struct {
 	process  *procpool.ManagedProcess
@@ -20,30 +27,33 @@ type persistentSession struct {
 	req      runtime.StartSessionRequest
 	events   chan runtime.Event
 	threadID string
+	model    string
 
-	mu        sync.Mutex
-	sessionID string
-	alive     bool
-	started   bool
-	turnHeld  bool
-	done      chan struct{}
-	closeOnce sync.Once
+	mu           sync.Mutex
+	sessionID    string
+	alive        bool
+	started      bool
+	turnHeld     bool
+	done         chan struct{}
+	closeOnce    sync.Once
+	pendingInput chan inputAnswer
 }
 
 func newPersistentSession(proc *procpool.ManagedProcess, rpc *rpcClient, key string, rt *Runtime, req runtime.StartSessionRequest) *persistentSession {
 	fallbackID := "codex:" + key
 	threadID := usablePreviousSessionID(req.PreviousSessionID)
 	return &persistentSession{
-		process:   proc,
-		rpc:       rpc,
-		key:       key,
-		rt:        rt,
-		req:       req,
-		events:    make(chan runtime.Event, 64),
-		threadID:  threadID,
-		sessionID: fallbackID,
-		alive:     true,
-		done:      make(chan struct{}),
+		process:      proc,
+		rpc:          rpc,
+		key:          key,
+		rt:           rt,
+		req:          req,
+		events:       make(chan runtime.Event, 64),
+		threadID:     threadID,
+		sessionID:    fallbackID,
+		alive:        true,
+		done:         make(chan struct{}),
+		pendingInput: make(chan inputAnswer, 1),
 	}
 }
 
@@ -88,6 +98,15 @@ func (s *persistentSession) Alive() bool {
 	return s.alive
 }
 
+func (s *persistentSession) RespondToInputRequest(questionID string, answer string) error {
+	select {
+	case s.pendingInput <- inputAnswer{questionID: questionID, answer: answer}:
+		return nil
+	default:
+		return errors.New("no pending input request")
+	}
+}
+
 func (s *persistentSession) Close(ctx context.Context) error {
 	s.mu.Lock()
 	s.alive = false
@@ -118,14 +137,15 @@ func (s *persistentSession) runTurn(ctx context.Context, input runtime.Input) {
 	}()
 
 	if s.threadID == "" {
-		threadID, err := s.startThread(ctx)
+		started, err := s.startThread(ctx)
 		if err != nil {
 			s.emit(runtime.Event{Type: runtime.EventFailed, Error: err.Error()})
 			return
 		}
-		s.threadID = threadID
+		s.threadID = started.threadID
+		s.model = started.model
 		s.mu.Lock()
-		s.sessionID = threadID
+		s.sessionID = started.threadID
 		s.mu.Unlock()
 	}
 
@@ -140,6 +160,7 @@ func (s *persistentSession) runTurn(ctx context.Context, input runtime.Input) {
 	if effort := strings.TrimSpace(s.req.Effort); effort != "" {
 		turnParams["effort"] = effort
 	}
+	s.addTurnOverrides(turnParams)
 
 	result, err := s.rpc.Call(ctx, "turn/start", turnParams)
 	if err != nil {
@@ -151,7 +172,12 @@ func (s *persistentSession) runTurn(ctx context.Context, input runtime.Input) {
 	s.processNotifications(ctx)
 }
 
-func (s *persistentSession) startThread(ctx context.Context) (string, error) {
+type threadStartResult struct {
+	threadID string
+	model    string
+}
+
+func (s *persistentSession) startThread(ctx context.Context) (threadStartResult, error) {
 	workspace := strings.TrimSpace(s.req.Workspace)
 	if workspace == "" {
 		workspace = "."
@@ -169,22 +195,130 @@ func (s *persistentSession) startThread(ctx context.Context) (string, error) {
 
 	result, err := s.rpc.Call(ctx, "thread/start", params)
 	if err != nil {
-		return "", fmt.Errorf("thread/start: %w", err)
+		return threadStartResult{}, fmt.Errorf("thread/start: %w", err)
 	}
 
 	thread, _ := result["thread"].(map[string]any)
 	if thread == nil {
-		return "", fmt.Errorf("thread/start: missing thread in response")
+		return threadStartResult{}, fmt.Errorf("thread/start: missing thread in response")
 	}
 	threadID, _ := thread["id"].(string)
 	if threadID == "" {
-		return "", fmt.Errorf("thread/start: missing thread id")
+		return threadStartResult{}, fmt.Errorf("thread/start: missing thread id")
 	}
-	return threadID, nil
+	return threadStartResult{threadID: threadID, model: stringVal(result, "model")}, nil
+}
+
+func (s *persistentSession) addTurnOverrides(turnParams map[string]any) {
+	mode := "default"
+	if strings.EqualFold(strings.TrimSpace(s.req.PermissionMode), "plan") {
+		mode = "plan"
+	}
+	turnParams["permissionProfile"] = codexPermissionProfile(mode, s.req.YoloMode)
+
+	effort := strings.TrimSpace(s.req.Effort)
+	if mode == "plan" && effort == "" {
+		effort = "medium"
+	}
+
+	settings := map[string]any{
+		"model":                  s.turnModel(),
+		"developer_instructions": nil,
+		"reasoning_effort":       nil,
+	}
+	if effort != "" {
+		settings["reasoning_effort"] = effort
+	}
+
+	turnParams["collaborationMode"] = map[string]any{
+		"mode":     mode,
+		"settings": settings,
+	}
+}
+
+func codexPermissionProfile(mode string, yolo bool) map[string]any {
+	if mode == "plan" {
+		return managedPermissionProfile([]map[string]any{
+			fileSystemEntry(specialFileSystemPath("root", nil), "read"),
+		}, false)
+	}
+	if yolo {
+		return map[string]any{"type": "disabled"}
+	}
+	return managedPermissionProfile([]map[string]any{
+		fileSystemEntry(specialFileSystemPath("root", nil), "read"),
+		fileSystemEntry(specialFileSystemPath("project_roots", map[string]any{"subpath": nil}), "write"),
+		fileSystemEntry(specialFileSystemPath("slash_tmp", nil), "write"),
+		fileSystemEntry(specialFileSystemPath("tmpdir", nil), "write"),
+		fileSystemEntry(specialFileSystemPath("project_roots", map[string]any{"subpath": ".git"}), "read"),
+		fileSystemEntry(specialFileSystemPath("project_roots", map[string]any{"subpath": ".agents"}), "read"),
+		fileSystemEntry(specialFileSystemPath("project_roots", map[string]any{"subpath": ".codex"}), "read"),
+	}, false)
+}
+
+func managedPermissionProfile(entries []map[string]any, networkEnabled bool) map[string]any {
+	return map[string]any{
+		"type": "managed",
+		"fileSystem": map[string]any{
+			"type":    "restricted",
+			"entries": entries,
+		},
+		"network": map[string]any{
+			"enabled": networkEnabled,
+		},
+	}
+}
+
+func fileSystemEntry(path map[string]any, access string) map[string]any {
+	return map[string]any{
+		"path":   path,
+		"access": access,
+	}
+}
+
+func specialFileSystemPath(kind string, fields map[string]any) map[string]any {
+	value := map[string]any{"kind": kind}
+	for key, val := range fields {
+		value[key] = val
+	}
+	return map[string]any{
+		"type":  "special",
+		"value": value,
+	}
+}
+
+func (s *persistentSession) turnModel() string {
+	if model := strings.TrimSpace(s.req.Model); model != "" {
+		return model
+	}
+	return strings.TrimSpace(s.model)
+}
+
+type notificationState struct {
+	text              strings.Builder
+	streamedPlanItems map[string]bool
+	completedPlanText string
+}
+
+func newNotificationState() *notificationState {
+	return &notificationState{streamedPlanItems: make(map[string]bool)}
+}
+
+func (st *notificationState) writeText(text string) {
+	if text != "" {
+		st.text.WriteString(text)
+	}
+}
+
+func (st *notificationState) textString() string {
+	if st.completedPlanText != "" {
+		return st.completedPlanText
+	}
+	return st.text.String()
 }
 
 func (s *persistentSession) processNotifications(ctx context.Context) {
-	var textBuf strings.Builder
+	state := newNotificationState()
 	for {
 		select {
 		case <-ctx.Done():
@@ -195,7 +329,7 @@ func (s *persistentSession) processNotifications(ctx context.Context) {
 			return
 		case msg, ok := <-s.rpc.Notifications():
 			if !ok {
-				if text := textBuf.String(); text != "" {
+				if text := state.textString(); text != "" {
 					s.emit(runtime.Event{Type: runtime.EventCompleted, Text: text})
 				} else {
 					s.emit(runtime.Event{Type: runtime.EventFailed, Error: "notification channel closed"})
@@ -208,7 +342,7 @@ func (s *persistentSession) processNotifications(ctx context.Context) {
 				continue
 			}
 
-			terminal := s.handleNotification(msg, &textBuf)
+			terminal := s.handleNotification(msg, state)
 			if terminal {
 				return
 			}
@@ -216,14 +350,24 @@ func (s *persistentSession) processNotifications(ctx context.Context) {
 	}
 }
 
-func (s *persistentSession) handleNotification(msg jsonRPCMessage, textBuf *strings.Builder) bool {
+func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notificationState) bool {
 	params := notificationParams(msg)
 
 	switch msg.Method {
 	case "item/agentMessage/delta":
 		delta, _ := params["delta"].(string)
 		if delta != "" {
-			textBuf.WriteString(delta)
+			state.writeText(delta)
+			s.emit(runtime.Event{Type: runtime.EventDelta, Text: delta})
+		}
+
+	case "item/plan/delta":
+		delta, _ := params["delta"].(string)
+		if delta != "" {
+			if itemID := stringVal(params, "itemId"); itemID != "" {
+				state.streamedPlanItems[itemID] = true
+			}
+			state.writeText(delta)
 			s.emit(runtime.Event{Type: runtime.EventDelta, Text: delta})
 		}
 
@@ -241,12 +385,20 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, textBuf *stri
 
 	case "item/completed":
 		item, _ := params["item"].(map[string]any)
+		if text, streamed := completedPlanText(item, state); text != "" {
+			if streamed {
+				state.completedPlanText = text
+			} else {
+				state.writeText(text)
+				s.emit(runtime.Event{Type: runtime.EventDelta, Text: text})
+			}
+		}
 		if pi := itemToProcessItem(item, "completed"); pi != nil {
 			s.emit(runtime.Event{Type: runtime.EventDelta, Process: []runtime.ProcessItem{*pi}})
 		}
 
 	case "turn/completed":
-		text := textBuf.String()
+		text := state.textString()
 		usage := turnCompletedUsage(params)
 		s.emit(runtime.Event{Type: runtime.EventCompleted, Text: text, Usage: usage})
 		return true
@@ -263,7 +415,7 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, textBuf *stri
 		return true
 
 	case "thread/closed":
-		text := textBuf.String()
+		text := state.textString()
 		if text != "" {
 			s.emit(runtime.Event{Type: runtime.EventCompleted, Text: text})
 		} else {
@@ -285,12 +437,82 @@ func (s *persistentSession) handleServerRequest(msg jsonRPCMessage) {
 			slog.Warn("codexpersist: failed to auto-approve", "method", msg.Method, "error", err)
 		}
 	case "item/tool/requestUserInput":
-		if err := s.rpc.RespondToRequest(msg.ID, map[string]any{"input": ""}); err != nil {
-			slog.Warn("codexpersist: failed to respond to user input request", "error", err)
-		}
+		s.handleUserInputRequest(msg)
 	default:
 		if err := s.rpc.RespondToRequest(msg.ID, map[string]any{}); err != nil {
 			slog.Warn("codexpersist: failed to respond to server request", "method", msg.Method, "error", err)
+		}
+	}
+}
+
+func (s *persistentSession) handleUserInputRequest(msg jsonRPCMessage) {
+	params := notificationParams(msg)
+
+	var question string
+	var questionRefID string
+	var options []runtime.InputRequestOption
+
+	// Codex uses a questions array: params.questions[0]
+	if questions, ok := params["questions"].([]any); ok && len(questions) > 0 {
+		q, _ := questions[0].(map[string]any)
+		if q != nil {
+			question = stringVal(q, "question")
+			questionRefID = stringVal(q, "id")
+			if rawOptions, ok := q["options"].([]any); ok {
+				for _, opt := range rawOptions {
+					optMap, _ := opt.(map[string]any)
+					if optMap == nil {
+						continue
+					}
+					options = append(options, runtime.InputRequestOption{
+						Label:       stringVal(optMap, "label"),
+						Description: stringVal(optMap, "description"),
+					})
+				}
+			}
+		}
+	}
+
+	// Fallback to flat fields
+	if question == "" {
+		question = stringVal(params, "question")
+	}
+	if question == "" {
+		question = stringVal(params, "prompt")
+	}
+	if question == "" {
+		question = "The agent is requesting input"
+	}
+
+	questionID := id.New("qst")
+	s.emit(runtime.Event{
+		Type: runtime.EventInputRequest,
+		InputRequest: &runtime.InputRequest{
+			QuestionID: questionID,
+			Question:   question,
+			RequestID:  msg.ID,
+			Options:    options,
+		},
+	})
+
+	select {
+	case <-s.process.Done():
+		return
+	case answer := <-s.pendingInput:
+		// Codex expects: {"answers": {"<question-ref-id>": {"answers": ["<answer>"]}}}
+		refID := questionRefID
+		if refID == "" {
+			refID = "q0"
+		}
+		result := map[string]any{
+			"answers": map[string]any{
+				refID: map[string]any{
+					"answers": []string{answer.answer},
+				},
+			},
+		}
+		if err := s.rpc.RespondToRequest(msg.ID, result); err != nil {
+			slog.Warn("codexpersist: failed to respond to user input request", "error", err)
 		}
 	}
 }
@@ -405,6 +627,18 @@ func itemToProcessItem(item map[string]any, status string) *runtime.ProcessItem 
 	return nil
 }
 
+func completedPlanText(item map[string]any, state *notificationState) (string, bool) {
+	if item == nil {
+		return "", false
+	}
+	if stringVal(item, "type") != "plan" {
+		return "", false
+	}
+	text := stringVal(item, "text")
+	itemID := stringVal(item, "id")
+	return text, itemID != "" && state.streamedPlanItems[itemID]
+}
+
 func itemToolName(item map[string]any) string {
 	if name := stringVal(item, "name"); name != "" {
 		return name
@@ -437,9 +671,9 @@ func turnCompletedUsage(params map[string]any) *runtime.Usage {
 		return nil
 	}
 	u := &runtime.Usage{
-		Model:       stringVal(turn, "model"),
-		InputTokens: int64Ptr(last, "inputTokens"),
-		OutputTokens: int64Ptr(last, "outputTokens"),
+		Model:                 stringVal(turn, "model"),
+		InputTokens:           int64Ptr(last, "inputTokens"),
+		OutputTokens:          int64Ptr(last, "outputTokens"),
 		CachedInputTokens:     int64Ptr(last, "cachedInputTokens"),
 		ReasoningOutputTokens: int64Ptr(last, "reasoningOutputTokens"),
 		TotalTokens:           int64Ptr(last, "totalTokens"),

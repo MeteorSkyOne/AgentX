@@ -33,3 +33,11 @@ func StreamJSONInput(input runtime.Input) ([]byte, error) {
 func HasImageAttachments(input runtime.Input) bool {
 	return hasImageAttachments(input)
 }
+
+func IsAskUserQuestion(part map[string]any) bool {
+	return isAskUserQuestion(part)
+}
+
+func ParseAskUserQuestion(part map[string]any) (string, []runtime.InputRequestOption, string) {
+	return parseAskUserQuestion(part)
+}

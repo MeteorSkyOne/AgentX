@@ -263,6 +263,7 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 						Payload:          domain.AgentOutputDeltaPayload{RunID: runID, AgentID: agent.ID, Text: evt.Text, Thinking: evt.Thinking, Process: process, Team: opts.Team},
 					})
 				case agentruntime.EventCompleted:
+					a.removePendingQuestions(userMessage.ConversationType, userMessage.ConversationID)
 					completedAt := time.Now().UTC()
 					if firstTokenAt == nil && strings.TrimSpace(evt.Text) != "" {
 						firstTokenAt = &completedAt
@@ -298,7 +299,30 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 					sendResult(botMessage, nil)
 					_ = session.Close(context.WithoutCancel(ctx))
 					return
+				case agentruntime.EventInputRequest:
+					if evt.InputRequest != nil {
+						a.registerPendingQuestion(pendingQuestionKey{
+							conversationType: userMessage.ConversationType,
+							conversationID:   userMessage.ConversationID,
+							questionID:       evt.InputRequest.QuestionID,
+						}, &pendingQuestion{session: session})
+						a.publishConversationEvent(domain.Event{
+							Type:             domain.EventAgentInputRequest,
+							OrganizationID:   userMessage.OrganizationID,
+							ConversationType: userMessage.ConversationType,
+							ConversationID:   userMessage.ConversationID,
+							Payload: domain.AgentInputRequestPayload{
+								RunID:      runID,
+								AgentID:    agent.ID,
+								QuestionID: evt.InputRequest.QuestionID,
+								Question:   evt.InputRequest.Question,
+								Options:    toAgentInputOptions(evt.InputRequest.Options),
+								Team:       opts.Team,
+							},
+						})
+					}
 				case agentruntime.EventFailed:
+					a.removePendingQuestions(userMessage.ConversationType, userMessage.ConversationID)
 					err := runtimeEventError(evt)
 					if evt.StaleSession && previousSessionID != "" {
 						slog.Warn("agent runtime stale provider session; retrying without resume", append(runAttrs, "provider_session_id", previousSessionID, "error", err)...)
@@ -825,6 +849,17 @@ func (a *App) publishConversationEvent(evt domain.Event) {
 	evt.ID = id.New("evt")
 	evt.CreatedAt = time.Now().UTC()
 	a.bus.Publish(evt)
+}
+
+func toAgentInputOptions(opts []agentruntime.InputRequestOption) []domain.AgentInputRequestOption {
+	if len(opts) == 0 {
+		return nil
+	}
+	result := make([]domain.AgentInputRequestOption, len(opts))
+	for i, o := range opts {
+		result[i] = domain.AgentInputRequestOption{Label: o.Label, Description: o.Description}
+	}
+	return result
 }
 
 func runtimeEventError(evt agentruntime.Event) error {

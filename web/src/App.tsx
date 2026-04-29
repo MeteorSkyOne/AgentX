@@ -41,7 +41,8 @@ import {
   userPreferences,
   workspace,
   workspaceFile,
-  workspaceTree
+  workspaceTree,
+  respondToInputRequest
 } from "./api/client";
 import type {
   Agent,
@@ -76,6 +77,7 @@ import type { AgentXEvent } from "./ws/events";
 import { useConversationSocket } from "./ws/useConversationSocket";
 import { applyTheme, getInitialTheme, storeTheme, type ThemeMode } from "./theme";
 import { showAgentMessageNotification } from "./notifications/browser";
+import type { PendingQuestion } from "./components/shell/types";
 
 interface ActiveConversation {
   type: ConversationType;
@@ -115,8 +117,10 @@ export default function App() {
   const [olderMessagesLoading, setOlderMessagesLoading] = useState(false);
   const [messageHistoryHasMore, setMessageHistoryHasMore] = useState(false);
   const [streamingByRunID, setStreamingByRunID] = useState<Record<string, StreamingMessage>>({});
+  const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
   const streamingCacheRef = useRef<Record<string, Record<string, StreamingMessage>>>({});
+  const pendingQuestionCacheRef = useRef<Record<string, PendingQuestion | null>>({});
   const hasSession = Boolean(sessionToken);
 
   useEffect(() => {
@@ -268,6 +272,10 @@ export default function App() {
         }
         return {};
       });
+      setPendingQuestion((current) => {
+        pendingQuestionCacheRef.current[prevKey] = current;
+        return null;
+      });
     }
     prevConversationKeyRef.current = nextKey;
     setConversationMessages([]);
@@ -280,6 +288,8 @@ export default function App() {
     } else {
       setStreamingByRunID({});
     }
+    const cachedQuestion = pendingQuestionCacheRef.current[nextKey];
+    setPendingQuestion(cachedQuestion ?? null);
   }, [conversationKey(activeConversation)]);
 
   useEffect(() => {
@@ -410,6 +420,9 @@ export default function App() {
           });
           break;
         case "AgentRunCompleted":
+          setPendingQuestion((current) =>
+            current?.runID === event.payload.run_id ? null : current
+          );
           setStreamingByRunID((current) => {
             const next = { ...current };
             delete next[event.payload.run_id];
@@ -417,6 +430,9 @@ export default function App() {
           });
           break;
         case "AgentRunFailed":
+          setPendingQuestion((current) =>
+            current?.runID === event.payload.run_id ? null : current
+          );
           setStreamingByRunID((current) => ({
             ...current,
             [event.payload.run_id]: {
@@ -428,6 +444,15 @@ export default function App() {
               error: event.payload.error || "Agent run failed"
             }
           }));
+          break;
+        case "AgentInputRequest":
+          setPendingQuestion({
+            runID: event.payload.run_id,
+            agentID: event.payload.agent_id,
+            questionID: event.payload.question_id,
+            question: event.payload.question,
+            options: event.payload.options
+          });
           break;
       }
     },
@@ -676,6 +701,17 @@ export default function App() {
     setConversationMessages((current) => removeMessageAndMarkReferencesDeleted(current, message.id));
   }
 
+  async function handleRespondToQuestion(questionID: string, answer: string) {
+    if (!activeConversation) return;
+    await respondToInputRequest(
+      activeConversation.type,
+      activeConversation.id,
+      questionID,
+      answer
+    );
+    setPendingQuestion(null);
+  }
+
   async function handleSaveChannelAgents(
     bindings: Array<{ agent_id: string; run_workspace_id?: string }>
   ) {
@@ -832,6 +868,8 @@ export default function App() {
       olderMessagesLoading={olderMessagesLoading}
       hasOlderMessages={messageHistoryHasMore}
       streaming={Object.values(streamingByRunID)}
+      pendingQuestion={pendingQuestion}
+      onRespondToQuestion={handleRespondToQuestion}
       connectionStatus={connectionStatus}
       notificationSettings={notificationSettingsQuery.data}
       notificationSettingsLoading={notificationSettingsQuery.isLoading}

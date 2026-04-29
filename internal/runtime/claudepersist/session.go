@@ -3,15 +3,22 @@ package claudepersist
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/meteorsky/agentx/internal/id"
 	"github.com/meteorsky/agentx/internal/runtime"
 	"github.com/meteorsky/agentx/internal/runtime/claude"
 	"github.com/meteorsky/agentx/internal/runtime/procpool"
 )
+
+type inputAnswer struct {
+	questionID string
+	answer     string
+}
 
 type persistentSession struct {
 	process *procpool.ManagedProcess
@@ -19,25 +26,28 @@ type persistentSession struct {
 	rt      *Runtime
 	events  chan runtime.Event
 
-	mu        sync.Mutex
-	sessionID string
-	alive     bool
-	started   bool
-	turnHeld  bool
-	done      chan struct{}
-	closeOnce sync.Once
+	mu                  sync.Mutex
+	sessionID           string
+	alive               bool
+	started             bool
+	turnHeld            bool
+	done                chan struct{}
+	closeOnce           sync.Once
+	pendingInput        chan inputAnswer
+	pendingControlInput map[string]any
 }
 
 func newPersistentSession(proc *procpool.ManagedProcess, key string, rt *Runtime) *persistentSession {
 	fallbackID := "claude:" + key
 	return &persistentSession{
-		process:   proc,
-		key:       key,
-		rt:        rt,
-		events:    make(chan runtime.Event, 64),
-		sessionID: fallbackID,
-		alive:     true,
-		done:      make(chan struct{}),
+		process:      proc,
+		key:          key,
+		rt:           rt,
+		events:       make(chan runtime.Event, 64),
+		sessionID:    fallbackID,
+		alive:        true,
+		done:         make(chan struct{}),
+		pendingInput: make(chan inputAnswer, 1),
 	}
 }
 
@@ -123,6 +133,15 @@ func (s *persistentSession) Alive() bool {
 	return s.alive
 }
 
+func (s *persistentSession) RespondToInputRequest(questionID string, answer string) error {
+	select {
+	case s.pendingInput <- inputAnswer{questionID: questionID, answer: answer}:
+		return nil
+	default:
+		return errors.New("no pending input request")
+	}
+}
+
 func (s *persistentSession) Close(ctx context.Context) error {
 	s.mu.Lock()
 	s.alive = false
@@ -175,7 +194,13 @@ func (s *persistentSession) readEvents(ctx context.Context) {
 				}
 				return
 			}
-			terminal := s.handleLine(line, &textBuf)
+			terminal, inputReq := s.handleLine(line, &textBuf)
+			if inputReq != nil {
+				if s.waitForInputResponse(ctx, inputReq) {
+					return
+				}
+				continue
+			}
 			if terminal {
 				return
 			}
@@ -183,7 +208,7 @@ func (s *persistentSession) readEvents(ctx context.Context) {
 	}
 }
 
-func (s *persistentSession) handleLine(line []byte, textBuf *strings.Builder) bool {
+func (s *persistentSession) handleLine(line []byte, textBuf *strings.Builder) (bool, *runtime.InputRequest) {
 	var payload map[string]any
 	if err := json.Unmarshal(line, &payload); err != nil {
 		text := strings.TrimSpace(string(line))
@@ -191,48 +216,100 @@ func (s *persistentSession) handleLine(line []byte, textBuf *strings.Builder) bo
 			textBuf.WriteString(text)
 			s.emit(runtime.Event{Type: runtime.EventDelta, Text: text})
 		}
-		return false
+		return false, nil
 	}
 
-	if id := claude.StringValue(payload, "session_id"); id != "" {
+	if sid := claude.StringValue(payload, "session_id"); sid != "" {
 		s.mu.Lock()
-		s.sessionID = id
+		s.sessionID = sid
 		s.mu.Unlock()
 	}
 
 	switch claude.StringValue(payload, "type") {
 	case "system":
-		return false
+		return false, nil
 
 	case "assistant":
 		text, thinking, process := claude.AssistantContent(payload)
 		if text == "" && thinking == "" && len(process) == 0 {
-			return false
+			return false, nil
 		}
 		if text != "" {
 			textBuf.WriteString(text)
 		}
 		s.emit(runtime.Event{Type: runtime.EventDelta, Text: text, Thinking: thinking, Process: process})
-		return false
+		return false, nil
 
 	case "result":
 		if claude.IsErrorResult(payload) {
 			errText := claude.ResultError(payload)
 			s.emit(runtime.Event{Type: runtime.EventFailed, Error: errText, StaleSession: claude.IsStaleSessionError(errText)})
-			return true
+			return true, nil
 		}
 		text := claude.StringValue(payload, "result")
 		if text == "" {
 			text = textBuf.String()
 		}
 		s.emit(runtime.Event{Type: runtime.EventCompleted, Text: text, Usage: claude.ClaudeUsage(payload)})
-		return true
+		return true, nil
 
 	case "control_request":
-		s.handleControlRequest(payload)
-		return false
+		if inputReq := s.handleControlRequest(payload); inputReq != nil {
+			return false, inputReq
+		}
+		return false, nil
 
 	default:
+		return false, nil
+	}
+}
+
+func (s *persistentSession) waitForInputResponse(ctx context.Context, inputReq *runtime.InputRequest) bool {
+	s.emit(runtime.Event{
+		Type:         runtime.EventInputRequest,
+		InputRequest: inputReq,
+	})
+
+	select {
+	case <-ctx.Done():
+		s.emit(runtime.Event{Type: runtime.EventFailed, Error: ctx.Err().Error()})
+		return true
+	case <-s.process.Done():
+		stderr := s.process.Stderr()
+		errText := "persistent process exited"
+		if stderr != "" {
+			errText = stderr
+		}
+		s.emit(runtime.Event{Type: runtime.EventFailed, Error: errText})
+		return true
+	case answer := <-s.pendingInput:
+		requestID, _ := inputReq.RequestID.(string)
+		s.mu.Lock()
+		rawInput := s.pendingControlInput
+		s.pendingControlInput = nil
+		s.mu.Unlock()
+		// Build updatedInput: echo original input and add answers
+		updatedInput := map[string]any{}
+		for k, v := range rawInput {
+			updatedInput[k] = v
+		}
+		updatedInput["answers"] = map[string]any{
+			inputReq.Question: answer.answer,
+		}
+		response := map[string]any{
+			"type": "control_response",
+			"response": map[string]any{
+				"subtype":    "success",
+				"request_id": requestID,
+				"response": map[string]any{
+					"behavior":     "allow",
+					"updatedInput": updatedInput,
+				},
+			},
+		}
+		if err := s.process.WriteJSON(response); err != nil {
+			slog.Warn("claudepersist: failed to send input response", "key", s.key, "error", err)
+		}
 		return false
 	}
 }
@@ -291,11 +368,37 @@ func buildUserMessage(input runtime.Input) (map[string]any, error) {
 	}, nil
 }
 
-func (s *persistentSession) handleControlRequest(payload map[string]any) {
+func (s *persistentSession) handleControlRequest(payload map[string]any) *runtime.InputRequest {
 	requestID := claude.StringValue(payload, "request_id")
 	if requestID == "" {
-		return
+		return nil
 	}
+
+	// Check if this is an AskUserQuestion permission request
+	request, _ := payload["request"].(map[string]any)
+	if request != nil && claude.StringValue(request, "tool_name") == "AskUserQuestion" {
+		input, _ := request["input"].(map[string]any)
+		if input != nil {
+			question, options, _ := claude.ParseAskUserQuestion(map[string]any{
+				"input": input,
+				"id":    claude.StringValue(request, "tool_use_id"),
+			})
+			if question == "" {
+				question = "The agent is requesting input"
+			}
+			s.mu.Lock()
+			s.pendingControlInput = input
+			s.mu.Unlock()
+			return &runtime.InputRequest{
+				QuestionID: id.New("qst"),
+				Question:   question,
+				ToolCallID: claude.StringValue(request, "tool_use_id"),
+				RequestID:  requestID,
+				Options:    options,
+			}
+		}
+	}
+
 	response := map[string]any{
 		"type": "control_response",
 		"response": map[string]any{
@@ -309,4 +412,5 @@ func (s *persistentSession) handleControlRequest(payload map[string]any) {
 	if err := s.process.WriteJSON(response); err != nil {
 		slog.Warn("claudepersist: failed to send permission response", "key", s.key, "error", err)
 	}
+	return nil
 }

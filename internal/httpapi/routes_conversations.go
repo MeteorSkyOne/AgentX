@@ -287,6 +287,51 @@ func readMultipartSendMessageRequest(w http.ResponseWriter, r *http.Request) (se
 	return req, attachments, nil
 }
 
+type inputResponseRequest struct {
+	QuestionID string `json:"question_id"`
+	Answer     string `json:"answer"`
+}
+
+func (s *Server) handleInputResponse(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	conversationType, ok := parseConversationType(chi.URLParam(r, "type"))
+	if !ok {
+		writeError(w, http.StatusBadRequest, "unknown conversation type")
+		return
+	}
+
+	conversationID := chi.URLParam(r, "id")
+	if _, ok, err := s.authorizedConversationOrganizationID(r, userID, conversationType, conversationID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	} else if !ok {
+		writeError(w, http.StatusNotFound, "conversation not found")
+		return
+	}
+
+	var req inputResponseRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "malformed JSON")
+		return
+	}
+	if strings.TrimSpace(req.QuestionID) == "" {
+		writeError(w, http.StatusBadRequest, "question_id is required")
+		return
+	}
+
+	if err := s.app.RespondToInputRequest(r.Context(), conversationType, conversationID, req.QuestionID, req.Answer); err != nil {
+		writeError(w, http.StatusNotFound, "no pending question")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleAttachmentContent(w http.ResponseWriter, r *http.Request) {
 	userID, ok := userIDFromContext(r.Context())
 	if !ok {

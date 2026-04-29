@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Composer } from "../Composer";
 import { MessagePane } from "../MessagePane";
 import type { Channel, ConversationAgentContext, Message, Thread, UserPreferences } from "../../api/types";
-import type { ComposerConversation, ShellProps, StreamingMessage } from "./types";
+import type { ComposerConversation, PendingQuestion, ShellProps, StreamingMessage } from "./types";
 import type { ThemeMode } from "../../theme";
 import type { WorkspacePathTarget } from "@/lib/workspacePaths";
 import { ThreadForum } from "./ThreadForum";
@@ -16,6 +16,7 @@ export function ConversationPanel({
   olderMessagesLoading,
   hasOlderMessages,
   streaming,
+  pendingQuestion,
   boundAgents,
   preferences,
   theme,
@@ -27,6 +28,7 @@ export function ConversationPanel({
   onUpdateMessage,
   onDeleteMessage,
   onLoadOlderMessages,
+  onRespondToQuestion,
   onMessageSent,
   workspacePath,
   onOpenWorkspacePath,
@@ -39,6 +41,7 @@ export function ConversationPanel({
   olderMessagesLoading: boolean;
   hasOlderMessages: boolean;
   streaming: StreamingMessage[];
+  pendingQuestion?: PendingQuestion | null;
   boundAgents: ConversationAgentContext[];
   preferences: UserPreferences;
   theme: ThemeMode;
@@ -50,6 +53,7 @@ export function ConversationPanel({
   onUpdateMessage: ShellProps["onUpdateMessage"];
   onDeleteMessage: ShellProps["onDeleteMessage"];
   onLoadOlderMessages: ShellProps["onLoadOlderMessages"];
+  onRespondToQuestion?: (questionID: string, answer: string) => Promise<void>;
   onMessageSent: ShellProps["onMessageSent"];
   workspacePath?: string;
   onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
@@ -114,12 +118,14 @@ export function ConversationPanel({
         isLoadingOlder={olderMessagesLoading}
         hasOlderMessages={hasOlderMessages}
         streaming={streaming}
+        pendingQuestion={pendingQuestion}
         agents={boundAgents}
         preferences={preferences}
         theme={theme}
         onUpdateMessage={onUpdateMessage}
         onDeleteMessage={onDeleteMessage}
         onLoadOlder={onLoadOlderMessages}
+        onRespondToQuestion={onRespondToQuestion}
         onReplyMessage={selectReplyTarget}
         workspacePath={workspacePath}
         onOpenWorkspacePath={onOpenWorkspacePath}

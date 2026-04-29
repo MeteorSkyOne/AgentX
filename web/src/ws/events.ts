@@ -92,6 +92,18 @@ export interface AgentRunFailedEvent extends BaseEvent {
   };
 }
 
+export interface AgentInputRequestEvent extends BaseEvent {
+  type: "AgentInputRequest";
+  payload: {
+    run_id: string;
+    agent_id: string;
+    question_id: string;
+    question: string;
+    options?: Array<{ label: string; description?: string }>;
+    team?: TeamMetadata;
+  };
+}
+
 export interface SubscribedEvent {
   type: "subscribed";
 }
@@ -106,7 +118,8 @@ export type AgentXEvent =
   | AgentRunStartedEvent
   | AgentOutputDeltaEvent
   | AgentRunCompletedEvent
-  | AgentRunFailedEvent;
+  | AgentRunFailedEvent
+  | AgentInputRequestEvent;
 
 export type SocketEvent = AgentXEvent | SubscribedEvent | { type?: unknown };
 
@@ -121,6 +134,7 @@ export function isAgentXEvent(event: SocketEvent): event is AgentXEvent {
     event.type === "AgentRunStarted" ||
     event.type === "AgentOutputDelta" ||
     event.type === "AgentRunCompleted" ||
-    event.type === "AgentRunFailed"
+    event.type === "AgentRunFailed" ||
+    event.type === "AgentInputRequest"
   );
 }

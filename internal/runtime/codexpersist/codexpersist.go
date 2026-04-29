@@ -81,13 +81,7 @@ func (r *Runtime) processStartFunc(req runtime.StartSessionRequest) procpool.Sta
 }
 
 func (r *Runtime) initializeServer(ctx context.Context, proc *procpool.ManagedProcess, rpc *rpcClient) error {
-	_, err := rpc.Call(ctx, "initialize", map[string]any{
-		"clientInfo": map[string]any{
-			"name":    "agentx",
-			"title":   "AgentX",
-			"version": "0.1.0",
-		},
-	})
+	_, err := rpc.Call(ctx, "initialize", initializeParams())
 	if err != nil {
 		return fmt.Errorf("codex app-server initialize: %w", err)
 	}
@@ -96,6 +90,19 @@ func (r *Runtime) initializeServer(ctx context.Context, proc *procpool.ManagedPr
 	}
 	slog.Info("codexpersist: server initialized", "pid", proc.Key)
 	return nil
+}
+
+func initializeParams() map[string]any {
+	return map[string]any{
+		"clientInfo": map[string]any{
+			"name":    "agentx",
+			"title":   "AgentX",
+			"version": "0.1.0",
+		},
+		"capabilities": map[string]any{
+			"experimentalApi": true,
+		},
+	}
 }
 
 func sessionKey(req runtime.StartSessionRequest) string {

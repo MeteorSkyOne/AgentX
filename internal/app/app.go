@@ -1,8 +1,11 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/meteorsky/agentx/internal/config"
@@ -29,11 +32,24 @@ type Options struct {
 	WebhookTimeout    time.Duration
 }
 
+type pendingQuestionKey struct {
+	conversationType domain.ConversationType
+	conversationID   string
+	questionID       string
+}
+
+type pendingQuestion struct {
+	session agentruntime.Session
+}
+
 type App struct {
 	store          store.Store
 	bus            *eventbus.Bus
 	opts           Options
 	providerLimits *providerLimitService
+
+	pendingQuestionsMu sync.Mutex
+	pendingQuestions    map[pendingQuestionKey]*pendingQuestion
 }
 
 func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
@@ -42,7 +58,48 @@ func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
 			domain.AgentKindFake: fake.New(),
 		}
 	}
-	return &App{store: st, bus: bus, opts: opts, providerLimits: newProviderLimitService(opts.ProviderLimits)}
+	return &App{
+		store:           st,
+		bus:             bus,
+		opts:            opts,
+		providerLimits:  newProviderLimitService(opts.ProviderLimits),
+		pendingQuestions: make(map[pendingQuestionKey]*pendingQuestion),
+	}
+}
+
+func (a *App) registerPendingQuestion(key pendingQuestionKey, pq *pendingQuestion) {
+	a.pendingQuestionsMu.Lock()
+	defer a.pendingQuestionsMu.Unlock()
+	a.pendingQuestions[key] = pq
+}
+
+func (a *App) removePendingQuestions(conversationType domain.ConversationType, conversationID string) {
+	a.pendingQuestionsMu.Lock()
+	defer a.pendingQuestionsMu.Unlock()
+	for key := range a.pendingQuestions {
+		if key.conversationType == conversationType && key.conversationID == conversationID {
+			delete(a.pendingQuestions, key)
+		}
+	}
+}
+
+func (a *App) RespondToInputRequest(_ context.Context, conversationType domain.ConversationType, conversationID string, questionID string, answer string) error {
+	a.pendingQuestionsMu.Lock()
+	key := pendingQuestionKey{
+		conversationType: conversationType,
+		conversationID:   conversationID,
+		questionID:       questionID,
+	}
+	pq, ok := a.pendingQuestions[key]
+	if ok {
+		delete(a.pendingQuestions, key)
+	}
+	a.pendingQuestionsMu.Unlock()
+
+	if !ok {
+		return errors.New("no pending question found")
+	}
+	return pq.session.RespondToInputRequest(questionID, answer)
 }
 
 func (a *App) runtimeForAgent(agent domain.Agent) (agentruntime.Runtime, bool) {

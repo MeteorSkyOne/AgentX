@@ -608,6 +608,52 @@ func stringValue(values map[string]any, key string) string {
 	}
 }
 
+func isAskUserQuestion(part map[string]any) bool {
+	return stringValue(part, "type") == "tool_use" && stringValue(part, "name") == "AskUserQuestion"
+}
+
+func parseAskUserQuestion(part map[string]any) (string, []runtime.InputRequestOption, string) {
+	toolCallID := stringValue(part, "id")
+	input, _ := part["input"].(map[string]any)
+	if input == nil {
+		return "", nil, toolCallID
+	}
+
+	// Claude Code uses a questions array: input.questions[0].question / .options
+	if questions, ok := input["questions"].([]any); ok && len(questions) > 0 {
+		q, _ := questions[0].(map[string]any)
+		if q != nil {
+			question := stringValue(q, "question")
+			options := parseInputOptions(q)
+			return question, options, toolCallID
+		}
+	}
+
+	// Fallback: flat format (input.question / input.options)
+	question := stringValue(input, "question")
+	options := parseInputOptions(input)
+	return question, options, toolCallID
+}
+
+func parseInputOptions(src map[string]any) []runtime.InputRequestOption {
+	rawOptions, _ := src["options"].([]any)
+	if len(rawOptions) == 0 {
+		return nil
+	}
+	options := make([]runtime.InputRequestOption, 0, len(rawOptions))
+	for _, opt := range rawOptions {
+		optMap, _ := opt.(map[string]any)
+		if optMap == nil {
+			continue
+		}
+		options = append(options, runtime.InputRequestOption{
+			Label:       stringValue(optMap, "label"),
+			Description: stringValue(optMap, "description"),
+		})
+	}
+	return options
+}
+
 func commandError(stderr string, waitErr error) string {
 	if strings.TrimSpace(stderr) != "" {
 		return stderr

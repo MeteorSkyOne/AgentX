@@ -128,6 +128,10 @@ func (s *Session) CurrentSessionID() string {
 	return s.fallbackID
 }
 
+func (s *Session) RespondToInputRequest(questionID string, answer string) error {
+	return errors.New("cli session does not support input requests")
+}
+
 func (s *Session) Alive() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -114,6 +114,10 @@ func (s *session) Close(ctx context.Context) error {
 	}
 }
 
+func (s *session) RespondToInputRequest(questionID string, answer string) error {
+	return errors.New("fake runtime does not support input requests")
+}
+
 func (s *session) emit(evt runtime.Event) bool {
 	select {
 	case <-s.done:

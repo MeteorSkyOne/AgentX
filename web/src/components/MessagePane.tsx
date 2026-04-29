@@ -49,6 +49,7 @@ import type { WorkspacePathTarget } from "@/lib/workspacePaths";
 import type { WorkspaceFileBrowserController } from "./WorkspaceFileBrowser";
 import { AgentAvatar, agentKindColor } from "./AgentAvatar";
 import { messageMetricsParts } from "./messageMetrics";
+import type { PendingQuestion } from "./shell/types";
 
 const MarkdownRenderer = lazy(() =>
   import("./MarkdownRenderer").then((module) => ({ default: module.MarkdownRenderer }))
@@ -76,6 +77,7 @@ interface MessagePaneProps {
   isLoadingOlder: boolean;
   hasOlderMessages: boolean;
   streaming: StreamingMessage[];
+  pendingQuestion?: PendingQuestion | null;
   agents: ConversationAgentContext[];
   preferences: UserPreferences;
   theme: ThemeMode;
@@ -83,6 +85,7 @@ interface MessagePaneProps {
   onDeleteMessage: (message: Message) => Promise<void>;
   onReplyMessage: (message: Message) => void;
   onLoadOlder: () => boolean;
+  onRespondToQuestion?: (questionID: string, answer: string) => Promise<void>;
   workspacePath?: string;
   onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
 }
@@ -101,6 +104,7 @@ export function MessagePane({
   isLoadingOlder,
   hasOlderMessages,
   streaming,
+  pendingQuestion,
   agents,
   preferences,
   theme,
@@ -108,6 +112,7 @@ export function MessagePane({
   onDeleteMessage,
   onReplyMessage,
   onLoadOlder,
+  onRespondToQuestion,
   workspacePath,
   onOpenWorkspacePath,
 }: MessagePaneProps) {
@@ -256,6 +261,16 @@ export function MessagePane({
               />
             );
           })}
+          {pendingQuestion && onRespondToQuestion && (
+            <QuestionPrompt
+              question={pendingQuestion}
+              agentName={agentByID.get(pendingQuestion.agentID)?.name}
+              agentKind={agentByID.get(pendingQuestion.agentID)?.kind}
+              agentID={pendingQuestion.agentID}
+              hideAvatar={preferences.hide_avatars}
+              onSubmit={(answer) => onRespondToQuestion(pendingQuestion.questionID, answer)}
+            />
+          )}
           <div ref={bottomRef} />
         </div>
       </section>
@@ -1787,6 +1802,105 @@ function formatJSON(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function QuestionPrompt({
+  question,
+  agentName,
+  agentKind,
+  agentID,
+  hideAvatar,
+  onSubmit,
+}: {
+  question: PendingQuestion;
+  agentName?: string;
+  agentKind?: string;
+  agentID?: string;
+  hideAvatar?: boolean;
+  onSubmit: (answer: string) => void;
+}) {
+  const [answer, setAnswer] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const label = agentName ?? "Agent";
+
+  async function handleSubmit() {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      onSubmit(answer);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="group flex min-w-0 max-w-full gap-3 rounded-md px-1 py-1 md:gap-4 md:px-2">
+      {!hideAvatar && (
+        agentID ? (
+          <AgentAvatar agentID={agentID} kind={agentKind ?? "fake"} size="md" className="shrink-0" />
+        ) : (
+          <Avatar className="h-10 w-10 shrink-0">
+            <AvatarFallback className={cn("text-white text-sm", agentKindColor(agentKind ?? "fake"))}>?</AvatarFallback>
+          </Avatar>
+        )
+      )}
+
+      <div className="min-w-0 flex-1 space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold">{label}</span>
+          <Badge variant="secondary" className="text-xs">BOT</Badge>
+          <Badge variant="outline" className="text-xs text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-600">QUESTION</Badge>
+        </div>
+        <div className={messageBodyClassName} data-testid="question-body">
+          <Suspense fallback={<p>{question.question}</p>}>
+            <MarkdownRenderer text={question.question} />
+          </Suspense>
+        </div>
+        {question.options && question.options.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {question.options.map((opt) => (
+              <Button
+                key={opt.label}
+                variant={answer === opt.label ? "default" : "outline"}
+                size="sm"
+                onClick={() => setAnswer(opt.label)}
+                disabled={submitting}
+              >
+                <span>{opt.label}</span>
+                {opt.description && (
+                  <span className="ml-1 text-muted-foreground text-xs">— {opt.description}</span>
+                )}
+              </Button>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2 items-end">
+          <Textarea
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value)}
+            placeholder="Type your response..."
+            className="min-h-[40px] max-h-[120px] resize-none text-sm"
+            rows={1}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit();
+              }
+            }}
+            disabled={submitting}
+          />
+          <Button
+            onClick={handleSubmit}
+            disabled={submitting}
+            size="sm"
+            className="shrink-0"
+          >
+            Send
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function formatTime(value: string): string {

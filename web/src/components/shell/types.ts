@@ -40,6 +40,14 @@ export interface StreamingMessage {
   team?: TeamMetadata;
 }
 
+export interface PendingQuestion {
+  runID: string;
+  agentID: string;
+  questionID: string;
+  question: string;
+  options?: Array<{ label: string; description?: string }>;
+}
+
 export interface ComposerConversation {
   type: ConversationType;
   id: string;
@@ -65,6 +73,7 @@ export interface ShellProps {
   olderMessagesLoading: boolean;
   hasOlderMessages: boolean;
   streaming: StreamingMessage[];
+  pendingQuestion?: PendingQuestion | null;
   connectionStatus: SocketConnectionStatus;
   notificationSettings?: NotificationSettings;
   notificationSettingsLoading: boolean;
@@ -140,6 +149,7 @@ export interface ShellProps {
   onUpdateMessage: (messageID: string, body: string) => Promise<Message>;
   onDeleteMessage: (message: Message) => Promise<void>;
   onLoadOlderMessages: () => boolean;
+  onRespondToQuestion?: (questionID: string, answer: string) => Promise<void>;
   onMessageSent: (message: Message) => void;
   onToggleTheme: () => void;
   onLogout: () => void;

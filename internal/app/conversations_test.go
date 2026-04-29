@@ -2706,6 +2706,10 @@ func (s *teamScriptSession) Alive() bool {
 	return true
 }
 
+func (s *teamScriptSession) RespondToInputRequest(questionID string, answer string) error {
+	return nil
+}
+
 func (s *teamScriptSession) Close(ctx context.Context) error {
 	close(s.events)
 	return nil
@@ -2764,6 +2768,10 @@ func (s *scriptedSession) CurrentSessionID() string {
 
 func (s *scriptedSession) Alive() bool {
 	return true
+}
+
+func (s *scriptedSession) RespondToInputRequest(questionID string, answer string) error {
+	return nil
 }
 
 func (s *scriptedSession) Close(ctx context.Context) error {
@@ -2862,6 +2870,10 @@ func (s *capturingSession) CurrentSessionID() string {
 
 func (s *capturingSession) Alive() bool {
 	return true
+}
+
+func (s *capturingSession) RespondToInputRequest(questionID string, answer string) error {
+	return nil
 }
 
 func (s *capturingSession) Close(ctx context.Context) error {

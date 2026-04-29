@@ -16,6 +16,7 @@ const (
 	EventAgentOutputDelta           EventType = "AgentOutputDelta"
 	EventAgentRunCompleted          EventType = "AgentRunCompleted"
 	EventAgentRunFailed             EventType = "AgentRunFailed"
+	EventAgentInputRequest          EventType = "AgentInputRequest"
 )
 
 type Event struct {
@@ -73,6 +74,20 @@ type AgentRunFailedPayload struct {
 	AgentID string        `json:"agent_id,omitempty"`
 	Error   string        `json:"error"`
 	Team    *TeamMetadata `json:"team,omitempty"`
+}
+
+type AgentInputRequestPayload struct {
+	RunID      string                    `json:"run_id"`
+	AgentID    string                    `json:"agent_id"`
+	QuestionID string                    `json:"question_id"`
+	Question   string                    `json:"question"`
+	Options    []AgentInputRequestOption `json:"options,omitempty"`
+	Team       *TeamMetadata             `json:"team,omitempty"`
+}
+
+type AgentInputRequestOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
 }
 
 type TeamMetadata struct {
