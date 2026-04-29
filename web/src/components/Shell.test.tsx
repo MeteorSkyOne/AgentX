@@ -66,7 +66,9 @@ vi.mock("./WorkspaceFileBrowser", () => ({
     deleteEntry: async () => undefined,
     moveEntry: async () => null,
   }),
-  WorkspaceFileTreePane: () => <div data-testid="project-file-tree-pane" />,
+  WorkspaceFileTreePane: ({ toolbarEnd }: { toolbarEnd?: ReactNode }) => (
+    <div data-testid="project-file-tree-pane">{toolbarEnd}</div>
+  ),
   WorkspaceFileEditorPane: ({ toolbarEnd }: { toolbarEnd?: ReactNode }) => (
     <div data-testid="project-file-editor-pane">{toolbarEnd}</div>
   ),
@@ -107,6 +109,24 @@ describe("Shell project files overlay", () => {
 
     expect(screen.queryByTestId("project-files-overlay")).toBeNull();
     expect(screen.getByTestId("conversation-panel")).toBeTruthy();
+  });
+
+  it("collapses the desktop project file tree panel", () => {
+    render(<Shell {...shellProps()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Project files" }));
+
+    expect(screen.getByTestId("project-file-tree-pane")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide project file tree" }));
+
+    expect(screen.queryByTestId("project-file-tree-pane")).toBeNull();
+    expect(screen.getByRole("button", { name: "Show project file tree" })).toBeTruthy();
+    expect(screen.getByTestId("project-file-editor-pane")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show project file tree" }));
+
+    expect(screen.getByTestId("project-file-tree-pane")).toBeTruthy();
   });
 });
 

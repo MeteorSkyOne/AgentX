@@ -36,6 +36,7 @@ describe("WorkspaceFileEditorPane markdown controls", () => {
 
     expect(screen.queryByLabelText("File path")).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit Markdown" })).toBeNull();
+    expect(screen.getByText("README.md")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Close workspace" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Show file path bar" })).toBeTruthy();
 

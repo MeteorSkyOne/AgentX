@@ -660,12 +660,14 @@ export function WorkspaceFileTreePane({
   ariaLabel = "Project files",
   className,
   onFileSelected,
+  toolbarEnd,
 }: {
   controller: WorkspaceFileBrowserController;
   title?: string;
   ariaLabel?: string;
   className?: string;
   onFileSelected?: () => void;
+  toolbarEnd?: ReactNode;
 }) {
   return (
     <div className={cn("flex h-full min-h-0 min-w-0 flex-col bg-sidebar", className)} data-testid="project-file-tree-pane">
@@ -676,17 +678,20 @@ export function WorkspaceFileTreePane({
             {controller.workspacePath || controller.workspaceID || "No workspace"}
           </p>
         </div>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-8 w-8 shrink-0"
-          onClick={() => void controller.loadTree()}
-          disabled={controller.workspaceTreeLoading || !controller.canUseWorkspace}
-          title="Refresh tree"
-          aria-label="Refresh tree"
-        >
-          <RefreshCw className={cn("h-4 w-4", controller.workspaceTreeLoading && "animate-spin")} />
-        </Button>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8 shrink-0"
+            onClick={() => void controller.loadTree()}
+            disabled={controller.workspaceTreeLoading || !controller.canUseWorkspace}
+            title="Refresh tree"
+            aria-label="Refresh tree"
+          >
+            <RefreshCw className={cn("h-4 w-4", controller.workspaceTreeLoading && "animate-spin")} />
+          </Button>
+          {toolbarEnd}
+        </div>
       </div>
       <div className="min-h-0 flex-1 p-3">
         <WorkspaceFileTree
@@ -981,8 +986,13 @@ export function WorkspaceFileEditorPane({
     <>
       <div className={cn("flex h-full min-h-0 min-w-0 flex-col bg-background", className)} data-testid="project-file-editor-pane">
         {headerCollapsed && collapseControlsInPane ? (
-          <div className="flex h-9 shrink-0 items-center justify-end border-b border-border px-3">
-            {toolbarEnd}
+          <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
+            <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
+              {controller.filePath || title}
+            </span>
+            <div className="flex shrink-0 items-center gap-1">
+              {toolbarEnd}
+            </div>
             <Button
               type="button"
               size="icon-sm"

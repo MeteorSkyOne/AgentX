@@ -5,6 +5,8 @@ import {
   BarChart3,
   Bot,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   FolderOpen,
   Hash,
@@ -160,6 +162,7 @@ export function Shell({
   const [focusedAgentID, setFocusedAgentID] = useState("");
   const [membersPanelOpen, setMembersPanelOpen] = useState(false);
   const [projectFilesOpen, setProjectFilesOpen] = useState(false);
+  const [projectFileTreeCollapsed, setProjectFileTreeCollapsed] = useState(false);
   const [mainView, setMainView] = useState<"chat" | "metrics">("chat");
   const [mobileProjectFilesView, setMobileProjectFilesView] = useState<"tree" | "editor">("tree");
   const [mobileEditorHeaderCollapsed, setMobileEditorHeaderCollapsed] = useState(false);
@@ -648,6 +651,7 @@ export function Shell({
     if (projectFilesOpen) {
       blurActiveElement();
       setProjectFilesOpen(false);
+      setProjectFileTreeCollapsed(false);
       setMobileProjectFilesView("tree");
       setMobileEditorHeaderCollapsed(false);
       return;
@@ -662,6 +666,7 @@ export function Shell({
       return;
     }
     setProjectFilesOpen(false);
+    setProjectFileTreeCollapsed(false);
     setMobileProjectFilesView("tree");
     setMobileEditorHeaderCollapsed(false);
   }
@@ -1637,16 +1642,8 @@ export function Shell({
           className="absolute inset-0 z-30 min-h-0 min-w-0 bg-background shadow-2xl"
           data-testid="project-files-overlay"
         >
-          <ResizablePanelGroup direction="horizontal" className="h-full">
-            <ResizablePanel defaultSize={24} minSize={18} maxSize={36}>
-              <WorkspaceFileTreePane
-                controller={projectFilesController}
-                title="Project files"
-                ariaLabel="Project files"
-              />
-            </ResizablePanel>
-            <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={76} minSize={48}>
+          {projectFileTreeCollapsed ? (
+            <div className="relative h-full min-h-0 min-w-0">
               <WorkspaceFileEditorPane
                 controller={projectFilesController}
                 theme={theme}
@@ -1665,8 +1662,69 @@ export function Shell({
                   </Button>
                 }
               />
-            </ResizablePanel>
-          </ResizablePanelGroup>
+              <div className="pointer-events-none absolute left-0 top-1/2 z-40 -translate-y-1/2">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="pointer-events-auto h-10 w-5 cursor-pointer rounded-l-none rounded-r-full border border-l-0 border-border bg-sidebar shadow-md hover:bg-accent"
+                  title="Show project file tree"
+                  aria-label="Show project file tree"
+                  aria-expanded="false"
+                  onClick={() => setProjectFileTreeCollapsed(false)}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <ResizablePanelGroup direction="horizontal" className="h-full">
+              <>
+                <ResizablePanel defaultSize={24} minSize={18} maxSize={36}>
+                  <WorkspaceFileTreePane
+                    controller={projectFilesController}
+                    title="Project files"
+                    ariaLabel="Project files"
+                    toolbarEnd={
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        title="Hide project file tree"
+                        aria-label="Hide project file tree"
+                        aria-expanded="true"
+                        onClick={() => setProjectFileTreeCollapsed(true)}
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                    }
+                  />
+                </ResizablePanel>
+                <ResizableHandle withHandle />
+              </>
+              <ResizablePanel defaultSize={76} minSize={48}>
+                <WorkspaceFileEditorPane
+                  controller={projectFilesController}
+                  theme={theme}
+                  contentAriaLabel="Project file editor"
+                  toolbarEnd={
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 bg-accent"
+                      title="Close project files"
+                      aria-label="Close project files"
+                      aria-pressed="true"
+                      onClick={toggleProjectFiles}
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                    </Button>
+                  }
+                />
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          )}
         </div>
       )}
       </div>
