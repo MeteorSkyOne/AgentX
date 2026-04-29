@@ -174,6 +174,51 @@ describe("MarkdownRenderer", () => {
     ]);
   });
 
+  it("resolves markdown file links relative to the current markdown file", () => {
+    const opened: WorkspacePathTarget[] = [];
+    const { container } = renderClient(
+      <MarkdownRenderer
+        text="[Next](next.md) and [Guide](../guide.md:4)"
+        workspacePath="/workspace/AgentX"
+        relativeLinkBasePath="docs/chapter/readme.md"
+        onOpenWorkspacePath={(target) => opened.push(target)}
+      />
+    );
+
+    const buttons = workspacePathButtons(container);
+    expect(buttons.map((button) => button.textContent)).toEqual(["Next", "Guide"]);
+
+    click(buttons[0]);
+    click(buttons[1]);
+
+    expect(opened).toEqual([
+      {
+        path: "docs/chapter/next.md",
+        label: "docs/chapter/next.md",
+      },
+      {
+        path: "docs/guide.md",
+        lineNumber: 4,
+        column: 1,
+        label: "docs/guide.md:4",
+      },
+    ]);
+  });
+
+  it("does not resolve markdown links that escape the workspace root", () => {
+    const { container } = renderClient(
+      <MarkdownRenderer
+        text="[Secret](../secret.md)"
+        workspacePath="/workspace/AgentX"
+        relativeLinkBasePath="README.md"
+        onOpenWorkspacePath={vi.fn()}
+      />
+    );
+
+    expect(workspacePathButtons(container)).toEqual([]);
+    expect(container.textContent).toBe("Secret");
+  });
+
   it("renders invalid markdown workspace links as plain text", () => {
     const { container } = renderClient(
       <MarkdownRenderer

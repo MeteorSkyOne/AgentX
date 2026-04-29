@@ -5,6 +5,7 @@ import {
   BarChart3,
   Bot,
   ChevronDown,
+  ChevronUp,
   FolderOpen,
   Hash,
   LogOut,
@@ -161,6 +162,7 @@ export function Shell({
   const [projectFilesOpen, setProjectFilesOpen] = useState(false);
   const [mainView, setMainView] = useState<"chat" | "metrics">("chat");
   const [mobileProjectFilesView, setMobileProjectFilesView] = useState<"tree" | "editor">("tree");
+  const [mobileEditorHeaderCollapsed, setMobileEditorHeaderCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [mobileAgentPanelOpen, setMobileAgentPanelOpen] = useState(false);
   const [mobileMembersPanelOpen, setMobileMembersPanelOpen] = useState(false);
@@ -608,6 +610,7 @@ export function Shell({
     setMobileAgentPanelOpen(false);
     setMobileMembersPanelOpen(false);
     setMobileProjectFilesView("tree");
+    setMobileEditorHeaderCollapsed(false);
     setProjectFilesOpen(true);
     void projectFilesController.loadTree({ quiet: true });
   }
@@ -646,6 +649,7 @@ export function Shell({
       blurActiveElement();
       setProjectFilesOpen(false);
       setMobileProjectFilesView("tree");
+      setMobileEditorHeaderCollapsed(false);
       return;
     }
     openProjectFiles();
@@ -654,10 +658,12 @@ export function Shell({
   function handleMobileProjectFilesBack() {
     if (mobileProjectFilesView === "editor") {
       setMobileProjectFilesView("tree");
+      setMobileEditorHeaderCollapsed(false);
       return;
     }
     setProjectFilesOpen(false);
     setMobileProjectFilesView("tree");
+    setMobileEditorHeaderCollapsed(false);
   }
 
   function selectMobileProject(projectID: string) {
@@ -787,6 +793,8 @@ export function Shell({
       : activeConversation && activeThread
         ? { type: activeConversation.type, id: activeConversation.id, label: activeThread.title }
         : undefined;
+  const showMobileProjectFilesButton = !(projectFilesOpen && mobileProjectFilesView === "editor");
+  const showMobileEditorHeaderControls = projectFilesOpen && mobileProjectFilesView === "editor";
 
   return (
     <div className="flex h-dvh w-screen overflow-hidden select-none" data-testid="agentx-shell">
@@ -835,18 +843,50 @@ export function Shell({
               {projectFilesOpen ? projectWorkspace?.path ?? "No workspace" : headerSubtitle}
             </p>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn("h-11 w-11", projectFilesOpen && "bg-accent")}
-            title="Project files"
-            aria-label="Project files"
-            aria-pressed={projectFilesOpen}
-            disabled={!projectWorkspace?.id}
-            onClick={toggleProjectFiles}
-          >
-            <FolderOpen className="h-5 w-5" />
-          </Button>
+          {showMobileEditorHeaderControls ? (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-11 w-11 bg-accent"
+                title="Close project files"
+                aria-label="Close project files"
+                aria-pressed="true"
+                onClick={toggleProjectFiles}
+              >
+                <FolderOpen className="h-5 w-5" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-11 w-11"
+                title={mobileEditorHeaderCollapsed ? "Show file path bar" : "Hide file path bar"}
+                aria-label={mobileEditorHeaderCollapsed ? "Show file path bar" : "Hide file path bar"}
+                aria-expanded={!mobileEditorHeaderCollapsed}
+                onClick={() => setMobileEditorHeaderCollapsed((collapsed) => !collapsed)}
+              >
+                {mobileEditorHeaderCollapsed ? (
+                  <ChevronDown className="h-5 w-5" />
+                ) : (
+                  <ChevronUp className="h-5 w-5" />
+                )}
+              </Button>
+            </>
+          ) : showMobileProjectFilesButton ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn("h-11 w-11", projectFilesOpen && "bg-accent")}
+              title="Project files"
+              aria-label="Project files"
+              aria-pressed={projectFilesOpen}
+              disabled={!projectWorkspace?.id}
+              onClick={toggleProjectFiles}
+            >
+              <FolderOpen className="h-5 w-5" />
+            </Button>
+          ) : null}
           {!projectFilesOpen ? (
             <>
               <Button
@@ -957,7 +997,10 @@ export function Shell({
                   title="Project files"
                   ariaLabel="Project files"
                   className="min-h-0 flex-1"
-                  onFileSelected={() => setMobileProjectFilesView("editor")}
+                  onFileSelected={() => {
+                    setMobileProjectFilesView("editor");
+                    setMobileEditorHeaderCollapsed(false);
+                  }}
                 />
               ) : (
                 <WorkspaceFileEditorPane
@@ -965,6 +1008,9 @@ export function Shell({
                   theme={theme}
                   contentAriaLabel="Project file editor"
                   className="min-h-0 flex-1"
+                  headerCollapsed={mobileEditorHeaderCollapsed}
+                  onHeaderCollapsedChange={setMobileEditorHeaderCollapsed}
+                  headerControlsPlacement="external"
                 />
               )}
             </div>

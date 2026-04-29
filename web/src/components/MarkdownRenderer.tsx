@@ -1,5 +1,5 @@
 import { lazy, memo, Suspense, useMemo, type ReactNode } from "react";
-import Markdown, { type Components } from "react-markdown";
+import Markdown, { defaultUrlTransform, type Components, type UrlTransform } from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -18,6 +18,7 @@ const SINGLE_MENTION_RE = /^@[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
 interface RendererOptions {
   workspacePath?: string;
+  relativeLinkBasePath?: string;
   onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
 }
 
@@ -153,9 +154,7 @@ function createComponents(options: RendererOptions): Components {
         );
       }
 
-      const target = href
-        ? parseWorkspacePathTarget(href, options.workspacePath)
-        : null;
+      const target = href ? markdownLinkTarget(href, options) : null;
       if (target && options.onOpenWorkspacePath) {
         return (
           <WorkspacePathButton
@@ -209,20 +208,88 @@ function singleTextChild(children: ReactNode): string | null {
   return null;
 }
 
+function markdownLinkTarget(
+  href: string,
+  options: RendererOptions
+): WorkspacePathTarget | null {
+  const targetHref = options.relativeLinkBasePath
+    ? resolveMarkdownRelativeHref(href, options.relativeLinkBasePath)
+    : href;
+  return parseWorkspacePathTarget(targetHref, options.workspacePath);
+}
+
+function resolveMarkdownRelativeHref(href: string, basePath: string): string {
+  const trimmed = href.trim();
+
+  const parsed = splitMarkdownHrefLocation(trimmed);
+  if (!parsed) return href;
+  if (!isRelativeMarkdownPath(parsed.path)) return href;
+
+  const baseDirectory = parentWorkspaceDirectoryPath(basePath);
+  const resolvedPath = normalizeJoinedWorkspacePath(baseDirectory, parsed.path);
+  return resolvedPath ? `${resolvedPath}${parsed.location}` : href;
+}
+
+function isRelativeMarkdownPath(path: string): boolean {
+  return Boolean(path) && !/^(?:[a-z][a-z0-9+.-]*:|#|\/)/i.test(path);
+}
+
+function splitMarkdownHrefLocation(
+  href: string
+): { path: string; location: string } | null {
+  const match = /^(.*?)(:[1-9][0-9]*(?::[1-9][0-9]*)?)?$/.exec(href);
+  if (!match) return null;
+  const path = match[1] ?? "";
+  if (!path) return null;
+  return { path, location: match[2] ?? "" };
+}
+
+function parentWorkspaceDirectoryPath(path: string): string {
+  const normalized = path.trim().replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
+  const slashIndex = normalized.lastIndexOf("/");
+  return slashIndex === -1 ? "" : normalized.slice(0, slashIndex);
+}
+
+function normalizeJoinedWorkspacePath(basePath: string, hrefPath: string): string | null {
+  const segments: string[] = [];
+  const combined = basePath ? `${basePath}/${hrefPath}` : hrefPath;
+
+  for (const segment of combined.replaceAll("\\", "/").split("/")) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      if (segments.length === 0) return null;
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+
+  return segments.length > 0 ? segments.join("/") : null;
+}
+
+const markdownUrlTransform: UrlTransform = (url, key, node) => {
+  if (key === "href" && node.tagName === "a") {
+    return url;
+  }
+  return defaultUrlTransform(url);
+};
+
 interface Props {
   text: string;
   workspacePath?: string;
+  relativeLinkBasePath?: string;
   onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
 }
 
 export const MarkdownRenderer = memo(function MarkdownRenderer({
   text,
   workspacePath,
+  relativeLinkBasePath,
   onOpenWorkspacePath,
 }: Props) {
   const components = useMemo(
-    () => createComponents({ workspacePath, onOpenWorkspacePath }),
-    [workspacePath, onOpenWorkspacePath]
+    () => createComponents({ workspacePath, relativeLinkBasePath, onOpenWorkspacePath }),
+    [workspacePath, relativeLinkBasePath, onOpenWorkspacePath]
   );
 
   return (
@@ -230,6 +297,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       remarkPlugins={[remarkGfm, remarkMath]}
       rehypePlugins={[rehypeKatex]}
       components={components}
+      urlTransform={markdownUrlTransform}
     >
       {text}
     </Markdown>

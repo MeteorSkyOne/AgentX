@@ -1,6 +1,19 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { Database, FileText, FolderOpen, RefreshCw, Save, Trash2, X } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Code2,
+  Columns2,
+  Database,
+  Eye,
+  FileText,
+  FolderOpen,
+  RefreshCw,
+  Save,
+  Trash2,
+  X,
+} from "lucide-react";
 import type { WorkspaceEntryType, WorkspaceTreeEntry } from "@/api/types";
 import type { ThemeMode } from "@/theme";
 import { cn } from "@/lib/utils";
@@ -19,6 +32,7 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { FileTree } from "./FileTree";
+import { isMarkdownFilePath } from "./workspaceFileLanguages";
 
 const LazyWorkspaceFileEditor = lazy(() =>
   import("./WorkspaceFileEditor").then((module) => ({ default: module.WorkspaceFileEditor }))
@@ -42,6 +56,8 @@ export interface WorkspaceFilePosition {
 export interface WorkspaceFileOpenOptions {
   position?: WorkspaceFilePosition;
 }
+
+export type WorkspaceFileViewMode = "edit" | "preview" | "split";
 
 interface WorkspaceFileBrowserProps extends WorkspaceFileBrowserActions {
   workspaceID?: string;
@@ -69,10 +85,12 @@ export interface WorkspaceFileBrowserController {
   workspaceStatus: string | null;
   fileOpenPosition?: WorkspaceFilePosition;
   fileOpenRequestID: number;
+  fileViewMode: WorkspaceFileViewMode;
   trimmedPath: string;
   canUseWorkspace: boolean;
   setFilePath: (path: string) => void;
   setFileBody: (body: string) => void;
+  setFileViewMode: (mode: WorkspaceFileViewMode) => void;
   loadTree: (options?: { quiet?: boolean }) => Promise<void>;
   loadDirectory: (path: string, options?: { quiet?: boolean; force?: boolean }) => Promise<void>;
   loadFile: (path?: string, options?: WorkspaceFileOpenOptions) => Promise<void>;
@@ -116,6 +134,7 @@ export function useWorkspaceFileBrowser({
   const [workspaceStatus, setWorkspaceStatus] = useState<string | null>(null);
   const [fileOpenPosition, setFileOpenPosition] = useState<WorkspaceFilePosition>();
   const [fileOpenRequestID, setFileOpenRequestID] = useState(0);
+  const [fileViewMode, setFileViewMode] = useState<WorkspaceFileViewMode>("edit");
   const workspaceTreeRequestRef = useRef(0);
   const directoryRequestRef = useRef<Record<string, number>>({});
   const fileRequestRef = useRef(0);
@@ -453,6 +472,7 @@ export function useWorkspaceFileBrowser({
     setEntryActionPending(false);
     setFileOpenPosition(undefined);
     setFileOpenRequestID(0);
+    setFileViewMode("edit");
     setWorkspaceStatus(null);
   }, [initialPath, workspaceID]);
 
@@ -481,10 +501,12 @@ export function useWorkspaceFileBrowser({
     workspaceStatus,
     fileOpenPosition,
     fileOpenRequestID,
+    fileViewMode,
     trimmedPath,
     canUseWorkspace,
     setFilePath,
     setFileBody,
+    setFileViewMode,
     loadTree,
     loadDirectory,
     loadFile,
@@ -928,6 +950,9 @@ export function WorkspaceFileEditorPane({
   contentAriaLabel = "Project file editor",
   className,
   toolbarEnd,
+  headerCollapsed: controlledHeaderCollapsed,
+  onHeaderCollapsedChange,
+  headerControlsPlacement = "pane",
 }: {
   controller: WorkspaceFileBrowserController;
   theme: ThemeMode;
@@ -935,33 +960,79 @@ export function WorkspaceFileEditorPane({
   contentAriaLabel?: string;
   className?: string;
   toolbarEnd?: ReactNode;
+  headerCollapsed?: boolean;
+  onHeaderCollapsedChange?: (collapsed: boolean) => void;
+  headerControlsPlacement?: "pane" | "external";
 }) {
   const [fileDeleteConfirmOpen, setFileDeleteConfirmOpen] = useState(false);
+  const [internalHeaderCollapsed, setInternalHeaderCollapsed] = useState(false);
+  const headerCollapsed = controlledHeaderCollapsed ?? internalHeaderCollapsed;
+  const collapseControlsInPane = headerControlsPlacement === "pane";
+
+  function setHeaderCollapsed(collapsed: boolean) {
+    if (onHeaderCollapsedChange) {
+      onHeaderCollapsedChange(collapsed);
+    } else {
+      setInternalHeaderCollapsed(collapsed);
+    }
+  }
 
   return (
     <>
       <div className={cn("flex h-full min-h-0 min-w-0 flex-col bg-background", className)} data-testid="project-file-editor-pane">
-        <div className="flex shrink-0 flex-col gap-2 border-b border-border p-3">
-          <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-            <Database className="h-3.5 w-3.5 shrink-0" />
-            <div className="min-w-0 flex-1">
-              <h1 className="truncate text-sm font-semibold text-foreground">
-                {controller.filePath || title}
-              </h1>
-              <p className="truncate">{controller.workspacePath || controller.workspaceID || "No workspace"}</p>
-            </div>
-            {controller.workspaceStatus && (
-              <span className="shrink-0" aria-live="polite">
-                {controller.workspaceStatus}
-              </span>
-            )}
+        {headerCollapsed && collapseControlsInPane ? (
+          <div className="flex h-9 shrink-0 items-center justify-end border-b border-border px-3">
             {toolbarEnd}
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              title="Show file path bar"
+              aria-label="Show file path bar"
+              aria-expanded="false"
+              onClick={() => setHeaderCollapsed(false)}
+            >
+              <ChevronDown className="h-4 w-4" />
+            </Button>
           </div>
-          <WorkspaceFileToolbar
-            controller={controller}
-            onDelete={() => setFileDeleteConfirmOpen(true)}
-          />
-        </div>
+        ) : !headerCollapsed ? (
+          <div className="flex shrink-0 flex-col gap-2 border-b border-border p-3">
+            <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+              <Database className="h-3.5 w-3.5 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <h1 className="truncate text-sm font-semibold text-foreground">
+                  {controller.filePath || title}
+                </h1>
+                <p className="truncate">{controller.workspacePath || controller.workspaceID || "No workspace"}</p>
+              </div>
+              {controller.workspaceStatus && (
+                <span className="shrink-0" aria-live="polite">
+                  {controller.workspaceStatus}
+                </span>
+              )}
+              {toolbarEnd}
+              {collapseControlsInPane && (
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  title="Hide file path bar"
+                  aria-label="Hide file path bar"
+                  aria-expanded="true"
+                  onClick={() => setHeaderCollapsed(true)}
+                >
+                  <ChevronUp className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+            <WorkspaceFileToolbar
+              controller={controller}
+              onDelete={() => setFileDeleteConfirmOpen(true)}
+            />
+          </div>
+        ) : (
+          null
+        )}
         <WorkspaceFileEditor
           controller={controller}
           theme={theme}
@@ -989,6 +1060,8 @@ function WorkspaceFileToolbar({
   showTreeButton?: boolean;
   onOpenTree?: () => void;
 }) {
+  const markdownControlsVisible = isMarkdownFilePath(controller.trimmedPath);
+
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
       {showTreeButton && (
@@ -1019,6 +1092,38 @@ function WorkspaceFileToolbar({
         <FileText className="h-3.5 w-3.5" />
         Open
       </Button>
+      {markdownControlsVisible && (
+        <div
+          className="flex shrink-0 items-center rounded-md border border-border bg-background p-0.5"
+          role="group"
+          aria-label="Markdown view"
+        >
+          <MarkdownViewButton
+            mode="edit"
+            currentMode={controller.fileViewMode}
+            label="Edit Markdown"
+            onSelect={controller.setFileViewMode}
+          >
+            <Code2 className="h-3.5 w-3.5" />
+          </MarkdownViewButton>
+          <MarkdownViewButton
+            mode="preview"
+            currentMode={controller.fileViewMode}
+            label="Preview Markdown"
+            onSelect={controller.setFileViewMode}
+          >
+            <Eye className="h-3.5 w-3.5" />
+          </MarkdownViewButton>
+          <MarkdownViewButton
+            mode="split"
+            currentMode={controller.fileViewMode}
+            label="Split Markdown view"
+            onSelect={controller.setFileViewMode}
+          >
+            <Columns2 className="h-3.5 w-3.5" />
+          </MarkdownViewButton>
+        </div>
+      )}
       <Button
         size="icon-sm"
         variant="outline"
@@ -1049,6 +1154,36 @@ function WorkspaceFileToolbar({
         <Trash2 className="h-3.5 w-3.5" />
       </Button>
     </div>
+  );
+}
+
+function MarkdownViewButton({
+  mode,
+  currentMode,
+  label,
+  onSelect,
+  children,
+}: {
+  mode: WorkspaceFileViewMode;
+  currentMode: WorkspaceFileViewMode;
+  label: string;
+  onSelect: (mode: WorkspaceFileViewMode) => void;
+  children: ReactNode;
+}) {
+  const selected = mode === currentMode;
+  return (
+    <Button
+      type="button"
+      size="icon-sm"
+      variant={selected ? "secondary" : "ghost"}
+      className="h-7 w-7"
+      title={label}
+      aria-label={label}
+      aria-pressed={selected}
+      onClick={() => onSelect(mode)}
+    >
+      {children}
+    </Button>
   );
 }
 

@@ -6,7 +6,9 @@ import "@/lib/monaco";
 import type { WorkspaceFileEditorProps } from "./WorkspaceFileBrowser";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { monacoLanguageForPath } from "./workspaceFileLanguages";
+import type { WorkspacePathTarget } from "@/lib/workspacePaths";
+import { MarkdownRenderer } from "./MarkdownRenderer";
+import { isMarkdownFilePath, monacoLanguageForPath } from "./workspaceFileLanguages";
 
 type WorkspaceEditorNode = HTMLDivElement & {
   __agentxSetEditorValue?: (value: string) => void;
@@ -26,6 +28,8 @@ export function WorkspaceFileEditor({
   const editorContainerRef = useRef<WorkspaceEditorNode | null>(null);
   const editorTheme = theme === "dark" ? "vs-dark" : "light";
   const language = useMemo(() => monacoLanguageForPath(controller.filePath), [controller.filePath]);
+  const isMarkdownFile = isMarkdownFilePath(controller.trimmedPath);
+  const viewMode = isMarkdownFile ? controller.fileViewMode : "edit";
   const editorModelPath = useMemo(() => {
     const path = controller.trimmedPath || "untitled";
     const encodedPath = path.split("/").map(encodeURIComponent).join("/");
@@ -107,6 +111,36 @@ export function WorkspaceFileEditor({
     controller.filePath,
   ]);
 
+  const handleOpenPreviewPath = useCallback(
+    (target: WorkspacePathTarget) => {
+      void controller.loadFile(target.path, {
+        position: target.lineNumber
+          ? { lineNumber: target.lineNumber, column: target.column ?? 1 }
+          : undefined,
+      });
+    },
+    [controller]
+  );
+
+  const editorElement = (
+    <Editor
+      height="100%"
+      width="100%"
+      language={language}
+      path={editorModelPath}
+      value={controller.fileBody}
+      theme={editorTheme}
+      options={editorOptions}
+      onChange={(value) => controller.setFileBody(value ?? "")}
+      onMount={handleEditorMount}
+      loading={
+        <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+          Loading editor...
+        </div>
+      }
+    />
+  );
+
   return (
     <div
       ref={editorContainerRef}
@@ -127,21 +161,51 @@ export function WorkspaceFileEditor({
           onRetry={() => void controller.loadFile(controller.trimmedPath)}
         />
       )}
-      <Editor
-        height="100%"
-        width="100%"
-        language={language}
-        path={editorModelPath}
-        value={controller.fileBody}
-        theme={editorTheme}
-        options={editorOptions}
-        onChange={(value) => controller.setFileBody(value ?? "")}
-        onMount={handleEditorMount}
-        loading={
-          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-            Loading editor...
+      {viewMode === "preview" ? (
+        <MarkdownPreview
+          controller={controller}
+          onOpenWorkspacePath={handleOpenPreviewPath}
+        />
+      ) : viewMode === "split" ? (
+        <div className="flex h-full min-h-0 min-w-0 flex-col md:flex-row">
+          <div className="min-h-0 min-w-0 flex-1 border-b border-border md:border-b-0 md:border-r">
+            {editorElement}
           </div>
-        }
+          <MarkdownPreview
+            controller={controller}
+            onOpenWorkspacePath={handleOpenPreviewPath}
+            className="min-h-[12rem] flex-1 md:min-h-0"
+          />
+        </div>
+      ) : (
+        editorElement
+      )}
+    </div>
+  );
+}
+
+function MarkdownPreview({
+  controller,
+  onOpenWorkspacePath,
+  className,
+}: {
+  controller: WorkspaceFileEditorProps["controller"];
+  onOpenWorkspacePath: (target: WorkspacePathTarget) => void;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "prose prose-sm h-full min-h-0 w-full max-w-none overflow-auto break-words bg-background p-4 text-foreground dark:prose-invert",
+        className
+      )}
+      data-testid="workspace-file-markdown-preview"
+    >
+      <MarkdownRenderer
+        text={controller.fileBody}
+        workspacePath={controller.workspacePath}
+        relativeLinkBasePath={controller.trimmedPath}
+        onOpenWorkspacePath={onOpenWorkspacePath}
       />
     </div>
   );

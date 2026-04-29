@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { monacoLanguageForPath } from "./workspaceFileLanguages";
+import { isMarkdownFilePath, monacoLanguageForPath } from "./workspaceFileLanguages";
 
 describe("monacoLanguageForPath", () => {
   it.each([
@@ -30,5 +30,14 @@ describe("monacoLanguageForPath", () => {
   it("is case-insensitive and defaults paths without extensions to plaintext", () => {
     expect(monacoLanguageForPath("README.MARKDOWN")).toBe("markdown");
     expect(monacoLanguageForPath("Makefile")).toBe("plaintext");
+  });
+});
+
+describe("isMarkdownFilePath", () => {
+  it("matches markdown file extensions", () => {
+    expect(isMarkdownFilePath("docs/README.md")).toBe(true);
+    expect(isMarkdownFilePath("docs/page.mdx")).toBe(true);
+    expect(isMarkdownFilePath("README.MARKDOWN")).toBe(true);
+    expect(isMarkdownFilePath("docs/readme.txt")).toBe(false);
   });
 });

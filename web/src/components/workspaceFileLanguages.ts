@@ -46,3 +46,7 @@ export function monacoLanguageForPath(path: string): string {
   const extension = fileName.includes(".") ? fileName.split(".").pop() ?? "" : "";
   return extensionLanguages[extension] ?? "plaintext";
 }
+
+export function isMarkdownFilePath(path: string): boolean {
+  return monacoLanguageForPath(path) === "markdown";
+}
