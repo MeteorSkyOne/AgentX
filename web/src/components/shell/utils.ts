@@ -44,11 +44,18 @@ export function runWorkspaceOptions(
 }
 
 export function defaultAgentInstructionPath(kind?: string): string {
-  return kind === "claude" ? "CLAUDE.md" : "AGENTS.md";
+  return kind === "claude" || kind === "claude-persistent"
+    ? "CLAUDE.md"
+    : "AGENTS.md";
 }
 
 export function isProviderLimitAgent(kind?: string): boolean {
-  return kind === "codex" || kind === "claude";
+  return (
+    kind === "codex" ||
+    kind === "claude" ||
+    kind === "codex-persistent" ||
+    kind === "claude-persistent"
+  );
 }
 
 export function blurActiveElement() {
@@ -144,15 +151,19 @@ export function conversationSubtitle(
 }
 
 export function agentToneColor(kind: string): string {
-  if (kind === "codex") return "text-[oklch(0.7_0.2_145)]";
-  if (kind === "claude") return "text-[oklch(0.75_0.15_50)]";
+  if (kind === "codex" || kind === "codex-persistent")
+    return "text-[oklch(0.7_0.2_145)]";
+  if (kind === "claude" || kind === "claude-persistent")
+    return "text-[oklch(0.75_0.15_50)]";
   return "text-muted-foreground";
 }
 
 export function agentKindLabel(kind: string): string {
   switch (kind) {
     case "codex": return "Codex";
+    case "codex-persistent": return "Codex (persistent)";
     case "claude": return "Claude Code";
+    case "claude-persistent": return "Claude Code (persistent)";
     case "fake": return "Fake runtime";
     default: return kind || "Agent";
   }

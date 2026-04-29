@@ -218,9 +218,9 @@ func (s *providerLimitService) fetch(ctx context.Context, agent domain.Agent, fe
 		provider = domain.AgentKindFake
 	}
 	switch provider {
-	case domain.AgentKindCodex:
+	case domain.AgentKindCodex, domain.AgentKindCodexPersistent:
 		return s.fetchCodex(ctx, agent, fetchedAt)
-	case domain.AgentKindClaude:
+	case domain.AgentKindClaude, domain.AgentKindClaudePersistent:
 		return s.fetchClaude(ctx, agent, fetchedAt)
 	default:
 		result := s.baseResult(agent, provider, fetchedAt)

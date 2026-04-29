@@ -1,0 +1,312 @@
+package claudepersist
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/meteorsky/agentx/internal/runtime"
+	"github.com/meteorsky/agentx/internal/runtime/claude"
+	"github.com/meteorsky/agentx/internal/runtime/procpool"
+)
+
+type persistentSession struct {
+	process *procpool.ManagedProcess
+	key     string
+	rt      *Runtime
+	events  chan runtime.Event
+
+	mu        sync.Mutex
+	sessionID string
+	alive     bool
+	started   bool
+	turnHeld  bool
+	done      chan struct{}
+	closeOnce sync.Once
+}
+
+func newPersistentSession(proc *procpool.ManagedProcess, key string, rt *Runtime) *persistentSession {
+	fallbackID := "claude:" + key
+	return &persistentSession{
+		process:   proc,
+		key:       key,
+		rt:        rt,
+		events:    make(chan runtime.Event, 64),
+		sessionID: fallbackID,
+		alive:     true,
+		done:      make(chan struct{}),
+	}
+}
+
+func (s *persistentSession) waitForSystemEvent(ctx context.Context) {
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case line, ok := <-s.process.StdoutLines():
+			if !ok {
+				return
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(line, &payload); err != nil {
+				continue
+			}
+			if claude.StringValue(payload, "type") == "system" {
+				if id := claude.StringValue(payload, "session_id"); id != "" {
+					s.mu.Lock()
+					s.sessionID = id
+					s.mu.Unlock()
+				}
+				return
+			}
+		case <-timeout:
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (s *persistentSession) Send(ctx context.Context, input runtime.Input) error {
+	s.mu.Lock()
+	if !s.alive {
+		s.mu.Unlock()
+		return procpool.ErrProcessDead
+	}
+	if s.started {
+		s.mu.Unlock()
+		return nil
+	}
+	s.started = true
+	s.mu.Unlock()
+
+	if err := s.process.AcquireTurn(ctx); err != nil {
+		s.emitFailed(err.Error())
+		return nil
+	}
+	s.mu.Lock()
+	s.turnHeld = true
+	s.mu.Unlock()
+
+	msg, err := buildUserMessage(input)
+	if err != nil {
+		s.releaseTurn()
+		s.emitFailed(err.Error())
+		return nil
+	}
+
+	if err := s.process.WriteJSON(msg); err != nil {
+		s.releaseTurn()
+		s.emitFailed(err.Error())
+		return nil
+	}
+
+	go s.readEvents(ctx)
+	return nil
+}
+
+func (s *persistentSession) Events() <-chan runtime.Event {
+	return s.events
+}
+
+func (s *persistentSession) CurrentSessionID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessionID
+}
+
+func (s *persistentSession) Alive() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.alive
+}
+
+func (s *persistentSession) Close(ctx context.Context) error {
+	s.mu.Lock()
+	s.alive = false
+	turnHeld := s.turnHeld
+	s.turnHeld = false
+	s.mu.Unlock()
+
+	if turnHeld {
+		s.process.ReleaseTurn()
+	}
+	s.closeOnce.Do(func() {
+		close(s.done)
+		close(s.events)
+	})
+	return nil
+}
+
+func (s *persistentSession) readEvents(ctx context.Context) {
+	defer func() {
+		s.releaseTurn()
+		s.mu.Lock()
+		s.alive = false
+		s.mu.Unlock()
+		s.closeOnce.Do(func() {
+			close(s.done)
+			close(s.events)
+		})
+	}()
+
+	var textBuf strings.Builder
+	for {
+		select {
+		case <-ctx.Done():
+			s.emit(runtime.Event{Type: runtime.EventFailed, Error: ctx.Err().Error()})
+			return
+		case <-s.process.Done():
+			stderr := s.process.Stderr()
+			errText := "persistent process exited"
+			if stderr != "" {
+				errText = stderr
+			}
+			s.emit(runtime.Event{Type: runtime.EventFailed, Error: errText, StaleSession: claude.IsStaleSessionError(errText)})
+			return
+		case line, ok := <-s.process.StdoutLines():
+			if !ok {
+				if text := textBuf.String(); text != "" {
+					s.emit(runtime.Event{Type: runtime.EventCompleted, Text: text})
+				} else {
+					s.emit(runtime.Event{Type: runtime.EventFailed, Error: "stdout closed"})
+				}
+				return
+			}
+			terminal := s.handleLine(line, &textBuf)
+			if terminal {
+				return
+			}
+		}
+	}
+}
+
+func (s *persistentSession) handleLine(line []byte, textBuf *strings.Builder) bool {
+	var payload map[string]any
+	if err := json.Unmarshal(line, &payload); err != nil {
+		text := strings.TrimSpace(string(line))
+		if text != "" {
+			textBuf.WriteString(text)
+			s.emit(runtime.Event{Type: runtime.EventDelta, Text: text})
+		}
+		return false
+	}
+
+	if id := claude.StringValue(payload, "session_id"); id != "" {
+		s.mu.Lock()
+		s.sessionID = id
+		s.mu.Unlock()
+	}
+
+	switch claude.StringValue(payload, "type") {
+	case "system":
+		return false
+
+	case "assistant":
+		text, thinking, process := claude.AssistantContent(payload)
+		if text == "" && thinking == "" && len(process) == 0 {
+			return false
+		}
+		if text != "" {
+			textBuf.WriteString(text)
+		}
+		s.emit(runtime.Event{Type: runtime.EventDelta, Text: text, Thinking: thinking, Process: process})
+		return false
+
+	case "result":
+		if claude.IsErrorResult(payload) {
+			errText := claude.ResultError(payload)
+			s.emit(runtime.Event{Type: runtime.EventFailed, Error: errText, StaleSession: claude.IsStaleSessionError(errText)})
+			return true
+		}
+		text := claude.StringValue(payload, "result")
+		if text == "" {
+			text = textBuf.String()
+		}
+		s.emit(runtime.Event{Type: runtime.EventCompleted, Text: text, Usage: claude.ClaudeUsage(payload)})
+		return true
+
+	case "control_request":
+		s.handleControlRequest(payload)
+		return false
+
+	default:
+		return false
+	}
+}
+
+func (s *persistentSession) emit(evt runtime.Event) {
+	select {
+	case <-s.done:
+	case s.events <- evt:
+	}
+}
+
+func (s *persistentSession) emitFailed(errText string) {
+	s.emit(runtime.Event{Type: runtime.EventFailed, Error: errText})
+	s.mu.Lock()
+	s.alive = false
+	s.mu.Unlock()
+	s.closeOnce.Do(func() {
+		close(s.done)
+		close(s.events)
+	})
+}
+
+func (s *persistentSession) releaseTurn() {
+	s.mu.Lock()
+	held := s.turnHeld
+	s.turnHeld = false
+	s.mu.Unlock()
+	if held {
+		s.process.ReleaseTurn()
+	}
+}
+
+func buildUserMessage(input runtime.Input) (map[string]any, error) {
+	if claude.HasImageAttachments(input) {
+		stdinBytes, err := claude.StreamJSONInput(input)
+		if err != nil {
+			return nil, err
+		}
+		var msg map[string]any
+		if err := json.Unmarshal(stdinBytes, &msg); err != nil {
+			return nil, err
+		}
+		return msg, nil
+	}
+	return map[string]any{
+		"type": "user",
+		"message": map[string]any{
+			"role": "user",
+			"content": []any{
+				map[string]any{
+					"type": "text",
+					"text": input.RenderedPrompt(),
+				},
+			},
+		},
+	}, nil
+}
+
+func (s *persistentSession) handleControlRequest(payload map[string]any) {
+	requestID := claude.StringValue(payload, "request_id")
+	if requestID == "" {
+		return
+	}
+	response := map[string]any{
+		"type": "control_response",
+		"response": map[string]any{
+			"subtype":    "success",
+			"request_id": requestID,
+			"response": map[string]any{
+				"behavior": "allow",
+			},
+		},
+	}
+	if err := s.process.WriteJSON(response); err != nil {
+		slog.Warn("claudepersist: failed to send permission response", "key", s.key, "error", err)
+	}
+}

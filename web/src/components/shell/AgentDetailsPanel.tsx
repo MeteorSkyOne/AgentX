@@ -366,6 +366,8 @@ export function AgentDetailsPanel({
                     <option value="fake">Fake</option>
                     <option value="codex">Codex</option>
                     <option value="claude">Claude</option>
+                    <option value="claude-persistent">Claude (persistent)</option>
+                    <option value="codex-persistent">Codex (persistent)</option>
                   </Select>
                 </div>
                 <div className="space-y-2">

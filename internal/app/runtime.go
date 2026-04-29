@@ -745,9 +745,9 @@ func runMetricScope(scope conversationScope) agentRunMetricScope {
 
 func providerForAgent(agent domain.Agent) string {
 	switch strings.TrimSpace(agent.Kind) {
-	case domain.AgentKindClaude:
+	case domain.AgentKindClaude, domain.AgentKindClaudePersistent:
 		return domain.AgentKindClaude
-	case domain.AgentKindCodex:
+	case domain.AgentKindCodex, domain.AgentKindCodexPersistent:
 		return domain.AgentKindCodex
 	case "", domain.AgentKindFake:
 		return domain.AgentKindFake

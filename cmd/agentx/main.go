@@ -24,7 +24,9 @@ import (
 	"github.com/meteorsky/agentx/internal/httpapi"
 	"github.com/meteorsky/agentx/internal/runtime"
 	"github.com/meteorsky/agentx/internal/runtime/claude"
+	"github.com/meteorsky/agentx/internal/runtime/claudepersist"
 	"github.com/meteorsky/agentx/internal/runtime/codex"
+	"github.com/meteorsky/agentx/internal/runtime/codexpersist"
 	"github.com/meteorsky/agentx/internal/runtime/fake"
 	sqlitestore "github.com/meteorsky/agentx/internal/store/sqlite"
 	"github.com/meteorsky/agentx/internal/webdist"
@@ -74,6 +76,36 @@ func main() {
 	}()
 
 	bus := eventbus.New()
+	runtimes := map[string]runtime.Runtime{
+		domain.AgentKindFake: fake.New(),
+		domain.AgentKindCodex: codex.New(codex.Options{
+			Command:          cfg.CodexCommand,
+			FullAuto:         cfg.CodexFullAuto,
+			BypassSandbox:    cfg.CodexBypassSandbox,
+			SkipGitRepoCheck: cfg.CodexSkipGitRepoCheck,
+		}),
+		domain.AgentKindClaude: claude.New(claude.Options{
+			Command:            cfg.ClaudeCommand,
+			PermissionMode:     cfg.ClaudePermissionMode,
+			AllowedTools:       cfg.ClaudeAllowedTools,
+			DisallowedTools:    cfg.ClaudeDisallowedTools,
+			AppendSystemPrompt: cfg.ClaudeAppendSystemText,
+		}),
+		domain.AgentKindClaudePersistent: claudepersist.New(claudepersist.Options{
+			Command:            cfg.ClaudeCommand,
+			PermissionMode:     cfg.ClaudePermissionMode,
+			AllowedTools:       cfg.ClaudeAllowedTools,
+			DisallowedTools:    cfg.ClaudeDisallowedTools,
+			AppendSystemPrompt: cfg.ClaudeAppendSystemText,
+			IdleTimeout:        time.Duration(cfg.ClaudePersistentIdleMinutes) * time.Minute,
+		}),
+		domain.AgentKindCodexPersistent: codexpersist.New(codexpersist.Options{
+			Command:     cfg.CodexCommand,
+			IdleTimeout: time.Duration(cfg.CodexPersistentIdleMinutes) * time.Minute,
+		}),
+	}
+	defer shutdownRuntimes(runtimes)
+
 	a := app.New(st, bus, app.Options{
 		AdminToken:        cfg.AdminToken,
 		DataDir:           cfg.DataDir,
@@ -87,22 +119,7 @@ func main() {
 			CodexCommand:  cfg.CodexCommand,
 			ClaudeCommand: cfg.ClaudeCommand,
 		},
-		Runtimes: map[string]runtime.Runtime{
-			domain.AgentKindFake: fake.New(),
-			domain.AgentKindCodex: codex.New(codex.Options{
-				Command:          cfg.CodexCommand,
-				FullAuto:         cfg.CodexFullAuto,
-				BypassSandbox:    cfg.CodexBypassSandbox,
-				SkipGitRepoCheck: cfg.CodexSkipGitRepoCheck,
-			}),
-			domain.AgentKindClaude: claude.New(claude.Options{
-				Command:            cfg.ClaudeCommand,
-				PermissionMode:     cfg.ClaudePermissionMode,
-				AllowedTools:       cfg.ClaudeAllowedTools,
-				DisallowedTools:    cfg.ClaudeDisallowedTools,
-				AppendSystemPrompt: cfg.ClaudeAppendSystemText,
-			}),
-		},
+		Runtimes: runtimes,
 	})
 	if err := printSetupTokenIfNeeded(ctx, os.Stdout, st.Users(), cfg.AdminToken); err != nil {
 		slog.Error("check setup status", "error", err)
@@ -373,4 +390,16 @@ func resolveWebDistDirFromExecutable(distDir string, executablePath func() (stri
 		}
 	}
 	return distDir
+}
+
+func shutdownRuntimes(runtimes map[string]runtime.Runtime) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for name, rt := range runtimes {
+		if s, ok := rt.(runtime.Shutdowner); ok {
+			if err := s.Shutdown(ctx); err != nil {
+				slog.Warn("runtime shutdown error", "runtime", name, "error", err)
+			}
+		}
+	}
 }

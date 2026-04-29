@@ -34,9 +34,11 @@ const (
 )
 
 const (
-	AgentKindFake   = "fake"
-	AgentKindCodex  = "codex"
-	AgentKindClaude = "claude"
+	AgentKindFake            = "fake"
+	AgentKindCodex           = "codex"
+	AgentKindClaude          = "claude"
+	AgentKindClaudePersistent = "claude-persistent"
+	AgentKindCodexPersistent  = "codex-persistent"
 )
 
 type ChannelType string

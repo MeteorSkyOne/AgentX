@@ -47,8 +47,10 @@ export function setAgentAvatar(agentID: string, data: AgentAvatarData | null): v
 }
 
 export function agentKindColor(kind: string): string {
-  if (kind === "codex") return "bg-[oklch(0.6_0.2_145)]";
-  if (kind === "claude") return "bg-[oklch(0.65_0.15_50)]";
+  if (kind === "codex" || kind === "codex-persistent")
+    return "bg-[oklch(0.6_0.2_145)]";
+  if (kind === "claude" || kind === "claude-persistent")
+    return "bg-[oklch(0.65_0.15_50)]";
   return "bg-primary";
 }
 

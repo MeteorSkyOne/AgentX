@@ -149,3 +149,7 @@ type Session interface {
 	Alive() bool
 	Close(ctx context.Context) error
 }
+
+type Shutdowner interface {
+	Shutdown(ctx context.Context) error
+}

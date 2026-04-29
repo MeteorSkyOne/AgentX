@@ -39,7 +39,9 @@ type Config struct {
 	ClaudePermissionMode   string
 	ClaudeAllowedTools     []string
 	ClaudeDisallowedTools  []string
-	ClaudeAppendSystemText string
+	ClaudeAppendSystemText        string
+	ClaudePersistentIdleMinutes   int
+	CodexPersistentIdleMinutes    int
 }
 
 type ServerSettings struct {
@@ -96,7 +98,9 @@ func FromEnv() Config {
 		ClaudePermissionMode:   getenv("AGENTX_CLAUDE_PERMISSION_MODE", "acceptEdits"),
 		ClaudeAllowedTools:     getenvList("AGENTX_CLAUDE_ALLOWED_TOOLS"),
 		ClaudeDisallowedTools:  getenvList("AGENTX_CLAUDE_DISALLOWED_TOOLS"),
-		ClaudeAppendSystemText: getenv("AGENTX_CLAUDE_APPEND_SYSTEM_PROMPT", ""),
+		ClaudeAppendSystemText:      getenv("AGENTX_CLAUDE_APPEND_SYSTEM_PROMPT", ""),
+		ClaudePersistentIdleMinutes: getenvInt("AGENTX_CLAUDE_PERSISTENT_IDLE_MINUTES", 30),
+		CodexPersistentIdleMinutes:  getenvInt("AGENTX_CODEX_PERSISTENT_IDLE_MINUTES", 30),
 	}
 }
 
@@ -250,6 +254,18 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func getenvInt(key string, fallback int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return v
 }
 
 func getenvBool(key string, fallback bool) bool {
