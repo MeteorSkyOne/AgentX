@@ -12,9 +12,11 @@ import {
 vi.mock("./WorkspaceFileEditor", () => ({
   WorkspaceFileEditor: ({
     controller,
+    className,
   }: {
     controller: WorkspaceFileBrowserController;
-  }) => <div data-testid="mock-workspace-file-editor">{controller.fileViewMode}</div>,
+    className?: string;
+  }) => <div className={className} data-testid="mock-workspace-file-editor">{controller.fileViewMode}</div>,
 }));
 
 afterEach(() => {
@@ -62,6 +64,12 @@ describe("WorkspaceFileEditorPane markdown controls", () => {
     expect(screen.getByTestId("mock-workspace-file-editor")).toBeTruthy();
   });
 
+  it("applies custom editor content spacing", () => {
+    render(<EditorPaneHarness filePath="README.md" editorClassName="md:mx-6" />);
+
+    expect(screen.getByTestId("mock-workspace-file-editor").className).toContain("md:mx-6");
+  });
+
 
   it("switches markdown view modes from the toolbar", async () => {
     render(<EditorPaneHarness filePath="README.md" />);
@@ -94,11 +102,13 @@ function EditorPaneHarness({
   toolbarEnd,
   headerCollapsed,
   headerControlsPlacement,
+  editorClassName,
 }: {
   filePath: string;
   toolbarEnd?: ReactNode;
   headerCollapsed?: boolean;
   headerControlsPlacement?: "pane" | "external";
+  editorClassName?: string;
 }) {
   const [mode, setMode] = useState<WorkspaceFileViewMode>("edit");
   const [collapsed, setCollapsed] = useState(headerCollapsed ?? false);
@@ -112,6 +122,7 @@ function EditorPaneHarness({
       theme="dark"
       contentAriaLabel="File content"
       toolbarEnd={toolbarEnd}
+      editorClassName={editorClassName}
       headerCollapsed={headerCollapsed === undefined ? undefined : collapsed}
       onHeaderCollapsedChange={headerCollapsed === undefined ? undefined : setCollapsed}
       headerControlsPlacement={headerControlsPlacement}

@@ -954,6 +954,7 @@ export function WorkspaceFileEditorPane({
   title = "Project file",
   contentAriaLabel = "Project file editor",
   className,
+  editorClassName,
   toolbarEnd,
   headerCollapsed: controlledHeaderCollapsed,
   onHeaderCollapsedChange,
@@ -964,6 +965,7 @@ export function WorkspaceFileEditorPane({
   title?: string;
   contentAriaLabel?: string;
   className?: string;
+  editorClassName?: string;
   toolbarEnd?: ReactNode;
   headerCollapsed?: boolean;
   onHeaderCollapsedChange?: (collapsed: boolean) => void;
@@ -1047,7 +1049,7 @@ export function WorkspaceFileEditorPane({
           controller={controller}
           theme={theme}
           contentAriaLabel={contentAriaLabel}
-          className="min-h-0 flex-1"
+          className={cn("min-h-0 flex-1", editorClassName)}
         />
       </div>
       <WorkspaceFileDeleteDialog

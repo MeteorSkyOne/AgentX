@@ -69,8 +69,14 @@ vi.mock("./WorkspaceFileBrowser", () => ({
   WorkspaceFileTreePane: ({ toolbarEnd }: { toolbarEnd?: ReactNode }) => (
     <div data-testid="project-file-tree-pane">{toolbarEnd}</div>
   ),
-  WorkspaceFileEditorPane: ({ toolbarEnd }: { toolbarEnd?: ReactNode }) => (
-    <div data-testid="project-file-editor-pane">{toolbarEnd}</div>
+  WorkspaceFileEditorPane: ({
+    toolbarEnd,
+    editorClassName,
+  }: {
+    toolbarEnd?: ReactNode;
+    editorClassName?: string;
+  }) => (
+    <div data-editor-class-name={editorClassName} data-testid="project-file-editor-pane">{toolbarEnd}</div>
   ),
 }));
 
@@ -122,7 +128,7 @@ describe("Shell project files overlay", () => {
 
     expect(screen.queryByTestId("project-file-tree-pane")).toBeNull();
     expect(screen.getByRole("button", { name: "Show project file tree" })).toBeTruthy();
-    expect(screen.getByTestId("project-file-editor-pane")).toBeTruthy();
+    expect(screen.getByTestId("project-file-editor-pane").getAttribute("data-editor-class-name")).toBe("md:mx-6");
 
     fireEvent.click(screen.getByRole("button", { name: "Show project file tree" }));
 

@@ -1648,6 +1648,7 @@ export function Shell({
                 controller={projectFilesController}
                 theme={theme}
                 contentAriaLabel="Project file editor"
+                editorClassName="md:mx-6"
                 toolbarEnd={
                   <Button
                     variant="ghost"
