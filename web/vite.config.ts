@@ -4,6 +4,7 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 const cdnImports: Record<string, string> = {
+  "@monaco-editor/react": "https://esm.sh/@monaco-editor/react@4.7.0?bundle&external=react",
   react: "https://esm.sh/react@19.2.5",
   "react/jsx-runtime": "https://esm.sh/react@19.2.5/jsx-runtime",
   "react-dom": "https://esm.sh/react-dom@19.2.5?bundle&external=react",
@@ -11,6 +12,7 @@ const cdnImports: Record<string, string> = {
   "@tanstack/react-query": "https://esm.sh/@tanstack/react-query@5.100.5?bundle&external=react",
   "@radix-ui/react-avatar": "https://esm.sh/@radix-ui/react-avatar@1.1.11?bundle&external=react,react-dom",
   "@radix-ui/react-collapsible": "https://esm.sh/@radix-ui/react-collapsible@1.1.12?bundle&external=react,react-dom",
+  "@radix-ui/react-context-menu": "https://esm.sh/@radix-ui/react-context-menu@2.2.16?bundle&external=react,react-dom",
   "@radix-ui/react-dialog": "https://esm.sh/@radix-ui/react-dialog@1.1.15?bundle&external=react,react-dom",
   "@radix-ui/react-label": "https://esm.sh/@radix-ui/react-label@2.1.8?bundle&external=react,react-dom",
   "@radix-ui/react-scroll-area": "https://esm.sh/@radix-ui/react-scroll-area@1.2.10?bundle&external=react,react-dom",
@@ -57,6 +59,14 @@ const cdnImportPrefixes: Record<string, string> = {
   "react-dom/": "https://esm.sh/react-dom@19.2.5/"
 };
 
+function normalizeAssetBase(base: string | undefined) {
+  const value = base?.trim();
+  if (!value) return "/";
+  return value.endsWith("/") ? value : `${value}/`;
+}
+
+const assetBase = normalizeAssetBase(process.env.AGENTX_WEB_ASSET_BASE);
+
 function isCdnExternal(id: string) {
   return (
     Object.prototype.hasOwnProperty.call(cdnImports, id) ||
@@ -82,6 +92,7 @@ function cdnImportMapPlugin(): Plugin {
 }
 
 export default defineConfig({
+  base: assetBase,
   plugins: [react(), cdnImportMapPlugin()],
   build: {
     rolldownOptions: {
