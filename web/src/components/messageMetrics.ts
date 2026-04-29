@@ -2,7 +2,7 @@ import type { MessageMetricsSummary, UserPreferences } from "../api/types";
 
 export function messageMetricsParts(
   metrics: MessageMetricsSummary | undefined,
-  preferences: UserPreferences
+  preferences: Pick<UserPreferences, "show_ttft" | "show_tps">
 ): string[] {
   if (!metrics) {
     return [];

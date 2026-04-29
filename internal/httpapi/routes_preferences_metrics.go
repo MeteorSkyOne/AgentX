@@ -12,8 +12,9 @@ import (
 )
 
 type userPreferencesUpdateRequest struct {
-	ShowTTFT *bool `json:"show_ttft"`
-	ShowTPS  *bool `json:"show_tps"`
+	ShowTTFT    *bool `json:"show_ttft"`
+	ShowTPS     *bool `json:"show_tps"`
+	HideAvatars *bool `json:"hide_avatars"`
 }
 
 func (s *Server) handleUserPreferences(w http.ResponseWriter, r *http.Request) {
@@ -45,10 +46,20 @@ func (s *Server) handleUpdateUserPreferences(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "missing preference")
 		return
 	}
+	hideAvatars := false
+	if req.HideAvatars != nil {
+		hideAvatars = *req.HideAvatars
+	} else if current, err := s.app.UserPreferences(r.Context(), userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	} else {
+		hideAvatars = current.HideAvatars
+	}
 	preferences, err := s.app.UpdateUserPreferences(r.Context(), domain.UserPreferences{
-		UserID:   userID,
-		ShowTTFT: *req.ShowTTFT,
-		ShowTPS:  *req.ShowTPS,
+		UserID:      userID,
+		ShowTTFT:    *req.ShowTTFT,
+		ShowTPS:     *req.ShowTPS,
+		HideAvatars: hideAvatars,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal server error")

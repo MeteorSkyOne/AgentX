@@ -512,20 +512,22 @@ func TestUserPreferencesDefaultTableUpsert(t *testing.T) {
 		t.Fatalf("ByUser error = %v, want sql.ErrNoRows", err)
 	}
 	if err := st.UserPreferences().Upsert(ctx, domain.UserPreferences{
-		UserID:    user.ID,
-		ShowTTFT:  false,
-		ShowTPS:   true,
-		CreatedAt: now,
-		UpdatedAt: now,
+		UserID:      user.ID,
+		ShowTTFT:    false,
+		ShowTPS:     true,
+		HideAvatars: false,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.UserPreferences().Upsert(ctx, domain.UserPreferences{
-		UserID:    user.ID,
-		ShowTTFT:  true,
-		ShowTPS:   false,
-		CreatedAt: now.Add(-time.Hour),
-		UpdatedAt: now.Add(time.Minute),
+		UserID:      user.ID,
+		ShowTTFT:    true,
+		ShowTPS:     false,
+		HideAvatars: true,
+		CreatedAt:   now.Add(-time.Hour),
+		UpdatedAt:   now.Add(time.Minute),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -533,7 +535,7 @@ func TestUserPreferencesDefaultTableUpsert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.ShowTTFT || got.ShowTPS {
+	if !got.ShowTTFT || got.ShowTPS || !got.HideAvatars {
 		t.Fatalf("preferences = %#v", got)
 	}
 	if !got.CreatedAt.Equal(now) || !got.UpdatedAt.Equal(now.Add(time.Minute)) {

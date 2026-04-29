@@ -83,10 +83,10 @@ func scanUserPreferences(scanner interface {
 	Scan(dest ...any) error
 }) (domain.UserPreferences, error) {
 	var preferences domain.UserPreferences
-	var showTTFT, showTPS int
+	var showTTFT, showTPS, hideAvatars int
 	var createdAt, updatedAt string
 	if err := scanner.Scan(
-		&preferences.UserID, &showTTFT, &showTPS, &createdAt, &updatedAt,
+		&preferences.UserID, &showTTFT, &showTPS, &hideAvatars, &createdAt, &updatedAt,
 	); err != nil {
 		return domain.UserPreferences{}, err
 	}
@@ -101,6 +101,7 @@ func scanUserPreferences(scanner interface {
 	}
 	preferences.ShowTTFT = showTTFT != 0
 	preferences.ShowTPS = showTPS != 0
+	preferences.HideAvatars = hideAvatars != 0
 	return preferences, nil
 }
 

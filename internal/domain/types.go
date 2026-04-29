@@ -72,11 +72,12 @@ type NotificationSettings struct {
 }
 
 type UserPreferences struct {
-	UserID    string    `json:"-"`
-	ShowTTFT  bool      `json:"show_ttft"`
-	ShowTPS   bool      `json:"show_tps"`
-	CreatedAt time.Time `json:"-"`
-	UpdatedAt time.Time `json:"-"`
+	UserID      string    `json:"-"`
+	ShowTTFT    bool      `json:"show_ttft"`
+	ShowTPS     bool      `json:"show_tps"`
+	HideAvatars bool      `json:"hide_avatars"`
+	CreatedAt   time.Time `json:"-"`
+	UpdatedAt   time.Time `json:"-"`
 }
 
 type Project struct {

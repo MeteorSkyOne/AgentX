@@ -3,7 +3,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import type { ConversationAgentContext, Message, ProcessItem } from "@/api/types";
+import type { ConversationAgentContext, Message, ProcessItem, UserPreferences } from "@/api/types";
 import type { WorkspacePathTarget } from "@/lib/workspacePaths";
 import { fetchMessageProcessItem } from "../api/client";
 
@@ -244,6 +244,25 @@ describe("MessagePane process details", () => {
   });
 });
 
+describe("MessagePane avatar density", () => {
+  it("hides persisted and streaming message avatars when enabled", async () => {
+    const { container } = await renderMessagePane({
+      messages: [
+        message({ id: "user-message", sender_type: "user", body: "user body" }),
+        message({ id: "bot-message", sender_type: "bot", sender_id: "bot-1", body: "bot body" }),
+      ],
+      streaming: [{ runID: "run-1", agentID: "agent-1", text: "streaming body" }],
+      preferences: { show_ttft: false, show_tps: false, hide_avatars: true },
+      onOpenWorkspacePath: () => undefined,
+    });
+
+    expect(container.textContent).toContain("user body");
+    expect(container.textContent).toContain("bot body");
+    expect(container.textContent).toContain("streaming body");
+    expect(container.querySelector('[data-slot="avatar"]')).toBeNull();
+  });
+});
+
 describe("isTextAttachmentPreviewSupported", () => {
   it("previews text attachments in the readonly editor", () => {
     expect(
@@ -301,6 +320,7 @@ describe("nextImagePreviewPan", () => {
 async function renderMessagePane({
   messages,
   streaming,
+  preferences = { show_ttft: false, show_tps: false, hide_avatars: false },
   onOpenWorkspacePath,
 }: {
   messages: Message[];
@@ -311,6 +331,7 @@ async function renderMessagePane({
     error?: string;
     process?: ProcessItem[];
   }>;
+  preferences?: UserPreferences;
   onOpenWorkspacePath: (target: WorkspacePathTarget) => void;
 }): Promise<{ container: HTMLDivElement }> {
   const container = document.createElement("div");
@@ -327,7 +348,7 @@ async function renderMessagePane({
         hasOlderMessages: false,
         streaming,
         agents: [agentContext()],
-        preferences: { show_ttft: false, show_tps: false },
+        preferences,
         theme: "light",
         onUpdateMessage: async (_messageID: string, body: string) => message({ body }),
         onDeleteMessage: async () => undefined,

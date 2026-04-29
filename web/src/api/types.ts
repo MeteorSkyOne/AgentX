@@ -121,6 +121,7 @@ export interface ServerSettingsUpdatePayload {
 export interface UserPreferences {
   show_ttft: boolean;
   show_tps: boolean;
+  hide_avatars: boolean;
 }
 
 export type MetricsProvider = "claude" | "codex" | "fake";

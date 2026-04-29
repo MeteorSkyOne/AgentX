@@ -26,7 +26,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { WorkspacePathTarget } from "@/lib/workspacePaths";
 import { ChannelList } from "./ChannelList";
-import type { Channel } from "../api/types";
+import type { Channel, UserPreferences } from "../api/types";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -210,6 +210,7 @@ export function Shell({
   const [webhookSecret, setWebhookSecret] = useState("");
   const [showTTFT, setShowTTFT] = useState(preferences.show_ttft);
   const [showTPS, setShowTPS] = useState(preferences.show_tps);
+  const [hideAvatars, setHideAvatars] = useState(preferences.hide_avatars);
   const [notificationActionError, setNotificationActionError] = useState<string | null>(null);
   const [notificationActionStatus, setNotificationActionStatus] = useState<string | null>(null);
   const [notificationSavePending, setNotificationSavePending] = useState(false);
@@ -358,7 +359,8 @@ export function Shell({
     serverSettings?.tls.cert_file,
     serverSettings?.tls.key_file,
     preferences.show_ttft,
-    preferences.show_tps
+    preferences.show_tps,
+    preferences.hide_avatars
   ]);
 
   async function submitProject() {
@@ -477,12 +479,14 @@ export function Shell({
   function syncPreferenceDraft() {
     setShowTTFT(preferences.show_ttft);
     setShowTPS(preferences.show_tps);
+    setHideAvatars(preferences.hide_avatars);
     setPreferencesError(null);
   }
 
-  async function saveMetricDisplayPreferences(next: { show_ttft: boolean; show_tps: boolean }) {
+  async function saveUserPreferences(next: UserPreferences) {
     setShowTTFT(next.show_ttft);
     setShowTPS(next.show_tps);
+    setHideAvatars(next.hide_avatars);
     setPreferencesError(null);
     setPreferencesPending(true);
     try {
@@ -490,6 +494,7 @@ export function Shell({
     } catch (err) {
       setShowTTFT(preferences.show_ttft);
       setShowTPS(preferences.show_tps);
+      setHideAvatars(preferences.hide_avatars);
       setPreferencesError(err instanceof Error ? err.message : "Save preferences failed");
     } finally {
       setPreferencesPending(false);
@@ -904,7 +909,7 @@ export function Shell({
           </div>
         )}
 
-        <div className="relative min-h-0 flex-1">
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {mainView === "metrics" ? (
             <MetricsPanel
               project={project}
@@ -1683,6 +1688,29 @@ export function Shell({
             </div>
             <div className="grid gap-3 rounded-md border border-border p-3">
               <div>
+                <h3 className="text-sm font-medium">Message layout</h3>
+                <p className="text-xs text-muted-foreground">
+                  {preferencesPending ? "Saving" : "Controls chat density"}
+                </p>
+              </div>
+              <label className="flex items-center justify-between gap-4 text-sm">
+                <span>Hide avatars</span>
+                <Switch
+                  checked={hideAvatars}
+                  disabled={preferencesLoading || preferencesPending}
+                  aria-label="Hide avatars"
+                  onCheckedChange={(checked) =>
+                    void saveUserPreferences({
+                      show_ttft: showTTFT,
+                      show_tps: showTPS,
+                      hide_avatars: checked,
+                    })
+                  }
+                />
+              </label>
+            </div>
+            <div className="grid gap-3 rounded-md border border-border p-3">
+              <div>
                 <h3 className="text-sm font-medium">Message metrics</h3>
                 <p className="text-xs text-muted-foreground">
                   {preferencesPending ? "Saving" : "Shown under bot replies"}
@@ -1695,7 +1723,11 @@ export function Shell({
                   disabled={preferencesLoading || preferencesPending}
                   aria-label="Show TTFT"
                   onCheckedChange={(checked) =>
-                    void saveMetricDisplayPreferences({ show_ttft: checked, show_tps: showTPS })
+                    void saveUserPreferences({
+                      show_ttft: checked,
+                      show_tps: showTPS,
+                      hide_avatars: hideAvatars,
+                    })
                   }
                 />
               </label>
@@ -1706,7 +1738,11 @@ export function Shell({
                   disabled={preferencesLoading || preferencesPending}
                   aria-label="Show TPS"
                   onCheckedChange={(checked) =>
-                    void saveMetricDisplayPreferences({ show_ttft: showTTFT, show_tps: checked })
+                    void saveUserPreferences({
+                      show_ttft: showTTFT,
+                      show_tps: checked,
+                      hide_avatars: hideAvatars,
+                    })
                   }
                 />
               </label>

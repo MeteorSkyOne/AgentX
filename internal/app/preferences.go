@@ -32,6 +32,7 @@ func (a *App) UpdateUserPreferences(ctx context.Context, preferences domain.User
 	}
 	current.ShowTTFT = preferences.ShowTTFT
 	current.ShowTPS = preferences.ShowTPS
+	current.HideAvatars = preferences.HideAvatars
 	current.UpdatedAt = now
 	if current.CreatedAt.IsZero() {
 		current.CreatedAt = now
@@ -45,10 +46,11 @@ func (a *App) UpdateUserPreferences(ctx context.Context, preferences domain.User
 func defaultUserPreferences(userID string) domain.UserPreferences {
 	now := time.Now().UTC()
 	return domain.UserPreferences{
-		UserID:    userID,
-		ShowTTFT:  true,
-		ShowTPS:   true,
-		CreatedAt: now,
-		UpdatedAt: now,
+		UserID:      userID,
+		ShowTTFT:    true,
+		ShowTPS:     true,
+		HideAvatars: false,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 }

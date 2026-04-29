@@ -174,7 +174,7 @@ function shellProps(): ShellProps {
     notificationSettingsLoading: false,
     serverSettingsLoading: false,
     serverSettingsError: null,
-    preferences: { show_ttft: true, show_tps: true },
+    preferences: { show_ttft: true, show_tps: true, hide_avatars: false },
     preferencesLoading: false,
     theme: "dark",
     onSelectProject: vi.fn(),

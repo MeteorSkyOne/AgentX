@@ -250,6 +250,7 @@ export function MessagePane({
                 agentName={agent?.name}
                 agentKind={agent?.kind}
                 agentID={agent?.id}
+                hideAvatar={preferences.hide_avatars}
                 workspacePath={workspacePath}
                 onOpenWorkspacePath={onOpenWorkspacePath}
               />
@@ -493,6 +494,7 @@ function ConversationMessageItem({
   const initial = label.charAt(0).toUpperCase();
   const process = isBot ? processFromMetadata(message.metadata) : [];
   const metricsParts = isBot ? messageMetricsParts(message.metadata?.metrics, preferences) : [];
+  const hideAvatar = preferences.hide_avatars;
 
   useEffect(() => {
     if (!editing) {
@@ -557,12 +559,14 @@ function ConversationMessageItem({
       className="group flex min-w-0 max-w-full gap-3 rounded-md px-1 py-1 hover:bg-accent/30 md:gap-4 md:px-2"
       data-message-id={message.id}
     >
-      {isBot && agentID ? (
-        <AgentAvatar agentID={agentID} kind={agentKind ?? "fake"} size="md" className="shrink-0" />
-      ) : (
-        <Avatar className="h-10 w-10 shrink-0">
-          <AvatarFallback className="text-sm">{initial}</AvatarFallback>
-        </Avatar>
+      {!hideAvatar && (
+        isBot && agentID ? (
+          <AgentAvatar agentID={agentID} kind={agentKind ?? "fake"} size="md" className="shrink-0" />
+        ) : (
+          <Avatar className="h-10 w-10 shrink-0">
+            <AvatarFallback className="text-sm">{initial}</AvatarFallback>
+          </Avatar>
+        )
       )}
 
       <div className="min-w-0 flex-1 select-text space-y-1">
@@ -1281,6 +1285,7 @@ function StreamingItem({
   agentName,
   agentKind,
   agentID,
+  hideAvatar,
   workspacePath,
   onOpenWorkspacePath,
 }: {
@@ -1288,6 +1293,7 @@ function StreamingItem({
   agentName?: string;
   agentKind?: string;
   agentID?: string;
+  hideAvatar?: boolean;
   workspacePath?: string;
   onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
 }) {
@@ -1297,20 +1303,22 @@ function StreamingItem({
 
   return (
     <div className={cn("group flex min-w-0 max-w-full gap-3 rounded-md px-1 py-1 md:gap-4 md:px-2", isError && "opacity-70")}>
-      {isError ? (
-        <Avatar className="h-10 w-10 shrink-0">
-          <AvatarFallback className="text-white text-sm bg-destructive">
-            <CircleAlert className="h-5 w-5" />
-          </AvatarFallback>
-        </Avatar>
-      ) : agentID ? (
-        <AgentAvatar agentID={agentID} kind={agentKind ?? "fake"} size="md" className="shrink-0" />
-      ) : (
-        <Avatar className="h-10 w-10 shrink-0">
-          <AvatarFallback className={cn("text-white text-sm", agentKindColor(agentKind ?? "fake"))}>
-            <CircleAlert className="h-5 w-5" />
-          </AvatarFallback>
-        </Avatar>
+      {!hideAvatar && (
+        isError ? (
+          <Avatar className="h-10 w-10 shrink-0">
+            <AvatarFallback className="text-white text-sm bg-destructive">
+              <CircleAlert className="h-5 w-5" />
+            </AvatarFallback>
+          </Avatar>
+        ) : agentID ? (
+          <AgentAvatar agentID={agentID} kind={agentKind ?? "fake"} size="md" className="shrink-0" />
+        ) : (
+          <Avatar className="h-10 w-10 shrink-0">
+            <AvatarFallback className={cn("text-white text-sm", agentKindColor(agentKind ?? "fake"))}>
+              <CircleAlert className="h-5 w-5" />
+            </AvatarFallback>
+          </Avatar>
+        )
       )}
 
       <div className="min-w-0 flex-1 select-text space-y-1">

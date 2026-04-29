@@ -838,7 +838,7 @@ export default function App() {
       serverSettings={serverSettingsQuery.data}
       serverSettingsLoading={serverSettingsQuery.isLoading}
       serverSettingsError={serverSettingsQuery.error instanceof Error ? serverSettingsQuery.error.message : null}
-      preferences={userPreferencesQuery.data ?? { show_ttft: true, show_tps: true }}
+      preferences={userPreferencesQuery.data ?? { show_ttft: true, show_tps: true, hide_avatars: false }}
       preferencesLoading={userPreferencesQuery.isLoading}
       theme={theme}
       onSelectProject={handleSelectProject}

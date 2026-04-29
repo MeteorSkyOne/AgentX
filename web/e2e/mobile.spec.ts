@@ -96,6 +96,55 @@ test("mobile navigation, messaging, and side panels are usable", async ({ page }
   await expectNoHorizontalOverflow(page);
 });
 
+test("mobile chat keeps composer visible and message pane scrollable with very long messages", async ({ page }, testInfo) => {
+  await signInMobile(page);
+
+  const marker = uniqueName(testInfo, "mobile long scroll");
+  const messageText = Array.from({ length: 90 }, (_, index) => {
+    const line = String(index + 1).padStart(2, "0");
+    return `${marker} line ${line} ${"message content ".repeat(8)}`;
+  }).join("\n");
+
+  const composer = page.getByRole("textbox", { name: "Message" });
+  await composer.fill(messageText);
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const messages = page.getByLabel("Messages");
+  const viewport = messages.locator('[data-slot="scroll-area-viewport"]');
+  await expect(messages).toContainText(`Echo: ${marker}`);
+  await expect(composer).toHaveValue("");
+  await expect(composer).toBeInViewport({ ratio: 1 });
+
+  await expect
+    .poll(() => viewport.evaluate((node) => node.scrollHeight - node.clientHeight))
+    .toBeGreaterThan(0);
+
+  await viewport.evaluate((node) => {
+    node.scrollTop = 0;
+  });
+  await expect.poll(() => viewport.evaluate((node) => node.scrollTop)).toBe(0);
+  await expect(composer).toBeInViewport({ ratio: 1 });
+
+  await viewport.evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  await expect
+    .poll(() =>
+      viewport.evaluate((node) => {
+        const maxScrollTop = node.scrollHeight - node.clientHeight;
+        return maxScrollTop > 0 && node.scrollTop >= maxScrollTop - 2;
+      })
+    )
+    .toBe(true);
+  await expect(composer).toBeInViewport({ ratio: 1 });
+
+  const followUp = uniqueName(testInfo, "after long mobile");
+  await composer.fill(followUp);
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(messages.getByText(followUp, { exact: true })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+});
+
 test("mobile messages can be copied", async ({ page, context }, testInfo) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await signInMobile(page);

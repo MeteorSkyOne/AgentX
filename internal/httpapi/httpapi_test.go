@@ -425,14 +425,15 @@ func TestHTTPPreferencesAndMetricsEndpoints(t *testing.T) {
 
 	var preferences map[string]bool
 	getJSON(t, ts.URL+"/api/me/preferences", bootstrap.SessionToken, http.StatusOK, &preferences)
-	if !preferences["show_ttft"] || !preferences["show_tps"] {
+	if !preferences["show_ttft"] || !preferences["show_tps"] || preferences["hide_avatars"] {
 		t.Fatalf("default preferences = %#v", preferences)
 	}
 	putJSON(t, ts.URL+"/api/me/preferences", bootstrap.SessionToken, map[string]bool{
-		"show_ttft": false,
-		"show_tps":  true,
+		"show_ttft":    false,
+		"show_tps":     true,
+		"hide_avatars": true,
 	}, http.StatusOK, &preferences)
-	if preferences["show_ttft"] || !preferences["show_tps"] {
+	if preferences["show_ttft"] || !preferences["show_tps"] || !preferences["hide_avatars"] {
 		t.Fatalf("updated preferences = %#v", preferences)
 	}
 
