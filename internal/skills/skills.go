@@ -233,7 +233,14 @@ func discoverFilter(opts DiscoverOptions) (rootFilter, error) {
 }
 
 func scanRoot(root string, reserved map[string]struct{}, filter rootFilter) ([]Skill, error) {
-	info, err := os.Stat(root)
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	info, err := os.Stat(resolved)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
@@ -248,7 +255,7 @@ func scanRoot(root string, reserved map[string]struct{}, filter rootFilter) ([]S
 	}
 
 	var result []Skill
-	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(resolved, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			if errors.Is(walkErr, os.ErrPermission) {
 				if entry != nil && entry.IsDir() {
