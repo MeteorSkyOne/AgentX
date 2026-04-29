@@ -1,72 +1,60 @@
 # AgentX
 
-AgentX is a self-hosted AI coding agent management service for coordinating organizations, channels, conversations, and agent activity from a local web UI.
+A self-hosted AI coding agent management service. Coordinate multiple AI agents from a single web UI — organize work into projects and channels, route conversations to agents, and stream their output in real time.
 
-## Foundation MVP
+## Features
 
-- Go API server
-- SQLite persistence
-- First-run admin setup and password login
-- Organization and channel model
-- Message history
-- WebSocket event stream
-- React web client
-- Fake echo agent runtime
-- Codex CLI runtime adapter
-- Claude Code CLI runtime adapter
+- **Multi-agent management** — run Claude Code, Codex, or custom agents side-by-side in the same workspace
+- **Persistent agent sessions** — keep agent processes alive across turns to reduce startup overhead and preserve context
+- **Interactive tool calls** — agents can ask the user questions with selectable options (AskUserQuestion) surfaced directly in the chat UI
+- **Real-time streaming** — agent output, thinking, and tool calls streamed over WebSocket
+- **Workspace file browsing** — browse and edit agent working directories from the UI
+- **Slash commands** — `/new`, `/compact`, `/plan`, `/commit`, `/push`, `/review` and more, with `@agent` mention targeting
+- **Team coordination** — multi-agent collaboration with leader/worker phases and turn budgets
+- **Notifications** — webhook notifications with HMAC-SHA256 signing, plus browser native notifications
+- **TLS support** — optional HTTPS with cert/key configuration via UI or config file
 
-## Development
+## Agent Runtimes
 
-Start the full local stack:
+| Kind | Mode | Description |
+|------|------|-------------|
+| `fake` | Ephemeral | Echo agent for testing |
+| `claude` | Ephemeral | Claude Code CLI (`claude --print --output-format stream-json`) |
+| `codex` | Ephemeral | Codex CLI (`codex exec --json`) |
+| `claude-persistent` | Persistent | Long-lived Claude Code process with stream-json stdin/stdout and permission-prompt-tool |
+| `codex-persistent` | Persistent | Long-lived Codex app-server process with JSON-RPC 2.0 protocol |
+
+Persistent runtimes are managed by a process pool with turn-based coordination and configurable idle timeout (default 30 minutes).
+
+## Quick Start
 
 ```sh
 make dev
 ```
 
-This starts the API on `127.0.0.1:8080`, the web client on `127.0.0.1:5173`, and uses the setup token `dev-token` for the first admin account.
+Starts the API on `127.0.0.1:8080` and the web UI on `127.0.0.1:5173` with setup token `dev-token`.
 
-The frontend uses pnpm. If pnpm is not already available, enable Corepack once with `corepack enable`.
+Open `http://127.0.0.1:5173`, create an admin account using `dev-token`, then sign in.
 
-Run the backend only:
-
-```sh
-AGENTX_ADMIN_TOKEN=dev-token go run ./cmd/agentx
-```
-
-The API listens on `127.0.0.1:8080`.
-
-Choose the default runtime before the first setup:
+### Choosing an agent runtime
 
 ```sh
-AGENTX_ADMIN_TOKEN=dev-token AGENTX_DEFAULT_AGENT_KIND=codex go run ./cmd/agentx
-AGENTX_ADMIN_TOKEN=dev-token AGENTX_DEFAULT_AGENT_KIND=claude go run ./cmd/agentx
+AGENTX_DEFAULT_AGENT_KIND=claude make dev
+AGENTX_DEFAULT_AGENT_KIND=claude-persistent make dev
+AGENTX_DEFAULT_AGENT_KIND=codex-persistent make dev
 ```
 
-Codex uses `codex exec --json` and Claude Code uses `claude --print --output-format stream-json`. The CLI commands must already be installed and authenticated. Optional knobs:
-
-- `AGENTX_DEFAULT_AGENT_MODEL`
-- `AGENTX_CODEX_COMMAND`, `AGENTX_CODEX_FULL_AUTO`, `AGENTX_CODEX_BYPASS_SANDBOX`, `AGENTX_CODEX_SKIP_GIT_REPO_CHECK`
-- `AGENTX_CLAUDE_COMMAND`, `AGENTX_CLAUDE_PERMISSION_MODE`, `AGENTX_CLAUDE_ALLOWED_TOOLS`, `AGENTX_CLAUDE_DISALLOWED_TOOLS`, `AGENTX_CLAUDE_APPEND_SYSTEM_PROMPT`
-
-Run the web client:
-
-```sh
-cd web && pnpm install && pnpm run dev
-```
-
-Open `http://127.0.0.1:5173`, set up the admin account with setup token `dev-token`, then sign in with the username and password you chose.
+The CLI commands (`claude`, `codex`) must already be installed and authenticated.
 
 ## Production
-
-Build the web client, compile the Go server, and serve both from one process:
 
 ```sh
 make prod
 ```
 
-Production builds embed the generated web assets into the `agentx` binary, so the compiled server can be moved and run without a separate `web/dist` directory.
+Builds the frontend, embeds it into the Go binary, and starts the server. The compiled binary is self-contained.
 
-The production server listens on `127.0.0.1:8080` by default. On startup, AgentX creates `~/.agentx/config.toml` when it does not exist. Change the listening IP and port there:
+The server creates `~/.agentx/config.toml` on first run:
 
 ```toml
 [server]
@@ -80,38 +68,40 @@ cert_file = ""
 key_file = ""
 ```
 
-When TLS is enabled, AgentX serves HTTP on `server.listen_port` and HTTPS on `server.tls.listen_port`. TLS can also be managed from User settings in the web UI. HTTPS takes effect after restart. Set `AGENTX_ADDR` to override the config file HTTP address for a single run. Set `AGENTX_ADMIN_TOKEN` to use a stable first-run setup token; otherwise the script generates a token for the current run. When initial setup is still pending, the server prints the setup token to stdout only; it is not written to the startup log file.
+Set `AGENTX_ADDR` to override the listen address. Set `AGENTX_ADMIN_TOKEN` to use a stable setup token.
 
-Reset the local admin username and password directly against the configured SQLite database:
+### Reset admin password
 
 ```sh
-printf '%s\n' 'new-long-password' | agentx auth reset-admin --username admin --password-stdin
+printf '%s\n' 'new-password' | agentx auth reset-admin --username admin --password-stdin
 ```
+
+## Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENTX_ADDR` | 127.0.0.1:8080 | Server bind address (overrides config.toml) |
+| `AGENTX_ADMIN_TOKEN` | random | First-run setup token |
+| `AGENTX_DATA_DIR` | ~/.agentx | SQLite database and config location |
+| `AGENTX_DEFAULT_AGENT_KIND` | fake | Default runtime: `fake`, `claude`, `codex`, `claude-persistent`, `codex-persistent` |
+| `AGENTX_DEFAULT_AGENT_MODEL` | | Default model for new agents |
+| `AGENTX_CLAUDE_COMMAND` | claude | Claude CLI binary |
+| `AGENTX_CLAUDE_PERMISSION_MODE` | acceptEdits | Permission mode: `acceptEdits`, `bypassPermissions`, `plan` |
+| `AGENTX_CLAUDE_ALLOWED_TOOLS` | | Comma-separated allowed tool names |
+| `AGENTX_CLAUDE_DISALLOWED_TOOLS` | | Comma-separated disallowed tool names |
+| `AGENTX_CLAUDE_APPEND_SYSTEM_PROMPT` | | System prompt appended to all Claude sessions |
+| `AGENTX_CLAUDE_PERSISTENT_IDLE_MINUTES` | 30 | Idle timeout for persistent Claude processes |
+| `AGENTX_CODEX_COMMAND` | codex | Codex CLI binary |
+| `AGENTX_CODEX_FULL_AUTO` | true | Auto-approve Codex operations |
+| `AGENTX_CODEX_BYPASS_SANDBOX` | false | Bypass Codex sandbox |
+| `AGENTX_CODEX_SKIP_GIT_REPO_CHECK` | true | Skip git repo validation |
+| `AGENTX_CODEX_PERSISTENT_IDLE_MINUTES` | 30 | Idle timeout for persistent Codex processes |
 
 ## Tests
 
 ```sh
-go test ./...
-bash scripts/dev_test.sh
-cd web && pnpm test
-cd web && pnpm run build
+go test ./...                    # Go unit tests
+bash scripts/dev_test.sh         # Integration tests
+cd web && pnpm test              # Vitest frontend tests
+cd web && pnpm run e2e           # Playwright E2E (needs: pnpm exec playwright install chromium)
 ```
-
-Run the browser e2e smoke test:
-
-```sh
-cd web
-pnpm exec playwright install chromium
-pnpm run e2e
-```
-
-The e2e suite includes desktop and mobile viewport coverage. Optional diagnostic screenshots for AI-assisted UI review are available when needed and are not part of the default test command:
-
-```sh
-cd web
-pnpm run e2e:screenshots
-```
-
-Screenshots are written under `.agentx-screenshot/`, which is ignored by git.
-
-On Linux, Playwright may also need system browser libraries. Install them once with `pnpm exec playwright install-deps chromium` when the environment allows it.
