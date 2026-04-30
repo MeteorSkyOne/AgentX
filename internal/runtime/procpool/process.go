@@ -5,11 +5,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -27,6 +30,7 @@ type ManagedProcess struct {
 	stdoutLines chan []byte
 	done        chan struct{}
 	alive       atomic.Bool
+	turnHeld    atomic.Bool
 	lastUsedAt  atomic.Value
 
 	turnMu chan struct{}
@@ -91,22 +95,43 @@ func (mp *ManagedProcess) WriteJSON(v any) error {
 	if err != nil {
 		return err
 	}
-	mp.stdinMu.Lock()
-	defer mp.stdinMu.Unlock()
-	_, err = mp.stdin.Write(append(data, '\n'))
-	return err
+	return mp.write(append(data, '\n'))
 }
 
 func (mp *ManagedProcess) WriteBytes(data []byte) error {
+	return mp.write(data)
+}
+
+func (mp *ManagedProcess) write(data []byte) error {
+	if !mp.Alive() {
+		return ErrProcessDead
+	}
+
 	mp.stdinMu.Lock()
 	defer mp.stdinMu.Unlock()
+
+	select {
+	case <-mp.done:
+		return ErrProcessDead
+	default:
+	}
+
 	_, err := mp.stdin.Write(data)
+	if err != nil && isDeadProcessWriteError(err) {
+		return ErrProcessDead
+	}
 	return err
 }
 
 func (mp *ManagedProcess) AcquireTurn(ctx context.Context) error {
 	select {
 	case <-mp.turnMu:
+		if !mp.Alive() {
+			mp.ReleaseTurn()
+			return ErrProcessDead
+		}
+		mp.turnHeld.Store(true)
+		mp.lastUsedAt.Store(time.Now())
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -116,6 +141,7 @@ func (mp *ManagedProcess) AcquireTurn(ctx context.Context) error {
 }
 
 func (mp *ManagedProcess) ReleaseTurn() {
+	mp.turnHeld.Store(false)
 	mp.lastUsedAt.Store(time.Now())
 	select {
 	case mp.turnMu <- struct{}{}:
@@ -129,6 +155,10 @@ func (mp *ManagedProcess) StdoutLines() <-chan []byte {
 
 func (mp *ManagedProcess) Alive() bool {
 	return mp.alive.Load()
+}
+
+func (mp *ManagedProcess) InUse() bool {
+	return mp.turnHeld.Load()
 }
 
 func (mp *ManagedProcess) Done() <-chan struct{} {
@@ -184,8 +214,16 @@ func (mp *ManagedProcess) waitForExit() {
 	mp.alive.Store(false)
 	close(mp.stdoutLines)
 	close(mp.done)
-	mp.pool.remove(mp.Key)
+	mp.pool.remove(mp)
 	slog.Info("procpool: process exited", "key", mp.Key)
+}
+
+func isDeadProcessWriteError(err error) bool {
+	return errors.Is(err, io.ErrClosedPipe) ||
+		errors.Is(err, os.ErrClosed) ||
+		errors.Is(err, syscall.EBADF) ||
+		errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ESRCH)
 }
 
 type lockedBuffer struct {

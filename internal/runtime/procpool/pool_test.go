@@ -2,6 +2,7 @@ package procpool
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"testing"
 	"time"
@@ -170,6 +171,49 @@ func TestProcessDeath(t *testing.T) {
 	}
 }
 
+func TestExitedProcessDoesNotRemoveReplacement(t *testing.T) {
+	pool := New(Options{IdleTimeout: 1 * time.Hour})
+	defer pool.Shutdown(context.Background())
+
+	proc, _, err := pool.GetOrCreate("key1", echoStartFunc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	old := &ManagedProcess{Key: "key1"}
+	pool.remove(old)
+
+	got, ok := pool.Get("key1")
+	if !ok {
+		t.Fatal("expected replacement process to remain in pool")
+	}
+	if got != proc {
+		t.Fatal("expected replacement process instance")
+	}
+}
+
+func TestWriteAfterProcessDeathReturnsErrProcessDead(t *testing.T) {
+	pool := New(Options{IdleTimeout: 1 * time.Hour})
+	defer pool.Shutdown(context.Background())
+
+	proc, _, err := pool.GetOrCreate("key1", func(ctx context.Context) *exec.Cmd {
+		return exec.CommandContext(ctx, "true")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-proc.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("process should have exited quickly")
+	}
+
+	if err := proc.WriteJSON(map[string]string{"hello": "world"}); !errors.Is(err, ErrProcessDead) {
+		t.Fatalf("WriteJSON error = %v, want ErrProcessDead", err)
+	}
+}
+
 func TestWriteAndRead(t *testing.T) {
 	pool := New(Options{IdleTimeout: 1 * time.Hour})
 	defer pool.Shutdown(context.Background())
@@ -214,5 +258,41 @@ func TestIdleReaping(t *testing.T) {
 	_, ok := pool.Get("key1")
 	if ok {
 		t.Fatal("expected reaped process to be removed from pool")
+	}
+}
+
+func TestIdleReapingSkipsProcessWithActiveTurn(t *testing.T) {
+	pool := New(Options{IdleTimeout: 100 * time.Millisecond})
+	defer pool.Shutdown(context.Background())
+
+	proc, _, err := pool.GetOrCreate("key1", echoStartFunc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := proc.AcquireTurn(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	pool.reapIdle()
+
+	select {
+	case <-proc.Done():
+		t.Fatal("active process should not be reaped")
+	default:
+	}
+	if !proc.Alive() {
+		t.Fatal("active process should still be alive")
+	}
+
+	proc.ReleaseTurn()
+	time.Sleep(120 * time.Millisecond)
+	pool.reapIdle()
+
+	select {
+	case <-proc.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected released idle process to be reaped")
 	}
 }

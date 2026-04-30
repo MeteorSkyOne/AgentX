@@ -79,10 +79,12 @@ func (p *ProcessPool) Get(key string) (*ManagedProcess, bool) {
 	return mp, ok
 }
 
-func (p *ProcessPool) remove(key string) {
+func (p *ProcessPool) remove(mp *ManagedProcess) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	delete(p.processes, key)
+	if current, ok := p.processes[mp.Key]; ok && current == mp {
+		delete(p.processes, mp.Key)
+	}
 }
 
 func (p *ProcessPool) Kill(key string) {
@@ -142,6 +144,13 @@ func (p *ProcessPool) reapIdle() {
 	p.mu.Lock()
 	var toKill []*ManagedProcess
 	for key, mp := range p.processes {
+		if !mp.Alive() {
+			delete(p.processes, key)
+			continue
+		}
+		if mp.InUse() {
+			continue
+		}
 		if now.Sub(mp.LastUsedAt()) > p.opts.IdleTimeout {
 			toKill = append(toKill, mp)
 			delete(p.processes, key)

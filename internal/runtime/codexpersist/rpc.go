@@ -87,7 +87,10 @@ func (c *rpcClient) Call(ctx context.Context, method string, params any) (map[st
 		return nil, ctx.Err()
 	case <-c.process.Done():
 		return nil, procpool.ErrProcessDead
-	case resp := <-req.ch:
+	case resp, ok := <-req.ch:
+		if !ok {
+			return nil, procpool.ErrProcessDead
+		}
 		if resp.Error != nil {
 			return nil, resp.Error
 		}
