@@ -283,6 +283,7 @@ test("mobile project files navigates tree editor and back to chat", async ({ pag
   await expect(page.getByRole("button", { name: "Navigation" })).toHaveCount(0);
   const projectTree = page.getByRole("tree", { name: "Project files" });
   await expect(projectTree).toBeVisible();
+  await projectTree.getByRole("treeitem", { name: "docs" }).click();
   await projectTree.getByRole("treeitem", { name: "mobile.md" }).click();
 
   const editor = page.getByTestId("project-file-editor-pane");

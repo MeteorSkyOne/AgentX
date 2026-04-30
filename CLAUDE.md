@@ -88,6 +88,10 @@ cmd/agentx/main.go (bootstrap)
 | `AGENTX_CODEX_BYPASS_SANDBOX` | false | Bypass Codex sandbox |
 | `AGENTX_CODEX_SKIP_GIT_REPO_CHECK` | true | Skip git repo validation |
 | `AGENTX_CODEX_PERSISTENT_IDLE_MINUTES` | 30 | Idle timeout for persistent Codex processes |
+| `AGENTX_D2_COMMAND` | d2 | D2 CLI binary used for Markdown `d2` diagrams |
+| `AGENTX_D2_TIMEOUT_SECONDS` | 10 | Per-render D2 CLI timeout |
+| `AGENTX_D2_CACHE_TTL_MINUTES` | 1440 | D2 SVG cache TTL |
+| `AGENTX_D2_CACHE_MAX_ENTRIES` | 256 | Maximum backend D2 SVG cache entries |
 
 ## Database
 

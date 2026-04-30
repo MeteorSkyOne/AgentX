@@ -29,6 +29,7 @@ const cdnImports: Record<string, string> = {
   clsx: "https://esm.sh/clsx@2.1.1?bundle",
   katex: "https://esm.sh/katex@0.16.45?bundle",
   "lucide-react": "https://esm.sh/lucide-react@1.11.0?bundle&external=react",
+  mermaid: "https://esm.sh/mermaid@11.14.0?bundle",
   "react-markdown": "https://esm.sh/react-markdown@10.1.0?bundle&external=react",
   "react-resizable-panels": "https://esm.sh/react-resizable-panels@2.1.9?bundle&external=react,react-dom",
   "react-syntax-highlighter/dist/esm/prism-light": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/prism-light?bundle&external=react",

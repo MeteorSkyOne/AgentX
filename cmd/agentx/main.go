@@ -115,6 +115,10 @@ func main() {
 		AddrOverrideValue: cfg.AddrOverrideValue,
 		DefaultAgentKind:  cfg.DefaultAgentKind,
 		DefaultAgentModel: cfg.DefaultAgentModel,
+		D2Command:         cfg.D2Command,
+		D2Timeout:         time.Duration(cfg.D2TimeoutSeconds) * time.Second,
+		D2CacheTTL:        time.Duration(cfg.D2CacheTTLMinutes) * time.Minute,
+		D2CacheMaxEntries: cfg.D2CacheMaxEntries,
 		ProviderLimits: app.ProviderLimitOptions{
 			CodexCommand:  cfg.CodexCommand,
 			ClaudeCommand: cfg.ClaudeCommand,

@@ -1380,7 +1380,12 @@ export function Shell({
 
       {/* Main Content */}
       <div className="relative min-h-0 min-w-0 flex-1">
-        <ResizablePanelGroup direction="horizontal" className="h-full">
+        <ResizablePanelGroup
+          direction="horizontal"
+          className="h-full"
+          aria-hidden={projectFilesOpen || undefined}
+          inert={projectFilesOpen || undefined}
+        >
           {/* Channel Sidebar */}
           <ResizablePanel defaultSize={18} minSize={15} maxSize={25}>
             <div className="flex h-full min-h-0 flex-col bg-sidebar">

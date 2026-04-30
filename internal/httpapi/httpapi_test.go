@@ -230,6 +230,40 @@ Private conflict prompt.
 	}
 }
 
+func TestHTTPD2RenderRequiresAuthAndCaches(t *testing.T) {
+	countPath := filepath.Join(t.TempDir(), "count")
+	t.Setenv("D2_COUNT_FILE", countPath)
+	env := newTestEnvWithOptions(t, app.Options{
+		D2Command: writeHTTPD2Script(t, `#!/bin/sh
+count_file="$D2_COUNT_FILE"
+count=$(cat "$count_file" 2>/dev/null || echo 0)
+echo $((count + 1)) > "$count_file"
+cat >/dev/null
+printf '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><text>ok</text></svg>'
+`),
+		D2CacheTTL: time.Hour,
+	})
+	bootstrap := setupHTTP(t, env.server.URL)
+	renderURL := env.server.URL + "/api/diagrams/d2/render"
+
+	postJSON(t, renderURL, "", app.D2RenderRequest{Source: "x -> y"}, http.StatusUnauthorized, nil)
+
+	var first app.D2RenderResponse
+	postJSON(t, renderURL, bootstrap.SessionToken, app.D2RenderRequest{Source: "x -> y"}, http.StatusOK, &first)
+	if first.Cached || !strings.Contains(first.SVG, "<svg") {
+		t.Fatalf("first render = %#v, want uncached SVG", first)
+	}
+
+	var second app.D2RenderResponse
+	postJSON(t, renderURL, bootstrap.SessionToken, app.D2RenderRequest{Source: "x -> y"}, http.StatusOK, &second)
+	if !second.Cached || second.SVG != first.SVG {
+		t.Fatalf("second render = %#v, want cached SVG", second)
+	}
+	if got := strings.TrimSpace(readHTTPTestFile(t, countPath)); got != "1" {
+		t.Fatalf("render count = %q, want 1", got)
+	}
+}
+
 func TestHTTPMessagesCanBeUpdatedAndDeleted(t *testing.T) {
 	ts := newTestServer(t)
 
@@ -1676,6 +1710,10 @@ func newTestServer(t *testing.T) *httptest.Server {
 }
 
 func newTestEnv(t *testing.T) testEnv {
+	return newTestEnvWithOptions(t, app.Options{})
+}
+
+func newTestEnvWithOptions(t *testing.T, opts app.Options) testEnv {
 	t.Helper()
 
 	ctx := context.Background()
@@ -1690,10 +1728,34 @@ func newTestEnv(t *testing.T) testEnv {
 	})
 
 	bus := eventbus.New()
-	a := app.New(st, bus, app.Options{AdminToken: "secret", DataDir: t.TempDir()})
+	if opts.AdminToken == "" {
+		opts.AdminToken = "secret"
+	}
+	if opts.DataDir == "" {
+		opts.DataDir = t.TempDir()
+	}
+	a := app.New(st, bus, opts)
 	ts := httptest.NewServer(NewRouter(a, bus))
 	t.Cleanup(ts.Close)
 	return testEnv{server: ts, store: st, app: a, bus: bus}
+}
+
+func writeHTTPD2Script(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "d2")
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func readHTTPTestFile(t *testing.T, path string) string {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
 }
 
 func writeHTTPSkill(t *testing.T, path string, body string) {

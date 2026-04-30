@@ -22,26 +22,30 @@ const (
 )
 
 type Config struct {
-	Addr                   string
-	AddrOverrideActive     bool
-	AddrOverrideValue      string
-	DataDir                string
-	SQLitePath             string
-	AdminToken             string
-	Server                 ServerSettings
-	DefaultAgentKind       string
-	DefaultAgentModel      string
-	CodexCommand           string
-	CodexFullAuto          bool
-	CodexBypassSandbox     bool
-	CodexSkipGitRepoCheck  bool
-	ClaudeCommand          string
-	ClaudePermissionMode   string
-	ClaudeAllowedTools     []string
-	ClaudeDisallowedTools  []string
-	ClaudeAppendSystemText        string
-	ClaudePersistentIdleMinutes   int
-	CodexPersistentIdleMinutes    int
+	Addr                        string
+	AddrOverrideActive          bool
+	AddrOverrideValue           string
+	DataDir                     string
+	SQLitePath                  string
+	AdminToken                  string
+	Server                      ServerSettings
+	DefaultAgentKind            string
+	DefaultAgentModel           string
+	CodexCommand                string
+	CodexFullAuto               bool
+	CodexBypassSandbox          bool
+	CodexSkipGitRepoCheck       bool
+	ClaudeCommand               string
+	ClaudePermissionMode        string
+	ClaudeAllowedTools          []string
+	ClaudeDisallowedTools       []string
+	ClaudeAppendSystemText      string
+	ClaudePersistentIdleMinutes int
+	CodexPersistentIdleMinutes  int
+	D2Command                   string
+	D2TimeoutSeconds            int
+	D2CacheTTLMinutes           int
+	D2CacheMaxEntries           int
 }
 
 type ServerSettings struct {
@@ -81,26 +85,30 @@ func FromEnv() Config {
 	dataDir := getenv("AGENTX_DATA_DIR", defaultDataDir())
 	addrOverride := strings.TrimSpace(os.Getenv("AGENTX_ADDR"))
 	return Config{
-		Addr:                   getenv("AGENTX_ADDR", defaultAddr),
-		AddrOverrideActive:     addrOverride != "",
-		AddrOverrideValue:      addrOverride,
-		DataDir:                dataDir,
-		SQLitePath:             getenv("AGENTX_SQLITE_PATH", filepath.Join(dataDir, "agentx.db")),
-		AdminToken:             getenv("AGENTX_ADMIN_TOKEN", randomToken()),
-		Server:                 DefaultServerSettings(),
-		DefaultAgentKind:       getenv("AGENTX_DEFAULT_AGENT_KIND", "fake"),
-		DefaultAgentModel:      getenv("AGENTX_DEFAULT_AGENT_MODEL", ""),
-		CodexCommand:           getenv("AGENTX_CODEX_COMMAND", "codex"),
-		CodexFullAuto:          getenvBool("AGENTX_CODEX_FULL_AUTO", true),
-		CodexBypassSandbox:     getenvBool("AGENTX_CODEX_BYPASS_SANDBOX", false),
-		CodexSkipGitRepoCheck:  getenvBool("AGENTX_CODEX_SKIP_GIT_REPO_CHECK", true),
-		ClaudeCommand:          getenv("AGENTX_CLAUDE_COMMAND", "claude"),
-		ClaudePermissionMode:   getenv("AGENTX_CLAUDE_PERMISSION_MODE", "acceptEdits"),
-		ClaudeAllowedTools:     getenvList("AGENTX_CLAUDE_ALLOWED_TOOLS"),
-		ClaudeDisallowedTools:  getenvList("AGENTX_CLAUDE_DISALLOWED_TOOLS"),
+		Addr:                        getenv("AGENTX_ADDR", defaultAddr),
+		AddrOverrideActive:          addrOverride != "",
+		AddrOverrideValue:           addrOverride,
+		DataDir:                     dataDir,
+		SQLitePath:                  getenv("AGENTX_SQLITE_PATH", filepath.Join(dataDir, "agentx.db")),
+		AdminToken:                  getenv("AGENTX_ADMIN_TOKEN", randomToken()),
+		Server:                      DefaultServerSettings(),
+		DefaultAgentKind:            getenv("AGENTX_DEFAULT_AGENT_KIND", "fake"),
+		DefaultAgentModel:           getenv("AGENTX_DEFAULT_AGENT_MODEL", ""),
+		CodexCommand:                getenv("AGENTX_CODEX_COMMAND", "codex"),
+		CodexFullAuto:               getenvBool("AGENTX_CODEX_FULL_AUTO", true),
+		CodexBypassSandbox:          getenvBool("AGENTX_CODEX_BYPASS_SANDBOX", false),
+		CodexSkipGitRepoCheck:       getenvBool("AGENTX_CODEX_SKIP_GIT_REPO_CHECK", true),
+		ClaudeCommand:               getenv("AGENTX_CLAUDE_COMMAND", "claude"),
+		ClaudePermissionMode:        getenv("AGENTX_CLAUDE_PERMISSION_MODE", "acceptEdits"),
+		ClaudeAllowedTools:          getenvList("AGENTX_CLAUDE_ALLOWED_TOOLS"),
+		ClaudeDisallowedTools:       getenvList("AGENTX_CLAUDE_DISALLOWED_TOOLS"),
 		ClaudeAppendSystemText:      getenv("AGENTX_CLAUDE_APPEND_SYSTEM_PROMPT", ""),
 		ClaudePersistentIdleMinutes: getenvInt("AGENTX_CLAUDE_PERSISTENT_IDLE_MINUTES", 30),
 		CodexPersistentIdleMinutes:  getenvInt("AGENTX_CODEX_PERSISTENT_IDLE_MINUTES", 30),
+		D2Command:                   getenv("AGENTX_D2_COMMAND", "d2"),
+		D2TimeoutSeconds:            getenvInt("AGENTX_D2_TIMEOUT_SECONDS", 10),
+		D2CacheTTLMinutes:           getenvInt("AGENTX_D2_CACHE_TTL_MINUTES", 1440),
+		D2CacheMaxEntries:           getenvInt("AGENTX_D2_CACHE_MAX_ENTRIES", 256),
 	}
 }
 

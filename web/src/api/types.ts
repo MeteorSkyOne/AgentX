@@ -124,6 +124,11 @@ export interface UserPreferences {
   hide_avatars: boolean;
 }
 
+export interface D2RenderResponse {
+  svg: string;
+  cached: boolean;
+}
+
 export type MetricsProvider = "claude" | "codex" | "fake";
 
 export interface AgentRunMetric {

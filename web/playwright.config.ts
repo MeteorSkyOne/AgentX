@@ -62,12 +62,12 @@ export default defineConfig({
   projects: [
     {
       name: "desktop-chromium",
-      testMatch: /(?:app|screenshots)\.spec\.ts/,
+      testMatch: /(?:app|diagrams|screenshots)\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] }
     },
     {
       name: "mobile-chrome",
-      testMatch: /(?:mobile|screenshots)\.spec\.ts/,
+      testMatch: /(?:diagrams|mobile|screenshots)\.spec\.ts/,
       use: { ...devices["Pixel 5"], browserName: "chromium" }
     },
     {

@@ -30,6 +30,10 @@ type Options struct {
 	ProviderLimits    ProviderLimitOptions
 	WebhookHTTPClient *http.Client
 	WebhookTimeout    time.Duration
+	D2Command         string
+	D2Timeout         time.Duration
+	D2CacheTTL        time.Duration
+	D2CacheMaxEntries int
 }
 
 type pendingQuestionKey struct {
@@ -47,9 +51,10 @@ type App struct {
 	bus            *eventbus.Bus
 	opts           Options
 	providerLimits *providerLimitService
+	d2Renderer     *d2Renderer
 
 	pendingQuestionsMu sync.Mutex
-	pendingQuestions    map[pendingQuestionKey]*pendingQuestion
+	pendingQuestions   map[pendingQuestionKey]*pendingQuestion
 }
 
 func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
@@ -59,10 +64,16 @@ func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
 		}
 	}
 	return &App{
-		store:           st,
-		bus:             bus,
-		opts:            opts,
-		providerLimits:  newProviderLimitService(opts.ProviderLimits),
+		store:          st,
+		bus:            bus,
+		opts:           opts,
+		providerLimits: newProviderLimitService(opts.ProviderLimits),
+		d2Renderer: newD2Renderer(D2RenderOptions{
+			Command:         opts.D2Command,
+			Timeout:         opts.D2Timeout,
+			CacheTTL:        opts.D2CacheTTL,
+			CacheMaxEntries: opts.D2CacheMaxEntries,
+		}),
 		pendingQuestions: make(map[pendingQuestionKey]*pendingQuestion),
 	}
 }

@@ -2,6 +2,8 @@ import { useState, useCallback, type ReactNode } from "react";
 import SyntaxHighlighter from "react-syntax-highlighter/dist/esm/prism-light";
 import oneDark from "react-syntax-highlighter/dist/esm/styles/prism/one-dark";
 import { Copy, Check } from "lucide-react";
+import { D2Diagram } from "./D2Diagram";
+import { MermaidDiagram } from "./MermaidDiagram";
 
 import typescript from "react-syntax-highlighter/dist/esm/languages/prism/typescript";
 import tsx from "react-syntax-highlighter/dist/esm/languages/prism/tsx";
@@ -67,16 +69,33 @@ export function CodeBlock({
   className?: string;
   children?: ReactNode;
 }) {
-  const match = /language-(\w+)/.exec(className || "");
+  const match = /language-([\w-]+)/.exec(className || "");
 
   if (!match) {
     return <code className={className}>{children}</code>;
   }
 
-  const language = match[1];
-  const code = String(children).replace(/\n$/, "");
+  const language = match[1].toLowerCase();
+  const code = codeBlockText(children).replace(/\n$/, "");
+
+  if (language === "mermaid" || language === "mmd") {
+    return <MermaidDiagram source={code} />;
+  }
+  if (language === "d2") {
+    return <D2Diagram source={code} />;
+  }
 
   return <FencedCodeBlock language={language} code={code} />;
+}
+
+function codeBlockText(children: ReactNode): string {
+  if (Array.isArray(children)) {
+    return children.map(codeBlockText).join("");
+  }
+  if (children === null || children === undefined) {
+    return "";
+  }
+  return String(children);
 }
 
 function FencedCodeBlock({

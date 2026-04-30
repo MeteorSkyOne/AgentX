@@ -430,6 +430,7 @@ test("desktop project files opens project editor and persists changes", async ({
   await expect(page.getByRole("button", { name: "Create channel" })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveCount(0);
 
+  await projectTree.getByRole("treeitem", { name: "src" }).click();
   await projectTree.getByRole("treeitem", { name: "app.ts" }).click();
   const editor = page.getByTestId("project-file-editor-pane");
   await expect(editor).toBeVisible();
@@ -507,7 +508,7 @@ test("desktop missing message file links show a prominent editor error", async (
   await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
   await page.getByRole("button", { name: "Project files" }).click();
   const editor = page.getByTestId("project-file-editor-pane");
-  await editor.getByLabel("File path").fill("src/existing.ts");
+  await editor.getByRole("textbox", { name: "File path" }).fill("src/existing.ts");
   await editor.getByRole("button", { name: "Open" }).click();
   await expectMonacoEditorText(editor, "const oldContent = true;");
   await page.getByRole("button", { name: "Project files" }).click();
@@ -547,7 +548,7 @@ test("agent files tab remains scoped to the agent workspace", async ({ page }) =
   const projectTree = page.getByRole("tree", { name: "Project files" });
   await expect(projectTree).toBeVisible();
   const projectEditor = page.getByTestId("project-file-editor-pane");
-  await projectEditor.getByLabel("File path").fill("memory.md");
+  await projectEditor.getByRole("textbox", { name: "File path" }).fill("memory.md");
   await projectEditor.getByRole("button", { name: "Open" }).click();
   await expectMonacoEditorText(projectEditor, "project memory");
   await page.getByRole("button", { name: "Project files" }).click();
@@ -556,7 +557,7 @@ test("agent files tab remains scoped to the agent workspace", async ({ page }) =
   const panel = page.getByLabel("Agent details");
   await panel.getByRole("tab", { name: /Files/ }).click();
   await expect(panel.getByLabel("Workspace", { exact: true })).toHaveCount(0);
-  await panel.getByLabel("File path").fill("memory.md");
+  await panel.getByRole("textbox", { name: "File path" }).fill("memory.md");
   await panel.getByRole("button", { name: "Open" }).click();
   await expectMonacoEditorText(panel, "agent memory");
   await expect(panel.getByTestId("workspace-file-editor")).not.toContainText("project memory");
@@ -627,7 +628,7 @@ test("manages projects, channel agents, threads, and workspace files", async ({ 
   await page.getByRole("button", { name: "Agent settings" }).click();
   await panel.getByLabel("Agent", { exact: true }).selectOption({ label: `${agentName} (@${agentHandle})` });
   await panel.getByRole("tab", { name: /Files/ }).click();
-  await panel.getByLabel("File path").fill("memory.md");
+  await panel.getByRole("textbox", { name: "File path" }).fill("memory.md");
   await setMonacoEditorValue(page, panel, "memory from e2e");
   await panel.getByRole("button", { name: "Save file" }).click();
   await setMonacoEditorValue(page, panel, "");

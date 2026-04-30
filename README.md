@@ -9,6 +9,7 @@ A self-hosted AI coding agent management service. Coordinate multiple AI agents 
 - **Interactive tool calls** — agents can ask the user questions with selectable options (AskUserQuestion) surfaced directly in the chat UI
 - **Real-time streaming** — agent output, thinking, and tool calls streamed over WebSocket
 - **Workspace file browsing** — browse and edit agent working directories from the UI
+- **Markdown diagrams** — render Mermaid blocks in the browser and D2 blocks through a cached CLI-backed SVG renderer
 - **Slash commands** — `/new`, `/compact`, `/plan`, `/commit`, `/push`, `/review` and more, with `@agent` mention targeting
 - **Team coordination** — multi-agent collaboration with leader/worker phases and turn budgets
 - **Notifications** — webhook notifications with HMAC-SHA256 signing, plus browser native notifications
@@ -96,6 +97,10 @@ printf '%s\n' 'new-password' | agentx auth reset-admin --username admin --passwo
 | `AGENTX_CODEX_BYPASS_SANDBOX` | false | Bypass Codex sandbox |
 | `AGENTX_CODEX_SKIP_GIT_REPO_CHECK` | true | Skip git repo validation |
 | `AGENTX_CODEX_PERSISTENT_IDLE_MINUTES` | 30 | Idle timeout for persistent Codex processes |
+| `AGENTX_D2_COMMAND` | d2 | D2 CLI binary used for Markdown `d2` diagrams |
+| `AGENTX_D2_TIMEOUT_SECONDS` | 10 | Per-render D2 CLI timeout |
+| `AGENTX_D2_CACHE_TTL_MINUTES` | 1440 | D2 SVG cache TTL |
+| `AGENTX_D2_CACHE_MAX_ENTRIES` | 256 | Maximum backend D2 SVG cache entries |
 
 ## Tests
 

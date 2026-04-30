@@ -11,6 +11,7 @@ import type {
   ConversationContext,
   ConversationType,
   CreateThreadResponse,
+  D2RenderResponse,
   Message,
   MessageProcessItemDetail,
   MetricsProvider,
@@ -129,6 +130,13 @@ export function updateUserPreferences(payload: UserPreferences): Promise<UserPre
   return request<UserPreferences>("/api/me/preferences", {
     method: "PUT",
     body: JSON.stringify(payload)
+  });
+}
+
+export function renderD2Diagram(source: string): Promise<D2RenderResponse> {
+  return request<D2RenderResponse>("/api/diagrams/d2/render", {
+    method: "POST",
+    body: JSON.stringify({ source })
   });
 }
 
