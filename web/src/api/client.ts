@@ -26,6 +26,9 @@ import type {
   WorkspaceEntry,
   WorkspaceEntryType,
   WorkspaceFile,
+  WorkspaceGitDiff,
+  WorkspaceGitScope,
+  WorkspaceGitStatus,
   WorkspaceTreeEntry
 } from "./types";
 
@@ -454,6 +457,43 @@ export function deleteWorkspaceEntry(workspaceID: string, path: string): Promise
     {
       method: "DELETE"
     }
+  );
+}
+
+export function workspaceGitStatus(
+  workspaceID: string,
+  scope: WorkspaceGitScope,
+  target?: string,
+  compare?: string
+): Promise<WorkspaceGitStatus> {
+  const params = new URLSearchParams({ scope });
+  if (target?.trim()) {
+    params.set("target", target.trim());
+  }
+  if (compare?.trim()) {
+    params.set("compare", compare.trim());
+  }
+  return request<WorkspaceGitStatus>(
+    `/api/workspaces/${encodeURIComponent(workspaceID)}/git/status?${params.toString()}`
+  );
+}
+
+export function workspaceGitDiff(
+  workspaceID: string,
+  scope: WorkspaceGitScope,
+  path: string,
+  target?: string,
+  compare?: string
+): Promise<WorkspaceGitDiff> {
+  const params = new URLSearchParams({ scope, path });
+  if (target?.trim()) {
+    params.set("target", target.trim());
+  }
+  if (compare?.trim()) {
+    params.set("compare", compare.trim());
+  }
+  return request<WorkspaceGitDiff>(
+    `/api/workspaces/${encodeURIComponent(workspaceID)}/git/diff?${params.toString()}`
   );
 }
 

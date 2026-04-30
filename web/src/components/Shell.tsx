@@ -77,6 +77,7 @@ import { MetricsPanel } from "./shell/MetricsPanel";
 import {
   useWorkspaceFileBrowser,
   WorkspaceFileEditorPane,
+  WorkspaceGitDiffPane,
   WorkspaceFileTreePane,
 } from "./WorkspaceFileBrowser";
 import type { ShellProps } from "./shell/types";
@@ -150,6 +151,8 @@ export function Shell({
   onCreateWorkspaceEntry,
   onMoveWorkspaceEntry,
   onDeleteWorkspaceEntry,
+  onLoadWorkspaceGitStatus,
+  onLoadWorkspaceGitDiff,
   onUpdateMessage,
   onDeleteMessage,
   onLoadOlderMessages,
@@ -273,6 +276,8 @@ export function Shell({
     onCreateEntry: onCreateWorkspaceEntry,
     onMoveEntry: onMoveWorkspaceEntry,
     onDeleteEntry: onDeleteWorkspaceEntry,
+    onLoadGitStatus: onLoadWorkspaceGitStatus,
+    onLoadGitDiff: onLoadWorkspaceGitDiff,
   });
   const projectWorkspaceIDRef = useRef(projectWorkspace?.id);
   const projectLoadFileRef = useRef(projectFilesController.loadFile);
@@ -1006,17 +1011,30 @@ export function Shell({
                     setMobileProjectFilesView("editor");
                     setMobileEditorHeaderCollapsed(false);
                   }}
+                  onChangeSelected={() => {
+                    setMobileProjectFilesView("editor");
+                    setMobileEditorHeaderCollapsed(false);
+                  }}
                 />
               ) : (
-                <WorkspaceFileEditorPane
-                  controller={projectFilesController}
-                  theme={theme}
-                  contentAriaLabel="Project file editor"
-                  className="min-h-0 flex-1"
-                  headerCollapsed={mobileEditorHeaderCollapsed}
-                  onHeaderCollapsedChange={setMobileEditorHeaderCollapsed}
-                  headerControlsPlacement="external"
-                />
+                projectFilesController.workspacePaneView === "changes" ? (
+                  <WorkspaceGitDiffPane
+                    controller={projectFilesController}
+                    theme={theme}
+                    contentAriaLabel="Project git diff preview"
+                    className="min-h-0 flex-1"
+                  />
+                ) : (
+                  <WorkspaceFileEditorPane
+                    controller={projectFilesController}
+                    theme={theme}
+                    contentAriaLabel="Project file editor"
+                    className="min-h-0 flex-1"
+                    headerCollapsed={mobileEditorHeaderCollapsed}
+                    onHeaderCollapsedChange={setMobileEditorHeaderCollapsed}
+                    headerControlsPlacement="external"
+                  />
+                )
               )}
             </div>
           )}
@@ -1644,25 +1662,47 @@ export function Shell({
         >
           {projectFileTreeCollapsed ? (
             <div className="relative h-full min-h-0 min-w-0">
-              <WorkspaceFileEditorPane
-                controller={projectFilesController}
-                theme={theme}
-                contentAriaLabel="Project file editor"
-                editorClassName="md:mx-6"
-                toolbarEnd={
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 shrink-0 bg-accent"
-                    title="Close project files"
-                    aria-label="Close project files"
-                    aria-pressed="true"
-                    onClick={toggleProjectFiles}
-                  >
-                    <FolderOpen className="h-4 w-4" />
-                  </Button>
-                }
-              />
+              {projectFilesController.workspacePaneView === "changes" ? (
+                <WorkspaceGitDiffPane
+                  controller={projectFilesController}
+                  theme={theme}
+                  contentAriaLabel="Project git diff preview"
+                  viewerClassName="md:mx-6"
+                  toolbarEnd={
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 bg-accent"
+                      title="Close project files"
+                      aria-label="Close project files"
+                      aria-pressed="true"
+                      onClick={toggleProjectFiles}
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                    </Button>
+                  }
+                />
+              ) : (
+                <WorkspaceFileEditorPane
+                  controller={projectFilesController}
+                  theme={theme}
+                  contentAriaLabel="Project file editor"
+                  editorClassName="md:mx-6"
+                  toolbarEnd={
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 bg-accent"
+                      title="Close project files"
+                      aria-label="Close project files"
+                      aria-pressed="true"
+                      onClick={toggleProjectFiles}
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                    </Button>
+                  }
+                />
+              )}
               <div className="pointer-events-none absolute left-0 top-1/2 z-40 -translate-y-1/2">
                 <Button
                   type="button"
@@ -1686,6 +1726,7 @@ export function Shell({
                     controller={projectFilesController}
                     title="Project files"
                     ariaLabel="Project files"
+                    onChangeSelected={() => setMobileProjectFilesView("editor")}
                     toolbarEnd={
                       <Button
                         type="button"
@@ -1705,24 +1746,45 @@ export function Shell({
                 <ResizableHandle withHandle />
               </>
               <ResizablePanel defaultSize={76} minSize={48}>
-                <WorkspaceFileEditorPane
-                  controller={projectFilesController}
-                  theme={theme}
-                  contentAriaLabel="Project file editor"
-                  toolbarEnd={
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 bg-accent"
-                      title="Close project files"
-                      aria-label="Close project files"
-                      aria-pressed="true"
-                      onClick={toggleProjectFiles}
-                    >
-                      <FolderOpen className="h-4 w-4" />
-                    </Button>
-                  }
-                />
+                {projectFilesController.workspacePaneView === "changes" ? (
+                  <WorkspaceGitDiffPane
+                    controller={projectFilesController}
+                    theme={theme}
+                    contentAriaLabel="Project git diff preview"
+                    toolbarEnd={
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 bg-accent"
+                        title="Close project files"
+                        aria-label="Close project files"
+                        aria-pressed="true"
+                        onClick={toggleProjectFiles}
+                      >
+                        <FolderOpen className="h-4 w-4" />
+                      </Button>
+                    }
+                  />
+                ) : (
+                  <WorkspaceFileEditorPane
+                    controller={projectFilesController}
+                    theme={theme}
+                    contentAriaLabel="Project file editor"
+                    toolbarEnd={
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 bg-accent"
+                        title="Close project files"
+                        aria-label="Close project files"
+                        aria-pressed="true"
+                        onClick={toggleProjectFiles}
+                      >
+                        <FolderOpen className="h-4 w-4" />
+                      </Button>
+                    }
+                  />
+                )}
               </ResizablePanel>
             </ResizablePanelGroup>
           )}

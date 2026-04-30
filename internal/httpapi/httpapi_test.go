@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -756,6 +757,143 @@ func TestHTTPWorkspaceTreeLazyLoadsDirectories(t *testing.T) {
 	getJSON(t, treeURL+"?path=../secret", bootstrap.SessionToken, http.StatusBadRequest, nil)
 }
 
+func TestHTTPWorkspaceGitStatusAndDiff(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not available")
+	}
+	ts := newTestServer(t)
+
+	bootstrap := setupHTTP(t, ts.URL)
+
+	var nonGit workspaceGitStatusResponse
+	getJSON(t, ts.URL+"/api/workspaces/"+bootstrap.Workspace.ID+"/git/status", bootstrap.SessionToken, http.StatusOK, &nonGit)
+	if nonGit.Available || nonGit.Message == "" {
+		t.Fatalf("non-git workspace status = %#v, want unavailable with message", nonGit)
+	}
+
+	workspacePath := filepath.Join(t.TempDir(), "git-workspace")
+	var project domain.Project
+	postJSON(t, ts.URL+"/api/organizations/"+bootstrap.Organization.ID+"/projects", bootstrap.SessionToken, map[string]string{
+		"name":           "Git Workspace",
+		"workspace_path": workspacePath,
+	}, http.StatusOK, &project)
+
+	var workspace domain.Workspace
+	getJSON(t, ts.URL+"/api/workspaces/"+project.WorkspaceID, bootstrap.SessionToken, http.StatusOK, &workspace)
+	runHTTPGit(t, workspace.Path, "init", "--initial-branch=master")
+	runHTTPGit(t, workspace.Path, "config", "user.email", "test@example.com")
+	runHTTPGit(t, workspace.Path, "config", "user.name", "Test User")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "README.md"), "hello\n")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "old.txt"), "old name\n")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "crlf.txt"), "one\ntwo\nthree\n")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "shared.txt"), "shared base\n")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "same.txt"), "same base\n")
+	runHTTPGit(t, workspace.Path, "add", ".")
+	runHTTPGit(t, workspace.Path, "commit", "-m", "initial")
+	runHTTPGit(t, workspace.Path, "checkout", "-b", "release")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "shared.txt"), "shared release\n")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "same.txt"), "same changed\n")
+	runHTTPGit(t, workspace.Path, "add", "shared.txt", "same.txt")
+	runHTTPGit(t, workspace.Path, "commit", "-m", "release change")
+	runHTTPGit(t, workspace.Path, "checkout", "master")
+	runHTTPGit(t, workspace.Path, "checkout", "-b", "feature")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "branch.txt"), "branch change\n")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "shared.txt"), "shared feature\n")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "same.txt"), "same changed\n")
+	runHTTPGit(t, workspace.Path, "add", "branch.txt", "shared.txt", "same.txt")
+	runHTTPGit(t, workspace.Path, "commit", "-m", "branch change")
+
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "README.md"), "hello working\n")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "crlf.txt"), "one\r\nTWO\r\nthree\r\n")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "untracked.txt"), "new file\n")
+	runHTTPGit(t, workspace.Path, "mv", "old.txt", "moved.txt")
+
+	statusURL := ts.URL + "/api/workspaces/" + workspace.ID + "/git/status"
+	var working workspaceGitStatusResponse
+	getJSON(t, statusURL+"?scope=working_tree", bootstrap.SessionToken, http.StatusOK, &working)
+	if !working.Available || working.Scope != workspaceGitScopeWorkingTree || working.Branch != "feature" {
+		t.Fatalf("working tree status = %#v", working)
+	}
+	if changeStatus(working.Changes, "README.md") != "modified" {
+		t.Fatalf("working changes = %#v, want README.md modified", working.Changes)
+	}
+	if changeStatus(working.Changes, "crlf.txt") != "modified" {
+		t.Fatalf("working changes = %#v, want crlf.txt modified", working.Changes)
+	}
+	if changeStatus(working.Changes, "untracked.txt") != "untracked" {
+		t.Fatalf("working changes = %#v, want untracked.txt untracked", working.Changes)
+	}
+	rename := changeByPath(working.Changes, "moved.txt")
+	if rename == nil || rename.Status != "renamed" || rename.OldPath != "old.txt" {
+		t.Fatalf("rename change = %#v, all changes = %#v", rename, working.Changes)
+	}
+
+	var readmeDiff workspaceGitDiffResponse
+	getJSON(t, ts.URL+"/api/workspaces/"+workspace.ID+"/git/diff?scope=working_tree&path=README.md", bootstrap.SessionToken, http.StatusOK, &readmeDiff)
+	if readmeDiff.Original != "hello\n" || readmeDiff.Modified != "hello working\n" {
+		t.Fatalf("README diff = %#v", readmeDiff)
+	}
+	var crlfDiff workspaceGitDiffResponse
+	getJSON(t, ts.URL+"/api/workspaces/"+workspace.ID+"/git/diff?scope=working_tree&path=crlf.txt", bootstrap.SessionToken, http.StatusOK, &crlfDiff)
+	if crlfDiff.Original != "one\ntwo\nthree\n" || crlfDiff.Modified != "one\nTWO\nthree\n" {
+		t.Fatalf("crlf diff = %#v", crlfDiff)
+	}
+	var untrackedDiff workspaceGitDiffResponse
+	getJSON(t, ts.URL+"/api/workspaces/"+workspace.ID+"/git/diff?scope=working_tree&path=untracked.txt", bootstrap.SessionToken, http.StatusOK, &untrackedDiff)
+	if untrackedDiff.Original != "" || untrackedDiff.Modified != "new file\n" {
+		t.Fatalf("untracked diff = %#v", untrackedDiff)
+	}
+
+	var branch workspaceGitStatusResponse
+	getJSON(t, statusURL+"?scope=branch", bootstrap.SessionToken, http.StatusOK, &branch)
+	if !branch.Available || branch.Scope != workspaceGitScopeBranch || branch.Base != "master" || branch.Target != "master" {
+		t.Fatalf("branch status = %#v", branch)
+	}
+	if branch.Compare != "feature" || branch.Branch != "feature" {
+		t.Fatalf("branch status = %#v, want feature compare branch", branch)
+	}
+	if !gitTargetsContain(branch.Targets, "master") || !gitTargetsContain(branch.Targets, "release") {
+		t.Fatalf("branch targets = %#v, want master and release", branch.Targets)
+	}
+	if changeStatus(branch.Changes, "branch.txt") != "added" || changeStatus(branch.Changes, "shared.txt") != "modified" {
+		t.Fatalf("branch changes = %#v, want branch.txt added and shared.txt modified", branch.Changes)
+	}
+	var releaseBranch workspaceGitStatusResponse
+	getJSON(t, statusURL+"?scope=branch&target=release", bootstrap.SessionToken, http.StatusOK, &releaseBranch)
+	if !releaseBranch.Available || releaseBranch.Target != "release" || releaseBranch.Base != "release" {
+		t.Fatalf("release branch status = %#v", releaseBranch)
+	}
+	if changeStatus(releaseBranch.Changes, "same.txt") != "" {
+		t.Fatalf("release branch changes = %#v, want same.txt omitted because target and HEAD match", releaseBranch.Changes)
+	}
+	getJSON(t, ts.URL+"/api/workspaces/"+workspace.ID+"/git/diff?scope=branch&target=release&path=same.txt", bootstrap.SessionToken, http.StatusNotFound, nil)
+	var releaseCompare workspaceGitStatusResponse
+	getJSON(t, statusURL+"?scope=branch&target=master&compare=release", bootstrap.SessionToken, http.StatusOK, &releaseCompare)
+	if !releaseCompare.Available || releaseCompare.Target != "master" || releaseCompare.Compare != "release" || releaseCompare.Branch != "release" {
+		t.Fatalf("release compare status = %#v", releaseCompare)
+	}
+	if changeStatus(releaseCompare.Changes, "branch.txt") != "" || changeStatus(releaseCompare.Changes, "same.txt") != "modified" {
+		t.Fatalf("release compare changes = %#v, want same.txt modified and branch.txt omitted", releaseCompare.Changes)
+	}
+	var sameCompareDiff workspaceGitDiffResponse
+	getJSON(t, ts.URL+"/api/workspaces/"+workspace.ID+"/git/diff?scope=branch&target=master&compare=release&path=same.txt", bootstrap.SessionToken, http.StatusOK, &sameCompareDiff)
+	if sameCompareDiff.Original != "same base\n" || sameCompareDiff.Modified != "same changed\n" || sameCompareDiff.Target != "master" || sameCompareDiff.Compare != "release" || sameCompareDiff.Branch != "release" {
+		t.Fatalf("same compare diff = %#v", sameCompareDiff)
+	}
+	var sharedBranchDiff workspaceGitDiffResponse
+	getJSON(t, ts.URL+"/api/workspaces/"+workspace.ID+"/git/diff?scope=branch&target=release&path=shared.txt", bootstrap.SessionToken, http.StatusOK, &sharedBranchDiff)
+	if sharedBranchDiff.Original != "shared release\n" || sharedBranchDiff.Modified != "shared feature\n" || sharedBranchDiff.Base != "release" || sharedBranchDiff.Target != "release" {
+		t.Fatalf("shared branch diff = %#v", sharedBranchDiff)
+	}
+	var branchDiff workspaceGitDiffResponse
+	getJSON(t, ts.URL+"/api/workspaces/"+workspace.ID+"/git/diff?scope=branch&target=release&path=branch.txt", bootstrap.SessionToken, http.StatusOK, &branchDiff)
+	if branchDiff.Original != "" || branchDiff.Modified != "branch change\n" || branchDiff.Base != "release" || branchDiff.Target != "release" {
+		t.Fatalf("branch diff = %#v", branchDiff)
+	}
+
+	getJSON(t, ts.URL+"/api/workspaces/"+workspace.ID+"/git/diff?scope=working_tree&path=../secret", bootstrap.SessionToken, http.StatusBadRequest, nil)
+}
+
 func TestHTTPWorkspaceMetadataAndProjectWorkspacePathUpdate(t *testing.T) {
 	ts := newTestServer(t)
 
@@ -803,6 +941,41 @@ func workspaceTreeChildPaths(entry workspaceTreeEntry) []string {
 		paths = append(paths, child.Path)
 	}
 	return paths
+}
+
+func runHTTPGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(output))
+	}
+}
+
+func changeStatus(changes []workspaceGitChange, path string) string {
+	if change := changeByPath(changes, path); change != nil {
+		return change.Status
+	}
+	return ""
+}
+
+func changeByPath(changes []workspaceGitChange, path string) *workspaceGitChange {
+	for i := range changes {
+		if changes[i].Path == path {
+			return &changes[i]
+		}
+	}
+	return nil
+}
+
+func gitTargetsContain(targets []workspaceGitTarget, name string) bool {
+	for _, target := range targets {
+		if target.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func TestHTTPBoundNonChannelConversationsCanSendAndListMessages(t *testing.T) {

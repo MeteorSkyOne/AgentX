@@ -7,14 +7,24 @@ import {
   Columns2,
   Database,
   Eye,
+  FileDiff,
   FileText,
   FolderOpen,
+  GitBranch,
+  GitCompare,
   RefreshCw,
   Save,
   Trash2,
   X,
 } from "lucide-react";
-import type { WorkspaceEntryType, WorkspaceTreeEntry } from "@/api/types";
+import type {
+  WorkspaceEntryType,
+  WorkspaceGitChange,
+  WorkspaceGitDiff,
+  WorkspaceGitScope,
+  WorkspaceGitStatus,
+  WorkspaceTreeEntry,
+} from "@/api/types";
 import type { ThemeMode } from "@/theme";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -26,6 +36,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -38,6 +49,10 @@ const LazyWorkspaceFileEditor = lazy(() =>
   import("./WorkspaceFileEditor").then((module) => ({ default: module.WorkspaceFileEditor }))
 );
 
+const LazyWorkspaceGitDiffViewer = lazy(() =>
+  import("./WorkspaceFileEditor").then((module) => ({ default: module.WorkspaceGitDiffViewer }))
+);
+
 export interface WorkspaceFileBrowserActions {
   onLoadTree: (workspaceID: string, path?: string) => Promise<WorkspaceTreeEntry>;
   onReadFile: (workspaceID: string, path: string) => Promise<string>;
@@ -46,6 +61,19 @@ export interface WorkspaceFileBrowserActions {
   onCreateEntry?: (workspaceID: string, path: string, type: WorkspaceEntryType) => Promise<void>;
   onMoveEntry?: (workspaceID: string, path: string, newPath: string) => Promise<void>;
   onDeleteEntry?: (workspaceID: string, path: string) => Promise<void>;
+  onLoadGitStatus?: (
+    workspaceID: string,
+    scope: WorkspaceGitScope,
+    target?: string,
+    compare?: string
+  ) => Promise<WorkspaceGitStatus>;
+  onLoadGitDiff?: (
+    workspaceID: string,
+    scope: WorkspaceGitScope,
+    path: string,
+    target?: string,
+    compare?: string
+  ) => Promise<WorkspaceGitDiff>;
 }
 
 export interface WorkspaceFilePosition {
@@ -58,6 +86,7 @@ export interface WorkspaceFileOpenOptions {
 }
 
 export type WorkspaceFileViewMode = "edit" | "preview" | "split";
+export type WorkspacePaneView = "files" | "changes";
 
 interface WorkspaceFileBrowserProps extends WorkspaceFileBrowserActions {
   workspaceID?: string;
@@ -83,6 +112,18 @@ export interface WorkspaceFileBrowserController {
   fileDeleting: boolean;
   entryActionPending: boolean;
   workspaceStatus: string | null;
+  workspacePaneView: WorkspacePaneView;
+  gitEnabled: boolean;
+  gitScope: WorkspaceGitScope;
+  gitTarget: string;
+  gitCompare: string;
+  gitStatus?: WorkspaceGitStatus;
+  gitStatusLoading: boolean;
+  gitStatusError: string | null;
+  gitDiff?: WorkspaceGitDiff;
+  gitDiffLoading: boolean;
+  gitDiffError: string | null;
+  gitSelectedPath: string;
   fileOpenPosition?: WorkspaceFilePosition;
   fileOpenRequestID: number;
   fileViewMode: WorkspaceFileViewMode;
@@ -91,9 +132,15 @@ export interface WorkspaceFileBrowserController {
   setFilePath: (path: string) => void;
   setFileBody: (body: string) => void;
   setFileViewMode: (mode: WorkspaceFileViewMode) => void;
+  setWorkspacePaneView: (view: WorkspacePaneView) => void;
+  setGitScope: (scope: WorkspaceGitScope) => void;
+  setGitTarget: (target: string) => void;
+  setGitCompare: (compare: string) => void;
   loadTree: (options?: { quiet?: boolean }) => Promise<void>;
   loadDirectory: (path: string, options?: { quiet?: boolean; force?: boolean }) => Promise<void>;
   loadFile: (path?: string, options?: WorkspaceFileOpenOptions) => Promise<void>;
+  loadGitStatus: (options?: { quiet?: boolean; scope?: WorkspaceGitScope; target?: string; compare?: string }) => Promise<void>;
+  loadGitDiff: (path: string) => Promise<void>;
   saveFile: () => Promise<void>;
   deleteFile: () => Promise<void>;
   createEntry: (
@@ -117,6 +164,8 @@ export function useWorkspaceFileBrowser({
   onCreateEntry,
   onMoveEntry,
   onDeleteEntry,
+  onLoadGitStatus,
+  onLoadGitDiff,
 }: Omit<WorkspaceFileBrowserProps, "theme">): WorkspaceFileBrowserController {
   const [filePath, setFilePath] = useState(initialPath);
   const [fileBody, setFileBody] = useState("");
@@ -132,15 +181,29 @@ export function useWorkspaceFileBrowser({
   const [fileDeleting, setFileDeleting] = useState(false);
   const [entryActionPending, setEntryActionPending] = useState(false);
   const [workspaceStatus, setWorkspaceStatus] = useState<string | null>(null);
+  const [workspacePaneView, setWorkspacePaneViewState] = useState<WorkspacePaneView>("files");
+  const [gitScope, setGitScopeState] = useState<WorkspaceGitScope>("working_tree");
+  const [gitTarget, setGitTargetState] = useState("");
+  const [gitCompare, setGitCompareState] = useState("");
+  const [gitStatus, setGitStatus] = useState<WorkspaceGitStatus>();
+  const [gitStatusLoading, setGitStatusLoading] = useState(false);
+  const [gitStatusError, setGitStatusError] = useState<string | null>(null);
+  const [gitDiff, setGitDiff] = useState<WorkspaceGitDiff>();
+  const [gitDiffLoading, setGitDiffLoading] = useState(false);
+  const [gitDiffError, setGitDiffError] = useState<string | null>(null);
+  const [gitSelectedPath, setGitSelectedPath] = useState("");
   const [fileOpenPosition, setFileOpenPosition] = useState<WorkspaceFilePosition>();
   const [fileOpenRequestID, setFileOpenRequestID] = useState(0);
   const [fileViewMode, setFileViewMode] = useState<WorkspaceFileViewMode>("edit");
   const workspaceTreeRequestRef = useRef(0);
   const directoryRequestRef = useRef<Record<string, number>>({});
   const fileRequestRef = useRef(0);
+  const gitStatusRequestRef = useRef(0);
+  const gitDiffRequestRef = useRef(0);
 
   const trimmedPath = filePath.trim();
   const canUseWorkspace = Boolean(workspaceID);
+  const gitEnabled = Boolean(onLoadGitStatus && onLoadGitDiff);
 
   const loadTree = useCallback(
     async (options: { quiet?: boolean } = {}) => {
@@ -256,6 +319,7 @@ export function useWorkspaceFileBrowser({
     async (path = filePath, options: WorkspaceFileOpenOptions = {}) => {
       const targetPath = path.trim();
       if (!workspaceID || !targetPath) return;
+      setWorkspacePaneViewState("files");
       const requestID = ++fileRequestRef.current;
       setFileLoading(true);
       setFileLoadError(null);
@@ -281,6 +345,129 @@ export function useWorkspaceFileBrowser({
       }
     },
     [filePath, onReadFile, workspaceID]
+  );
+
+  const loadGitStatus = useCallback(
+    async (options: { quiet?: boolean; scope?: WorkspaceGitScope; target?: string; compare?: string } = {}) => {
+      const targetScope = options.scope ?? gitScope;
+      const targetBranch = options.target ?? gitTarget;
+      const compareBranch = options.compare ?? gitCompare;
+      if (!workspaceID || !onLoadGitStatus) return;
+      const requestID = ++gitStatusRequestRef.current;
+      setGitStatusLoading(true);
+      setGitStatusError(null);
+      try {
+        const status = await onLoadGitStatus(
+          workspaceID,
+          targetScope,
+          targetScope === "branch" ? targetBranch : undefined,
+          targetScope === "branch" ? compareBranch : undefined
+        );
+        if (gitStatusRequestRef.current !== requestID) return;
+        setGitStatus(status);
+        if (targetScope === "branch") {
+          setGitTargetState(status.target ?? targetBranch);
+          setGitCompareState(status.compare ?? status.branch ?? compareBranch);
+        }
+        if (!options.quiet) setWorkspaceStatus(status.available ? "Changes loaded" : status.message ?? "Git unavailable");
+      } catch (err) {
+        if (gitStatusRequestRef.current !== requestID) return;
+        const message = err instanceof Error ? err.message : "Changes load failed";
+        setGitStatus(undefined);
+        setGitStatusError(message);
+        if (!options.quiet) setWorkspaceStatus(message);
+      } finally {
+        if (gitStatusRequestRef.current === requestID) {
+          setGitStatusLoading(false);
+        }
+      }
+    },
+    [gitCompare, gitScope, gitTarget, onLoadGitStatus, workspaceID]
+  );
+
+  const loadGitDiff = useCallback(
+    async (path: string) => {
+      const targetPath = path.trim();
+      if (!workspaceID || !onLoadGitDiff || !targetPath) return;
+      setWorkspacePaneViewState("changes");
+      setGitSelectedPath(targetPath);
+      const requestID = ++gitDiffRequestRef.current;
+      setGitDiff(undefined);
+      setGitDiffLoading(true);
+      setGitDiffError(null);
+      try {
+        const diff = await onLoadGitDiff(
+          workspaceID,
+          gitScope,
+          targetPath,
+          gitScope === "branch" ? gitTarget : undefined,
+          gitScope === "branch" ? gitCompare : undefined
+        );
+        if (gitDiffRequestRef.current !== requestID) return;
+        setGitDiff(diff);
+        setWorkspaceStatus("Diff loaded");
+      } catch (err) {
+        if (gitDiffRequestRef.current !== requestID) return;
+        const message = err instanceof Error ? err.message : "Diff load failed";
+        setGitDiff(undefined);
+        setGitDiffError(message);
+        setWorkspaceStatus(message);
+      } finally {
+        if (gitDiffRequestRef.current === requestID) {
+          setGitDiffLoading(false);
+        }
+      }
+    },
+    [gitCompare, gitScope, gitTarget, onLoadGitDiff, workspaceID]
+  );
+
+  const setWorkspacePaneView = useCallback(
+    (view: WorkspacePaneView) => {
+      setWorkspacePaneViewState(view);
+      if (view === "changes") {
+        void loadGitStatus({ quiet: true });
+      }
+    },
+    [loadGitStatus]
+  );
+
+  const setGitScope = useCallback(
+    (scope: WorkspaceGitScope) => {
+      setGitScopeState(scope);
+      setGitDiff(undefined);
+      setGitDiffError(null);
+      setGitSelectedPath("");
+      if (workspacePaneView === "changes") {
+        void loadGitStatus({ quiet: true, scope, target: gitTarget, compare: gitCompare });
+      }
+    },
+    [gitCompare, gitTarget, loadGitStatus, workspacePaneView]
+  );
+
+  const setGitTarget = useCallback(
+    (target: string) => {
+      setGitTargetState(target);
+      setGitDiff(undefined);
+      setGitDiffError(null);
+      setGitSelectedPath("");
+      if (workspacePaneView === "changes" && gitScope === "branch") {
+        void loadGitStatus({ quiet: true, scope: "branch", target, compare: gitCompare });
+      }
+    },
+    [gitCompare, gitScope, loadGitStatus, workspacePaneView]
+  );
+
+  const setGitCompare = useCallback(
+    (compare: string) => {
+      setGitCompareState(compare);
+      setGitDiff(undefined);
+      setGitDiffError(null);
+      setGitSelectedPath("");
+      if (workspacePaneView === "changes" && gitScope === "branch") {
+        void loadGitStatus({ quiet: true, scope: "branch", target: gitTarget, compare });
+      }
+    },
+    [gitScope, gitTarget, loadGitStatus, workspacePaneView]
   );
 
   const saveFile = useCallback(async () => {
@@ -457,6 +644,8 @@ export function useWorkspaceFileBrowser({
     workspaceTreeRequestRef.current += 1;
     directoryRequestRef.current = {};
     fileRequestRef.current += 1;
+    gitStatusRequestRef.current += 1;
+    gitDiffRequestRef.current += 1;
     setTree(undefined);
     setWorkspaceTreeResetKey((current) => current + 1);
     setFilePath(initialPath);
@@ -470,6 +659,17 @@ export function useWorkspaceFileBrowser({
     setFileSaving(false);
     setFileDeleting(false);
     setEntryActionPending(false);
+    setWorkspacePaneViewState("files");
+    setGitScopeState("working_tree");
+    setGitTargetState("");
+    setGitCompareState("");
+    setGitStatus(undefined);
+    setGitStatusLoading(false);
+    setGitStatusError(null);
+    setGitDiff(undefined);
+    setGitDiffLoading(false);
+    setGitDiffError(null);
+    setGitSelectedPath("");
     setFileOpenPosition(undefined);
     setFileOpenRequestID(0);
     setFileViewMode("edit");
@@ -499,6 +699,18 @@ export function useWorkspaceFileBrowser({
     fileDeleting,
     entryActionPending,
     workspaceStatus,
+    workspacePaneView,
+    gitEnabled,
+    gitScope,
+    gitTarget,
+    gitCompare,
+    gitStatus,
+    gitStatusLoading,
+    gitStatusError,
+    gitDiff,
+    gitDiffLoading,
+    gitDiffError,
+    gitSelectedPath,
     fileOpenPosition,
     fileOpenRequestID,
     fileViewMode,
@@ -507,9 +719,15 @@ export function useWorkspaceFileBrowser({
     setFilePath,
     setFileBody,
     setFileViewMode,
+    setWorkspacePaneView,
+    setGitScope,
+    setGitTarget,
+    setGitCompare,
     loadTree,
     loadDirectory,
     loadFile,
+    loadGitStatus,
+    loadGitDiff,
     saveFile,
     deleteFile,
     createEntry,
@@ -616,6 +834,59 @@ function uniqueWorkspaceChildName(
   return `${stem}-${Date.now()}${extension}`;
 }
 
+function gitChangeCode(change: WorkspaceGitChange): string {
+  switch (change.status) {
+    case "added":
+      return "A";
+    case "deleted":
+      return "D";
+    case "renamed":
+      return "R";
+    case "copied":
+      return "C";
+    case "untracked":
+      return "?";
+    case "typechange":
+      return "T";
+    default:
+      return "M";
+  }
+}
+
+function gitChangeStatusLabel(status: WorkspaceGitChange["status"]): string {
+  switch (status) {
+    case "added":
+      return "Added";
+    case "deleted":
+      return "Deleted";
+    case "renamed":
+      return "Renamed";
+    case "copied":
+      return "Copied";
+    case "untracked":
+      return "Untracked";
+    case "typechange":
+      return "Type changed";
+    default:
+      return "Modified";
+  }
+}
+
+function gitChangeTone(status: WorkspaceGitChange["status"]): string {
+  switch (status) {
+    case "added":
+    case "untracked":
+      return "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+    case "deleted":
+      return "border-destructive/40 bg-destructive/10 text-destructive";
+    case "renamed":
+    case "copied":
+      return "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300";
+    default:
+      return "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  }
+}
+
 function workspaceEntryNameValidationError(name: string): string | null {
   const trimmed = name.trim();
   if (!trimmed) return "Name is required";
@@ -660,6 +931,7 @@ export function WorkspaceFileTreePane({
   ariaLabel = "Project files",
   className,
   onFileSelected,
+  onChangeSelected,
   toolbarEnd,
 }: {
   controller: WorkspaceFileBrowserController;
@@ -667,6 +939,7 @@ export function WorkspaceFileTreePane({
   ariaLabel?: string;
   className?: string;
   onFileSelected?: () => void;
+  onChangeSelected?: () => void;
   toolbarEnd?: ReactNode;
 }) {
   return (
@@ -693,14 +966,257 @@ export function WorkspaceFileTreePane({
           {toolbarEnd}
         </div>
       </div>
-      <div className="min-h-0 flex-1 p-3">
-        <WorkspaceFileTree
-          controller={controller}
-          ariaLabel={ariaLabel}
-          className="h-full"
-          onFileSelected={onFileSelected}
-        />
+      <div className="flex min-h-0 flex-1 flex-col gap-3 p-3">
+        {controller.gitEnabled && (
+          <WorkspacePaneViewSwitch controller={controller} />
+        )}
+        <div className="min-h-0 flex-1">
+          {controller.gitEnabled && controller.workspacePaneView === "changes" ? (
+            <WorkspaceGitChangesList
+              controller={controller}
+              className="h-full"
+              onChangeSelected={onChangeSelected}
+            />
+          ) : (
+            <WorkspaceFileTree
+              controller={controller}
+              ariaLabel={ariaLabel}
+              className="h-full"
+              onFileSelected={onFileSelected}
+            />
+          )}
+        </div>
       </div>
+    </div>
+  );
+}
+
+function WorkspacePaneViewSwitch({
+  controller,
+}: {
+  controller: WorkspaceFileBrowserController;
+}) {
+  return (
+    <div
+      className="grid grid-cols-2 rounded-md border border-border bg-background p-0.5"
+      role="group"
+      aria-label="Project files view"
+    >
+      <WorkspacePaneViewButton
+        selected={controller.workspacePaneView === "files"}
+        label="Files"
+        onClick={() => controller.setWorkspacePaneView("files")}
+      >
+        <FolderOpen className="h-3.5 w-3.5" />
+        Files
+      </WorkspacePaneViewButton>
+      <WorkspacePaneViewButton
+        selected={controller.workspacePaneView === "changes"}
+        label="Changes"
+        onClick={() => controller.setWorkspacePaneView("changes")}
+      >
+        <GitCompare className="h-3.5 w-3.5" />
+        Changes
+      </WorkspacePaneViewButton>
+    </div>
+  );
+}
+
+function WorkspacePaneViewButton({
+  selected,
+  label,
+  onClick,
+  children,
+}: {
+  selected: boolean;
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant={selected ? "secondary" : "ghost"}
+      className="h-7 justify-center gap-1.5 px-2 text-xs"
+      aria-label={label}
+      aria-pressed={selected}
+      onClick={onClick}
+    >
+      {children}
+    </Button>
+  );
+}
+
+function WorkspaceGitChangesList({
+  controller,
+  className,
+  onChangeSelected,
+}: {
+  controller: WorkspaceFileBrowserController;
+  className?: string;
+  onChangeSelected?: () => void;
+}) {
+  const status = controller.gitStatus?.scope === controller.gitScope ? controller.gitStatus : undefined;
+  const changes = status?.changes ?? [];
+  const branchTargets = status?.targets ?? [];
+  const baseBranch = branchTargets.length > 0 ? controller.gitTarget || status?.target || status?.base || "" : "";
+  const compareBranch = branchTargets.length > 0 ? controller.gitCompare || status?.compare || status?.branch || "" : "";
+
+  return (
+    <div className={cn("flex min-h-0 flex-col overflow-hidden rounded-md border border-border bg-background/50", className)}>
+      <div className="flex shrink-0 flex-col gap-2 border-b border-border p-2">
+        <div className="flex items-center gap-2">
+          <Select
+            value={controller.gitScope}
+            onChange={(event) => controller.setGitScope(event.target.value as WorkspaceGitScope)}
+            className="min-w-0 flex-1"
+            selectClassName="h-8 text-xs"
+            aria-label="Git change scope"
+          >
+            <option value="working_tree">Working tree</option>
+            <option value="branch">Branch</option>
+          </Select>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            title="Refresh changes"
+            aria-label="Refresh changes"
+            disabled={controller.gitStatusLoading || !controller.canUseWorkspace}
+            onClick={() => void controller.loadGitStatus()}
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", controller.gitStatusLoading && "animate-spin")} />
+          </Button>
+        </div>
+        {controller.gitScope === "branch" && (
+          <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1.5">
+            <Select
+              value={baseBranch}
+              onChange={(event) => controller.setGitTarget(event.target.value)}
+              className="min-w-0"
+              selectClassName="h-8 text-xs"
+              aria-label="Base branch"
+              disabled={controller.gitStatusLoading && !status}
+            >
+              {branchTargets.length > 0 ? (
+                branchTargets.map((target) => (
+                  <option key={target.name} value={target.name}>
+                    {target.name}
+                  </option>
+                ))
+              ) : (
+                <option value="">No branch</option>
+              )}
+            </Select>
+            <span className="shrink-0 text-[11px] text-muted-foreground">vs</span>
+            <Select
+              value={compareBranch}
+              onChange={(event) => controller.setGitCompare(event.target.value)}
+              className="min-w-0"
+              selectClassName="h-8 text-xs"
+              aria-label="Compare branch"
+              disabled={controller.gitStatusLoading && !status}
+            >
+              {branchTargets.length > 0 ? (
+                branchTargets.map((target) => (
+                  <option key={target.name} value={target.name}>
+                    {target.name}
+                  </option>
+                ))
+              ) : (
+                <option value="">No branch</option>
+              )}
+            </Select>
+          </div>
+        )}
+      </div>
+      {status?.available && (
+        <div className="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5 text-[11px] text-muted-foreground">
+          <GitBranch className="h-3 w-3 shrink-0" />
+          {controller.gitScope === "branch" && (status.target || status.base) ? (
+            <>
+              <span className="truncate">{status.target || status.base}</span>
+              <span className="shrink-0">vs</span>
+              <span className="truncate">{status.compare || status.branch || "HEAD"}</span>
+            </>
+          ) : (
+            <span className="truncate">{status.branch || "HEAD"}</span>
+          )}
+        </div>
+      )}
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {controller.gitStatusError ? (
+          <p className="px-3 py-2 text-xs text-destructive">{controller.gitStatusError}</p>
+        ) : controller.gitStatusLoading && !status ? (
+          <p className="px-3 py-2 text-xs text-muted-foreground">Loading...</p>
+        ) : status && !status.available ? (
+          <p className="px-3 py-2 text-xs text-muted-foreground">{status.message || "Git changes are unavailable."}</p>
+        ) : !status ? (
+          <p className="px-3 py-2 text-xs text-muted-foreground">Select Changes to load git status.</p>
+        ) : changes.length === 0 ? (
+          <p className="px-3 py-2 text-xs text-muted-foreground">No changes.</p>
+        ) : (
+          <div className="h-full overflow-auto p-2" role="list" aria-label="Git changes">
+            {changes.map((change) => (
+              <WorkspaceGitChangeRow
+                key={`${change.old_path ?? ""}:${change.path}:${change.status}`}
+                change={change}
+                selected={controller.gitSelectedPath === change.path}
+                onSelect={() => {
+                  void controller.loadGitDiff(change.path);
+                  onChangeSelected?.();
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WorkspaceGitChangeRow({
+  change,
+  selected,
+  onSelect,
+}: {
+  change: WorkspaceGitChange;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <div
+      role="listitem"
+      aria-label={`${gitChangeStatusLabel(change.status)} ${change.path}`}
+    >
+      <button
+        type="button"
+        className={cn(
+          "flex min-h-8 w-full items-center gap-2 rounded px-1.5 py-1 text-left text-xs transition-colors",
+          selected
+            ? "bg-accent text-foreground"
+            : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+        )}
+        onClick={onSelect}
+      >
+        <span
+          className={cn(
+            "flex h-5 min-w-5 shrink-0 items-center justify-center rounded border px-1 text-[10px] font-semibold uppercase",
+            gitChangeTone(change.status)
+          )}
+        >
+          {gitChangeCode(change)}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate">{change.path}</span>
+          {change.old_path && (
+            <span className="block truncate text-[11px] text-muted-foreground">
+              from {change.old_path}
+            </span>
+          )}
+        </span>
+      </button>
     </div>
   );
 }
@@ -1061,6 +1577,133 @@ export function WorkspaceFileEditorPane({
   );
 }
 
+export function WorkspaceGitDiffPane({
+  controller,
+  theme,
+  title = "Git diff",
+  contentAriaLabel = "Git diff preview",
+  className,
+  viewerClassName,
+  toolbarEnd,
+}: {
+  controller: WorkspaceFileBrowserController;
+  theme: ThemeMode;
+  title?: string;
+  contentAriaLabel?: string;
+  className?: string;
+  viewerClassName?: string;
+  toolbarEnd?: ReactNode;
+}) {
+  const diff = controller.gitDiff;
+  const path = diff?.path || controller.gitSelectedPath || title;
+  const [diffNavigationContainer, setDiffNavigationContainer] = useState<HTMLDivElement | null>(null);
+
+  return (
+    <div className={cn("flex h-full min-h-0 min-w-0 flex-col bg-background", className)} data-testid="project-git-diff-pane">
+      <div className="flex shrink-0 flex-col gap-2 border-b border-border p-3">
+        <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+          <FileDiff className="h-3.5 w-3.5 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-sm font-semibold text-foreground">{path}</h1>
+            <p className="truncate">
+              {gitScopeLabel(controller.gitScope)}
+              {diff?.target || diff?.base
+                ? ` - ${diff.target || diff.base} vs ${diff.compare || diff.branch || "HEAD"}`
+                : diff?.branch
+                  ? ` - ${diff.branch}`
+                  : ""}
+            </p>
+          </div>
+          {controller.workspaceStatus && (
+            <span className="shrink-0" aria-live="polite">
+              {controller.workspaceStatus}
+            </span>
+          )}
+          {diff ? (
+            <div
+              ref={setDiffNavigationContainer}
+              className="flex shrink-0 items-center"
+              data-testid="workspace-git-diff-navigation-host"
+            />
+          ) : null}
+          {toolbarEnd}
+        </div>
+      </div>
+      <div className={cn("relative min-h-0 flex-1", viewerClassName)}>
+        {controller.gitDiffLoading && (
+          <div className="absolute right-3 top-3 z-10 rounded border border-border bg-background/95 px-2 py-1 text-xs text-muted-foreground shadow-sm">
+            Loading...
+          </div>
+        )}
+        {controller.gitDiffError && !controller.gitDiffLoading ? (
+          <GitDiffMessage
+            title="Diff load failed"
+            message={controller.gitDiffError}
+            onRetry={controller.gitSelectedPath ? () => void controller.loadGitDiff(controller.gitSelectedPath) : undefined}
+          />
+        ) : diff ? (
+          <Suspense
+            fallback={
+              <div className="flex h-full min-h-[18rem] items-center justify-center text-xs text-muted-foreground">
+                Loading diff editor...
+              </div>
+            }
+          >
+            <LazyWorkspaceGitDiffViewer
+              diff={diff}
+              theme={theme}
+              contentAriaLabel={contentAriaLabel}
+              className="h-full"
+              navigationContainer={diffNavigationContainer}
+            />
+          </Suspense>
+        ) : (
+          <GitDiffMessage
+            title="No change selected"
+            message="Select a changed file to preview its diff."
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GitDiffMessage({
+  title,
+  message,
+  onRetry,
+}: {
+  title: string;
+  message: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <div className="flex h-full min-h-[18rem] items-center justify-center bg-background p-6" role="status">
+      <div className="max-w-md rounded-md border border-border bg-background p-4 text-center shadow-sm">
+        <FileDiff className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
+        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+        <p className="mt-2 text-xs text-muted-foreground">{message}</p>
+        {onRetry && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="mt-4 gap-1.5"
+            onClick={onRetry}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Retry
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function gitScopeLabel(scope: WorkspaceGitScope): string {
+  return scope === "branch" ? "Branch" : "Working tree";
+}
+
 function WorkspaceFileToolbar({
   controller,
   onDelete,
@@ -1294,6 +1937,8 @@ export function WorkspaceFileBrowser({
   onCreateEntry,
   onMoveEntry,
   onDeleteEntry,
+  onLoadGitStatus,
+  onLoadGitDiff,
 }: WorkspaceFileBrowserProps) {
   const [fileDeleteConfirmOpen, setFileDeleteConfirmOpen] = useState(false);
   const [treeDrawerOpen, setTreeDrawerOpen] = useState(false);
@@ -1311,6 +1956,8 @@ export function WorkspaceFileBrowser({
     onCreateEntry,
     onMoveEntry,
     onDeleteEntry,
+    onLoadGitStatus,
+    onLoadGitDiff,
   });
 
   useEffect(() => {

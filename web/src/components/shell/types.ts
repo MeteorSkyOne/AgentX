@@ -18,6 +18,9 @@ import type {
   UserPreferences,
   Workspace,
   WorkspaceEntryType,
+  WorkspaceGitDiff,
+  WorkspaceGitScope,
+  WorkspaceGitStatus,
   WorkspaceTreeEntry,
 } from "../../api/types";
 import type { ThemeMode } from "../../theme";
@@ -146,6 +149,19 @@ export interface ShellProps {
   ) => Promise<void>;
   onMoveWorkspaceEntry: (workspaceID: string, path: string, newPath: string) => Promise<void>;
   onDeleteWorkspaceEntry: (workspaceID: string, path: string) => Promise<void>;
+  onLoadWorkspaceGitStatus: (
+    workspaceID: string,
+    scope: WorkspaceGitScope,
+    target?: string,
+    compare?: string
+  ) => Promise<WorkspaceGitStatus>;
+  onLoadWorkspaceGitDiff: (
+    workspaceID: string,
+    scope: WorkspaceGitScope,
+    path: string,
+    target?: string,
+    compare?: string
+  ) => Promise<WorkspaceGitDiff>;
   onUpdateMessage: (messageID: string, body: string) => Promise<Message>;
   onDeleteMessage: (message: Message) => Promise<void>;
   onLoadOlderMessages: () => boolean;

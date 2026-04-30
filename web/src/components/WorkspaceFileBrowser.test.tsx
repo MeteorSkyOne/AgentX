@@ -5,6 +5,7 @@ import { useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   WorkspaceFileEditorPane,
+  WorkspaceFileTreePane,
   type WorkspaceFileBrowserController,
   type WorkspaceFileViewMode,
 } from "./WorkspaceFileBrowser";
@@ -17,6 +18,7 @@ vi.mock("./WorkspaceFileEditor", () => ({
     controller: WorkspaceFileBrowserController;
     className?: string;
   }) => <div className={className} data-testid="mock-workspace-file-editor">{controller.fileViewMode}</div>,
+  WorkspaceGitDiffViewer: () => <div data-testid="mock-workspace-git-diff-viewer" />,
 }));
 
 afterEach(() => {
@@ -95,6 +97,56 @@ describe("WorkspaceFileEditorPane markdown controls", () => {
     expect(screen.queryByRole("button", { name: "Preview Markdown" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Split Markdown view" })).toBeNull();
   });
+
+  it("renders project changes in the file tree pane", async () => {
+    const loadGitDiff = vi.fn(async () => undefined);
+    const setGitTarget = vi.fn();
+    const setGitCompare = vi.fn();
+
+    render(
+      <WorkspaceFileTreePaneHarness
+        controller={controllerFixture({
+          gitEnabled: true,
+          workspacePaneView: "changes",
+          gitScope: "branch",
+          gitTarget: "origin/main",
+          gitCompare: "feature",
+          gitStatus: {
+            available: true,
+            scope: "branch",
+            branch: "feature",
+            target: "origin/main",
+            compare: "feature",
+            targets: [
+              { name: "origin/main", default: true },
+              { name: "release" },
+              { name: "feature" },
+            ],
+            changes: [
+              { path: "src/main.go", status: "modified", unstaged: true },
+            ],
+          },
+          loadGitDiff,
+          setGitTarget,
+          setGitCompare,
+        })}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Changes" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.change(screen.getByRole("combobox", { name: "Base branch" }), {
+      target: { value: "release" },
+    });
+    expect(setGitTarget).toHaveBeenCalledWith("release");
+    fireEvent.change(screen.getByRole("combobox", { name: "Compare branch" }), {
+      target: { value: "origin/main" },
+    });
+    expect(setGitCompare).toHaveBeenCalledWith("origin/main");
+
+    fireEvent.click(screen.getByRole("button", { name: /src\/main.go/i }));
+
+    expect(loadGitDiff).toHaveBeenCalledWith("src/main.go");
+  });
 });
 
 function EditorPaneHarness({
@@ -130,6 +182,20 @@ function EditorPaneHarness({
   );
 }
 
+function WorkspaceFileTreePaneHarness({
+  controller,
+}: {
+  controller: WorkspaceFileBrowserController;
+}) {
+  return (
+    <WorkspaceFileTreePane
+      controller={controller}
+      title="Project files"
+      ariaLabel="Project files"
+    />
+  );
+}
+
 function controllerFixture(
   overrides: Partial<WorkspaceFileBrowserController> = {}
 ): WorkspaceFileBrowserController {
@@ -151,6 +217,18 @@ function controllerFixture(
     fileDeleting: false,
     entryActionPending: false,
     workspaceStatus: null,
+    workspacePaneView: "files",
+    gitEnabled: false,
+    gitScope: "working_tree",
+    gitTarget: "",
+    gitCompare: "",
+    gitStatus: undefined,
+    gitStatusLoading: false,
+    gitStatusError: null,
+    gitDiff: undefined,
+    gitDiffLoading: false,
+    gitDiffError: null,
+    gitSelectedPath: "",
     fileOpenPosition: undefined,
     fileOpenRequestID: 0,
     fileViewMode: "edit",
@@ -158,9 +236,15 @@ function controllerFixture(
     setFilePath: vi.fn(),
     setFileBody: vi.fn(),
     setFileViewMode: vi.fn(),
+    setWorkspacePaneView: vi.fn(),
+    setGitScope: vi.fn(),
+    setGitTarget: vi.fn(),
+    setGitCompare: vi.fn(),
     loadTree: vi.fn(async () => undefined),
     loadDirectory: vi.fn(async () => undefined),
     loadFile: vi.fn(async () => undefined),
+    loadGitStatus: vi.fn(async () => undefined),
+    loadGitDiff: vi.fn(async () => undefined),
     saveFile: vi.fn(async () => undefined),
     deleteFile: vi.fn(async () => undefined),
     createEntry: vi.fn(async () => null),

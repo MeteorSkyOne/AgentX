@@ -41,6 +41,8 @@ import {
   userPreferences,
   workspace,
   workspaceFile,
+  workspaceGitDiff,
+  workspaceGitStatus,
   workspaceTree,
   respondToInputRequest
 } from "./api/client";
@@ -61,6 +63,9 @@ import type {
   Thread,
   UserPreferences,
   WorkspaceEntryType,
+  WorkspaceGitDiff,
+  WorkspaceGitScope,
+  WorkspaceGitStatus,
   WorkspaceTreeEntry
 } from "./api/types";
 import { LoginView } from "./components/LoginView";
@@ -820,6 +825,25 @@ export default function App() {
     await deleteWorkspaceEntry(workspaceID, path);
   }
 
+  async function handleLoadWorkspaceGitStatus(
+    workspaceID: string,
+    scope: WorkspaceGitScope,
+    target?: string,
+    compare?: string
+  ): Promise<WorkspaceGitStatus> {
+    return workspaceGitStatus(workspaceID, scope, target, compare);
+  }
+
+  async function handleLoadWorkspaceGitDiff(
+    workspaceID: string,
+    scope: WorkspaceGitScope,
+    path: string,
+    target?: string,
+    compare?: string
+  ): Promise<WorkspaceGitDiff> {
+    return workspaceGitDiff(workspaceID, scope, path, target, compare);
+  }
+
   const handleToggleTheme = useCallback(() => {
     setTheme((current) => (current === "dark" ? "light" : "dark"));
   }, []);
@@ -906,6 +930,8 @@ export default function App() {
       onCreateWorkspaceEntry={handleCreateWorkspaceEntry}
       onMoveWorkspaceEntry={handleMoveWorkspaceEntry}
       onDeleteWorkspaceEntry={handleDeleteWorkspaceEntry}
+      onLoadWorkspaceGitStatus={handleLoadWorkspaceGitStatus}
+      onLoadWorkspaceGitDiff={handleLoadWorkspaceGitDiff}
       onUpdateMessage={handleUpdateMessage}
       onDeleteMessage={handleDeleteMessage}
       onLoadOlderMessages={handleLoadOlderMessages}

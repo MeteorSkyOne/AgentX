@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import Editor, { type OnMount } from "@monaco-editor/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import Editor, { DiffEditor, type DiffOnMount, type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
-import { CircleAlert, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronUp, CircleAlert, RefreshCw } from "lucide-react";
 import "@/lib/monaco";
 import type { WorkspaceFileEditorProps } from "./WorkspaceFileBrowser";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { WorkspacePathTarget } from "@/lib/workspacePaths";
+import type { WorkspaceGitDiff } from "@/api/types";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { isMarkdownFilePath, monacoLanguageForPath } from "./workspaceFileLanguages";
 
@@ -184,6 +186,148 @@ export function WorkspaceFileEditor({
   );
 }
 
+export function WorkspaceGitDiffViewer({
+  diff,
+  theme,
+  contentAriaLabel,
+  className,
+  navigationContainer,
+}: {
+  diff: WorkspaceGitDiff;
+  theme: "light" | "dark";
+  contentAriaLabel: string;
+  className?: string;
+  navigationContainer?: HTMLElement | null;
+}) {
+  const editorTheme = theme === "dark" ? "vs-dark" : "light";
+  const diffEditorRef = useRef<{
+    key: string;
+    instance: editor.IStandaloneDiffEditor;
+  } | null>(null);
+  const [diffNavigationState, setDiffNavigationState] = useState({
+    key: "",
+    hasChanges: false,
+  });
+  const language = useMemo(() => monacoLanguageForPath(diff.path), [diff.path]);
+  const originalModelPath = useMemo(
+    () => gitDiffModelPath("original", diff),
+    [diff]
+  );
+  const modifiedModelPath = useMemo(
+    () => gitDiffModelPath("modified", diff),
+    [diff]
+  );
+  const diffEditorKey = `${originalModelPath}\n${modifiedModelPath}`;
+  const hasDiffChanges =
+    diffNavigationState.key === diffEditorKey && diffNavigationState.hasChanges;
+  const options = useMemo<editor.IDiffEditorConstructionOptions>(
+    () => ({
+      ariaLabel: contentAriaLabel,
+      automaticLayout: true,
+      fontSize: 13,
+      hideUnchangedRegions: {
+        enabled: true,
+        contextLineCount: 3,
+        minimumLineCount: 8,
+        revealLineCount: 20,
+      },
+      minimap: { enabled: false },
+      originalEditable: false,
+      readOnly: true,
+      diffWordWrap: "off",
+      renderSideBySide: true,
+      scrollBeyondLastLine: false,
+      wordWrap: "off",
+    }),
+    [contentAriaLabel]
+  );
+  const handleDiffEditorMount = useCallback<DiffOnMount>((editorInstance) => {
+    const mountedDiffKey = diffEditorKey;
+    diffEditorRef.current = { key: mountedDiffKey, instance: editorInstance };
+
+    const updateChanges = () => {
+      setDiffNavigationState({
+        key: mountedDiffKey,
+        hasChanges: (editorInstance.getLineChanges()?.length ?? 0) > 0,
+      });
+    };
+    updateChanges();
+    const diffSubscription = editorInstance.onDidUpdateDiff(updateChanges);
+    const disposeSubscription = editorInstance.onDidDispose(() => {
+      diffSubscription.dispose();
+      disposeSubscription.dispose();
+      if (diffEditorRef.current?.instance === editorInstance) {
+        diffEditorRef.current = null;
+      }
+    });
+  }, [diffEditorKey]);
+  const navigateDiff = useCallback((target: "previous" | "next") => {
+    const currentEditor = diffEditorRef.current;
+    if (currentEditor?.key !== diffEditorKey) return;
+    currentEditor.instance.goToDiff(target);
+  }, [diffEditorKey]);
+  const navigationControls = (
+    <div
+      className="flex overflow-hidden rounded-md border border-border bg-background shadow-sm"
+      data-testid="workspace-git-diff-navigation"
+    >
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="ghost"
+        title="Previous change"
+        aria-label="Previous change"
+        disabled={!hasDiffChanges}
+        className="rounded-none"
+        onClick={() => navigateDiff("previous")}
+      >
+        <ChevronUp className="h-3.5 w-3.5" />
+      </Button>
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="ghost"
+        title="Next change"
+        aria-label="Next change"
+        disabled={!hasDiffChanges}
+        className="rounded-none border-l border-border"
+        onClick={() => navigateDiff("next")}
+      >
+        <ChevronDown className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+  );
+
+  return (
+    <div
+      className={cn("min-h-[18rem] min-w-0 overflow-hidden bg-background", className)}
+      data-testid="workspace-git-diff-viewer"
+      role="region"
+      aria-label="Git diff preview"
+    >
+      {navigationContainer ? createPortal(navigationControls, navigationContainer) : null}
+      <DiffEditor
+        key={diffEditorKey}
+        height="100%"
+        width="100%"
+        language={language}
+        original={diff.original}
+        modified={diff.modified}
+        originalModelPath={originalModelPath}
+        modifiedModelPath={modifiedModelPath}
+        theme={editorTheme}
+        options={options}
+        onMount={handleDiffEditorMount}
+        loading={
+          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+            Loading diff editor...
+          </div>
+        }
+      />
+    </div>
+  );
+}
+
 function MarkdownPreview({
   controller,
   onOpenWorkspacePath,
@@ -209,6 +353,14 @@ function MarkdownPreview({
       />
     </div>
   );
+}
+
+function gitDiffModelPath(side: "original" | "modified", diff: WorkspaceGitDiff): string {
+  const path = side === "original" ? diff.old_path || diff.path : diff.path;
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  const scope = encodeURIComponent(diff.scope);
+  const ref = encodeURIComponent(side === "original" ? diff.target || diff.base || "HEAD" : diff.compare || diff.branch || "workspace");
+  return `agentx://git-diff/${scope}/${ref}/${side}/${encodedPath}`;
 }
 
 function FileLoadErrorOverlay({

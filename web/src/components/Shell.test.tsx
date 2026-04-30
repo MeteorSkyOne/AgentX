@@ -232,6 +232,8 @@ function shellProps(): ShellProps {
     onCreateWorkspaceEntry: vi.fn(),
     onMoveWorkspaceEntry: vi.fn(),
     onDeleteWorkspaceEntry: vi.fn(),
+    onLoadWorkspaceGitStatus: vi.fn(),
+    onLoadWorkspaceGitDiff: vi.fn(),
     onUpdateMessage: vi.fn(),
     onDeleteMessage: vi.fn(),
     onLoadOlderMessages: vi.fn(),

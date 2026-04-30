@@ -273,6 +273,49 @@ export interface Workspace {
   updated_at: string;
 }
 
+export type WorkspaceGitScope = "working_tree" | "branch";
+
+export interface WorkspaceGitChange {
+  path: string;
+  old_path?: string;
+  status: "modified" | "added" | "deleted" | "renamed" | "copied" | "untracked" | "typechange";
+  staged?: boolean;
+  unstaged?: boolean;
+  untracked?: boolean;
+  index_status?: string;
+  work_status?: string;
+}
+
+export interface WorkspaceGitTarget {
+  name: string;
+  default?: boolean;
+}
+
+export interface WorkspaceGitStatus {
+  available: boolean;
+  scope: WorkspaceGitScope;
+  branch?: string;
+  base?: string;
+  target?: string;
+  compare?: string;
+  targets?: WorkspaceGitTarget[];
+  message?: string;
+  changes: WorkspaceGitChange[];
+}
+
+export interface WorkspaceGitDiff {
+  scope: WorkspaceGitScope;
+  branch?: string;
+  base?: string;
+  target?: string;
+  compare?: string;
+  path: string;
+  old_path?: string;
+  status: WorkspaceGitChange["status"];
+  original: string;
+  modified: string;
+}
+
 export interface ConversationBinding {
   id: string;
   organization_id: string;

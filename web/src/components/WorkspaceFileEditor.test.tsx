@@ -1,20 +1,74 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cloneElement, type ComponentProps, type ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WorkspaceFileEditor } from "./WorkspaceFileEditor";
+import { WorkspaceFileEditor, WorkspaceGitDiffViewer } from "./WorkspaceFileEditor";
 import type { WorkspaceFileBrowserController } from "./WorkspaceFileBrowser";
 
 vi.mock("@/lib/monaco", () => ({}));
 
-vi.mock("@monaco-editor/react", () => ({
-  default: ({ value }: { value: string }) => (
-    <div data-testid="mock-monaco-editor">{value}</div>
-  ),
+const diffEditorState = vi.hoisted(() => ({
+  mounts: 0,
+  navigationCalls: [] as string[],
 }));
+
+vi.mock("@monaco-editor/react", async () => {
+  const React = await import("react");
+
+  return {
+    default: ({ value }: { value: string }) => (
+      <div data-testid="mock-monaco-editor">{value}</div>
+    ),
+    DiffEditor: ({
+      original,
+      modified,
+      options,
+      onMount,
+    }: {
+      original: string;
+      modified: string;
+      options?: Record<string, unknown>;
+      onMount?: (editor: {
+        getLineChanges: () => unknown[];
+        goToDiff: (target: "next" | "previous") => void;
+        onDidUpdateDiff: (listener: () => void) => { dispose: () => void };
+        onDidDispose: (listener: () => void) => { dispose: () => void };
+      }, monaco: Record<string, never>) => void;
+    }) => {
+      React.useEffect(() => {
+        diffEditorState.mounts += 1;
+        onMount?.({
+          getLineChanges: () => [{ modifiedStartLineNumber: 1 }],
+          goToDiff: (target) => {
+            diffEditorState.navigationCalls.push(target);
+          },
+          onDidUpdateDiff: (listener) => {
+            const timer = window.setTimeout(listener, 0);
+            return { dispose: () => window.clearTimeout(timer) };
+          },
+          onDidDispose: () => ({ dispose: () => undefined }),
+        }, {});
+      }, [onMount]);
+
+      return (
+        <div data-testid="mock-monaco-diff-editor">
+          <span>{original}</span>
+          <span>{modified}</span>
+          <span data-testid="mock-monaco-diff-options">{JSON.stringify(options)}</span>
+        </div>
+      );
+    },
+  };
+});
 
 afterEach(() => {
   cleanup();
+  document.querySelectorAll("[data-testid='workspace-git-diff-navigation-host']").forEach((node) => {
+    node.remove();
+  });
+  diffEditorState.mounts = 0;
+  diffEditorState.navigationCalls = [];
 });
 
 describe("WorkspaceFileEditor markdown preview", () => {
@@ -73,6 +127,120 @@ describe("WorkspaceFileEditor markdown preview", () => {
   });
 });
 
+describe("WorkspaceGitDiffViewer", () => {
+  it("keeps diff lines unwrapped and collapses unchanged regions", () => {
+    renderDiffViewer(
+      <WorkspaceGitDiffViewer
+        diff={{
+          scope: "branch",
+          branch: "main",
+          base: "origin/main",
+          target: "origin/main",
+          path: "go.mod",
+          status: "modified",
+          original: "module example\n",
+          modified: "module example\n",
+        }}
+        theme="dark"
+        contentAriaLabel="Git diff"
+      />
+    );
+
+    const options = JSON.parse(screen.getByTestId("mock-monaco-diff-options").textContent ?? "{}");
+    expect(options.wordWrap).toBe("off");
+    expect(options.diffWordWrap).toBe("off");
+    expect(options.hideUnchangedRegions).toEqual({
+      enabled: true,
+      contextLineCount: 3,
+      minimumLineCount: 8,
+      revealLineCount: 20,
+    });
+    const navigationHost = screen.getByTestId("workspace-git-diff-navigation-host");
+    expect(navigationHost.className).toContain("shrink-0");
+    expect(navigationHost.className).not.toContain("absolute");
+  });
+
+  it("remounts the Monaco diff editor when switching changed files", () => {
+    const firstDiff = {
+      scope: "working_tree" as const,
+      branch: "main",
+      path: "internal/httpapi/httpapi_test.go",
+      status: "modified" as const,
+      original: "package httpapi\n",
+      modified: "package httpapi\n",
+    };
+    const { rerender } = renderDiffViewer(
+      <WorkspaceGitDiffViewer
+        diff={firstDiff}
+        theme="dark"
+        contentAriaLabel="Git diff"
+      />
+    );
+
+    expect(diffEditorState.mounts).toBe(1);
+
+    rerender(
+      <WorkspaceGitDiffViewer
+        diff={{
+          ...firstDiff,
+          path: "web/src/App.tsx",
+          original: "export function App() {}\n",
+          modified: "export function App() { return null }\n",
+        }}
+        theme="dark"
+        contentAriaLabel="Git diff"
+      />
+    );
+
+    expect(diffEditorState.mounts).toBe(2);
+  });
+
+  it("navigates to previous and next diff changes", async () => {
+    renderDiffViewer(
+      <WorkspaceGitDiffViewer
+        diff={{
+          scope: "working_tree",
+          branch: "main",
+          path: "web/src/App.tsx",
+          status: "modified",
+          original: "const before = 1\n",
+          modified: "const after = 1\n",
+        }}
+        theme="dark"
+        contentAriaLabel="Git diff"
+      />
+    );
+
+    const previousButton = screen.getByRole("button", { name: "Previous change" });
+    const nextButton = screen.getByRole("button", { name: "Next change" });
+    await waitFor(() => {
+      expect((previousButton as HTMLButtonElement).disabled).toBe(false);
+      expect((nextButton as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    fireEvent.click(previousButton);
+    fireEvent.click(nextButton);
+
+    expect(diffEditorState.navigationCalls).toEqual(["previous", "next"]);
+  });
+});
+
+function renderDiffViewer(
+  element: ReactElement<ComponentProps<typeof WorkspaceGitDiffViewer>>
+) {
+  const navigationContainer = document.createElement("div");
+  navigationContainer.setAttribute("data-testid", "workspace-git-diff-navigation-host");
+  navigationContainer.className = "flex shrink-0 items-center";
+  document.body.appendChild(navigationContainer);
+  const result = render(cloneElement(element, { navigationContainer }));
+  return {
+    ...result,
+    rerender: (nextElement: ReactElement<ComponentProps<typeof WorkspaceGitDiffViewer>>) => {
+      result.rerender(cloneElement(nextElement, { navigationContainer }));
+    },
+  };
+}
+
 function renderEditor(overrides: Partial<WorkspaceFileBrowserController> = {}) {
   const controller = controllerFixture(overrides);
   render(
@@ -106,6 +274,18 @@ function controllerFixture(
     fileDeleting: false,
     entryActionPending: false,
     workspaceStatus: null,
+    workspacePaneView: "files",
+    gitEnabled: false,
+    gitScope: "working_tree",
+    gitTarget: "",
+    gitCompare: "",
+    gitStatus: undefined,
+    gitStatusLoading: false,
+    gitStatusError: null,
+    gitDiff: undefined,
+    gitDiffLoading: false,
+    gitDiffError: null,
+    gitSelectedPath: "",
     fileOpenPosition: undefined,
     fileOpenRequestID: 0,
     fileViewMode: "edit",
@@ -113,9 +293,15 @@ function controllerFixture(
     setFilePath: vi.fn(),
     setFileBody: vi.fn(),
     setFileViewMode: vi.fn(),
+    setWorkspacePaneView: vi.fn(),
+    setGitScope: vi.fn(),
+    setGitTarget: vi.fn(),
+    setGitCompare: vi.fn(),
     loadTree: vi.fn(async () => undefined),
     loadDirectory: vi.fn(async () => undefined),
     loadFile: vi.fn(async () => undefined),
+    loadGitStatus: vi.fn(async () => undefined),
+    loadGitDiff: vi.fn(async () => undefined),
     saveFile: vi.fn(async () => undefined),
     deleteFile: vi.fn(async () => undefined),
     createEntry: vi.fn(async () => null),
