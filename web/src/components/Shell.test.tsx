@@ -30,6 +30,10 @@ vi.mock("./shell/MetricsPanel", () => ({
   MetricsPanel: () => <div data-testid="metrics-panel" />,
 }));
 
+vi.mock("./shell/AgentDetailsPanel", () => ({
+  AgentDetailsPanel: () => <div data-testid="agent-details-panel" />,
+}));
+
 vi.mock("./WorkspaceFileBrowser", () => ({
   useWorkspaceFileBrowser: () => ({
     workspaceID: "w1",
@@ -80,11 +84,11 @@ vi.mock("./WorkspaceFileBrowser", () => ({
   ),
 }));
 
-beforeEach(() => {
+function setMatchMedia(matchesMaxWidth: boolean) {
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     value: vi.fn().mockImplementation((query: string) => ({
-      matches: query.includes("max-width") ? false : true,
+      matches: query.includes("max-width") ? matchesMaxWidth : !matchesMaxWidth,
       media: query,
       onchange: null,
       addEventListener: vi.fn(),
@@ -94,6 +98,10 @@ beforeEach(() => {
       dispatchEvent: vi.fn(),
     })),
   });
+}
+
+beforeEach(() => {
+  setMatchMedia(false);
 });
 
 afterEach(() => {
@@ -133,6 +141,22 @@ describe("Shell project files overlay", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show project file tree" }));
 
     expect(screen.getByTestId("project-file-tree-pane")).toBeTruthy();
+  });
+});
+
+describe("Shell mobile panels", () => {
+  it("opens agent settings as a full-screen mobile dialog", () => {
+    setMatchMedia(true);
+    render(<Shell {...shellProps()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Agent settings" }));
+
+    const dialog = screen.getByTestId("mobile-agent-settings-dialog");
+    expect(dialog.className).toContain("!left-0");
+    expect(dialog.className).toContain("!w-[100svw]");
+    expect(dialog.className).toContain("!max-w-[100svw]");
+    expect(dialog.className).not.toContain("w-[96vw]");
+    expect(screen.getByTestId("agent-details-panel")).toBeTruthy();
   });
 });
 

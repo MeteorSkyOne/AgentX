@@ -1242,7 +1242,8 @@ export function Shell({
         <Dialog open={mobileAgentPanelOpen} onOpenChange={setMobileAgentPanelOpen}>
           <DialogContent
             showCloseButton={false}
-            className="left-auto right-0 top-0 !h-svh w-[96vw] max-w-md !translate-x-0 !translate-y-0 gap-0 overflow-hidden rounded-none border-y-0 border-r-0 p-0 sm:max-w-md"
+            data-testid="mobile-agent-settings-dialog"
+            className="!left-0 !right-auto !top-0 min-w-0 !h-svh !w-[100svw] !max-w-[100svw] !translate-x-0 !translate-y-0 gap-0 overflow-hidden rounded-none border-0 p-0"
           >
             <DialogTitle className="sr-only">Agent settings</DialogTitle>
             <DialogDescription className="sr-only">Manage agent settings and workspace files.</DialogDescription>
