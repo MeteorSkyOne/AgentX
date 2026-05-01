@@ -193,6 +193,55 @@ export interface Project {
   updated_at: string;
 }
 
+export type ScheduledTaskKind = "agent_prompt" | "shell_command";
+export type ScheduledTaskTrigger = "scheduled" | "manual";
+export type ScheduledTaskRunStatus = "running" | "completed" | "failed" | "skipped";
+
+export interface ScheduledTask {
+  id: string;
+  organization_id: string;
+  project_id: string;
+  name: string;
+  kind: ScheduledTaskKind;
+  enabled: boolean;
+  schedule: string;
+  timezone: string;
+  conversation_type?: ConversationType;
+  conversation_id?: string;
+  agent_id?: string;
+  workspace_id?: string;
+  prompt?: string;
+  command?: string;
+  timeout_seconds: number;
+  created_by: string;
+  last_run_id?: string;
+  last_run_status?: string;
+  last_run_at?: string;
+  last_finished_at?: string;
+  next_run_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScheduledTaskRun {
+  id: string;
+  task_id: string;
+  organization_id: string;
+  project_id: string;
+  kind: ScheduledTaskKind;
+  trigger: ScheduledTaskTrigger;
+  scheduled_for?: string;
+  started_at: string;
+  finished_at?: string;
+  status: ScheduledTaskRunStatus;
+  error?: string;
+  exit_code?: number;
+  stdout?: string;
+  stderr?: string;
+  output_truncated: boolean;
+  message_id?: string;
+}
+
 export type WorkspaceEntryType = "file" | "directory";
 
 export interface WorkspaceEntry {

@@ -46,6 +46,7 @@ type Config struct {
 	D2TimeoutSeconds            int
 	D2CacheTTLMinutes           int
 	D2CacheMaxEntries           int
+	ScheduledShellEnabled       bool
 }
 
 type ServerSettings struct {
@@ -109,6 +110,7 @@ func FromEnv() Config {
 		D2TimeoutSeconds:            getenvInt("AGENTX_D2_TIMEOUT_SECONDS", 10),
 		D2CacheTTLMinutes:           getenvInt("AGENTX_D2_CACHE_TTL_MINUTES", 1440),
 		D2CacheMaxEntries:           getenvInt("AGENTX_D2_CACHE_MAX_ENTRIES", 256),
+		ScheduledShellEnabled:       getenvBool("AGENTX_SCHEDULED_SHELL_ENABLED", false),
 	}
 }
 

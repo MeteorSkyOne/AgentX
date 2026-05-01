@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { AlertCircle, BookOpen, FileText, Image as ImageIcon, Paperclip, Reply, Send, Terminal, X } from "lucide-react";
 import { conversationSkills, sendMessage } from "../api/client";
 import type { Agent, ConversationAgentSkills, ConversationSkill, ConversationType, Message } from "../api/types";
@@ -52,17 +52,19 @@ export function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentsRef = useRef<DraftAttachment[]>([]);
   const trimmed = body.trim();
+  const commandToken = useMemo(() => slashCommandTokenAt(body, caret), [body, caret]);
+  const skillsConversation = conversation && commandToken ? conversation : null;
   const skillsQuery = useQuery({
-    queryKey: ["conversation-skills", conversation?.type, conversation?.id],
-    queryFn: () => conversationSkills(conversation!.type, conversation!.id),
-    enabled: Boolean(conversation),
+    queryKey: ["conversation-skills", skillsConversation?.type, skillsConversation?.id],
+    queryFn: skillsConversation
+      ? () => conversationSkills(skillsConversation.type, skillsConversation.id)
+      : skipToken,
     staleTime: 15_000
   });
   const allSlashCommands = useMemo(
     () => buildSlashCommandOptions(skillsQuery.data ?? [], mentionAgents.length > 1),
     [skillsQuery.data, mentionAgents.length]
   );
-  const commandToken = useMemo(() => slashCommandTokenAt(body, caret), [body, caret]);
   const commandIndicator = useMemo(
     () =>
       commandToken

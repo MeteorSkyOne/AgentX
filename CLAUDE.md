@@ -92,6 +92,7 @@ cmd/agentx/main.go (bootstrap)
 | `AGENTX_D2_TIMEOUT_SECONDS` | 10 | Per-render D2 CLI timeout |
 | `AGENTX_D2_CACHE_TTL_MINUTES` | 1440 | D2 SVG cache TTL |
 | `AGENTX_D2_CACHE_MAX_ENTRIES` | 256 | Maximum backend D2 SVG cache entries |
+| `AGENTX_SCHEDULED_SHELL_ENABLED` | false | Enable project scheduled shell command tasks |
 
 ## Database
 

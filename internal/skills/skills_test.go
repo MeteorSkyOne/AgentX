@@ -125,6 +125,25 @@ func TestCodexRootsIncludeHomeSuperpowersPluginsAndClaudeSkills(t *testing.T) {
 	}
 }
 
+func TestDiscoverIgnoresWorkspaceDotCodexFile(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".codex"), "")
+
+	result, err := Discover(DiscoverOptions{
+		AgentKind:       domain.AgentKindCodex,
+		ConfigWorkspace: root,
+		RunWorkspace:    root,
+		HomeDir:         filepath.Join(root, "home"),
+		Env:             map[string]string{"CODEX_HOME": filepath.Join(root, "codex-home")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 0 {
+		t.Fatalf("skills = %#v, want none", result)
+	}
+}
+
 func TestCodexRootsRespectConfiguredPluginAndSkillEnablement(t *testing.T) {
 	base := t.TempDir()
 	codexHome := filepath.Join(base, "codex")

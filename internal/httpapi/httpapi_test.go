@@ -230,6 +230,32 @@ Private conflict prompt.
 	}
 }
 
+func TestHTTPConversationSkillsIgnoresWorkspaceDotCodexFile(t *testing.T) {
+	ts := newTestServer(t)
+
+	bootstrap := setupHTTP(t, ts.URL)
+	emptyHome := t.TempDir()
+	patchJSON(t, ts.URL+"/api/agents/"+bootstrap.Agent.ID, bootstrap.SessionToken, map[string]any{
+		"kind": "codex",
+		"env": map[string]string{
+			"CODEX_HOME": filepath.Join(emptyHome, "codex"),
+			"HOME":       emptyHome,
+		},
+	}, http.StatusOK, nil)
+	if err := os.WriteFile(filepath.Join(bootstrap.Workspace.Path, ".codex"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var groups []app.ConversationAgentSkills
+	getJSON(t, ts.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/skills", bootstrap.SessionToken, http.StatusOK, &groups)
+	if len(groups) != 1 || groups[0].AgentID != bootstrap.Agent.ID {
+		t.Fatalf("skill groups = %#v", groups)
+	}
+	if len(groups[0].Skills) != 0 {
+		t.Fatalf("skills = %#v, want none", groups[0].Skills)
+	}
+}
+
 func TestHTTPD2RenderRequiresAuthAndCaches(t *testing.T) {
 	countPath := filepath.Join(t.TempDir(), "count")
 	t.Setenv("D2_COUNT_FILE", countPath)
@@ -500,6 +526,47 @@ func TestHTTPPreferencesAndMetricsEndpoints(t *testing.T) {
 	getJSON(t, ts.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/metrics?provider=bad", bootstrap.SessionToken, http.StatusBadRequest, nil)
 	getJSON(t, ts.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/metrics?group=bad", bootstrap.SessionToken, http.StatusBadRequest, nil)
 	getJSON(t, ts.URL+"/api/me/preferences", "", http.StatusUnauthorized, nil)
+}
+
+func TestHTTPScheduledTaskEndpointsCreateRunAndListHistory(t *testing.T) {
+	ts := newTestServer(t)
+	bootstrap := setupHTTP(t, ts.URL)
+
+	var task domain.ScheduledTask
+	postJSON(t, ts.URL+"/api/projects/"+bootstrap.Project.ID+"/scheduled-tasks", bootstrap.SessionToken, map[string]any{
+		"name":              "Daily ping",
+		"kind":              "agent_prompt",
+		"enabled":           false,
+		"schedule":          "@daily",
+		"timezone":          "UTC",
+		"conversation_type": "channel",
+		"conversation_id":   bootstrap.Channel.ID,
+		"agent_id":          bootstrap.Agent.ID,
+		"workspace_id":      bootstrap.ProjectWorkspace.ID,
+		"prompt":            "scheduled http ping",
+		"timeout_seconds":   60,
+	}, http.StatusOK, &task)
+	if task.ID == "" || task.Kind != domain.ScheduledTaskKindAgentPrompt {
+		t.Fatalf("task = %#v", task)
+	}
+
+	var tasks []domain.ScheduledTask
+	getJSON(t, ts.URL+"/api/projects/"+bootstrap.Project.ID+"/scheduled-tasks", bootstrap.SessionToken, http.StatusOK, &tasks)
+	if len(tasks) != 1 || tasks[0].ID != task.ID {
+		t.Fatalf("tasks = %#v", tasks)
+	}
+
+	var run domain.ScheduledTaskRun
+	postJSON(t, ts.URL+"/api/scheduled-tasks/"+task.ID+"/runs", bootstrap.SessionToken, map[string]any{}, http.StatusOK, &run)
+	if run.ID == "" || run.Status != domain.ScheduledTaskRunStatusRunning {
+		t.Fatalf("run = %#v", run)
+	}
+
+	var runs []domain.ScheduledTaskRun
+	requireEventually(t, 2*time.Second, func() bool {
+		getJSON(t, ts.URL+"/api/scheduled-tasks/"+task.ID+"/runs", bootstrap.SessionToken, http.StatusOK, &runs)
+		return len(runs) == 1 && runs[0].Status == domain.ScheduledTaskRunStatusCompleted && runs[0].MessageID != ""
+	})
 }
 
 func TestHTTPSendMessageRejectsUnknownChannelWithoutCreatingOrphan(t *testing.T) {

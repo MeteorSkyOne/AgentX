@@ -104,6 +104,10 @@ func (s *Store) Metrics() store.MetricsStore {
 	return metricsRepo{q: s.db}
 }
 
+func (s *Store) ScheduledTasks() store.ScheduledTaskStore {
+	return scheduledTaskRepo{q: s.db}
+}
+
 func (t *txStore) Users() store.UserStore {
 	return userRepo{q: t.tx}
 }
@@ -166,4 +170,8 @@ func (t *txStore) Sessions() store.SessionStore {
 
 func (t *txStore) Metrics() store.MetricsStore {
 	return metricsRepo{q: t.tx}
+}
+
+func (t *txStore) ScheduledTasks() store.ScheduledTaskStore {
+	return scheduledTaskRepo{q: t.tx}
 }

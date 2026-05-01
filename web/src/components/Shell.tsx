@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   BarChart3,
   Bot,
+  CalendarClock,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -74,6 +75,7 @@ import { uniqueAgents, uniqueConversationAgents } from "./shell/agentLists";
 import { ConversationPanel } from "./shell/ConversationPanel";
 import { MembersPanel } from "./shell/MembersPanel";
 import { MetricsPanel } from "./shell/MetricsPanel";
+import { TasksPanel } from "./shell/TasksPanel";
 import {
   useWorkspaceFileBrowser,
   WorkspaceFileEditorPane,
@@ -166,7 +168,7 @@ export function Shell({
   const [membersPanelOpen, setMembersPanelOpen] = useState(false);
   const [projectFilesOpen, setProjectFilesOpen] = useState(false);
   const [projectFileTreeCollapsed, setProjectFileTreeCollapsed] = useState(false);
-  const [mainView, setMainView] = useState<"chat" | "metrics">("chat");
+  const [mainView, setMainView] = useState<"chat" | "metrics" | "tasks">("chat");
   const [mobileProjectFilesView, setMobileProjectFilesView] = useState<"tree" | "editor">("tree");
   const [mobileEditorHeaderCollapsed, setMobileEditorHeaderCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -269,6 +271,7 @@ export function Shell({
   const projectFilesController = useWorkspaceFileBrowser({
     workspaceID: projectWorkspace?.id,
     workspacePath: projectWorkspace?.path,
+    autoLoadTree: false,
     onLoadTree: onLoadWorkspaceTree,
     onReadFile: onReadWorkspaceFile,
     onWriteFile: onWriteWorkspaceFile,
@@ -652,6 +655,19 @@ export function Shell({
     setMainView("metrics");
   }
 
+  function openTasks() {
+    if (!project) return;
+    blurActiveElement();
+    setProjectFilesOpen(false);
+    setMobileProjectFilesView("tree");
+    setAgentPanelOpen(false);
+    setMembersPanelOpen(false);
+    setMobileNavOpen(false);
+    setMobileAgentPanelOpen(false);
+    setMobileMembersPanelOpen(false);
+    setMainView("tasks");
+  }
+
   function toggleProjectFiles() {
     if (projectFilesOpen) {
       blurActiveElement();
@@ -794,8 +810,9 @@ export function Shell({
 
   const title = conversationTitle(selectedChannel, activeThread, boundAgents.map((item) => item.agent));
   const subtitle = conversationSubtitle(selectedChannel, activeThread, boundAgents.length);
-  const headerTitle = mainView === "metrics" ? "Metrics" : title;
-  const headerSubtitle = mainView === "metrics" ? project?.name ?? "No project" : subtitle;
+  const headerTitle = mainView === "metrics" ? "Metrics" : mainView === "tasks" ? "Tasks" : title;
+  const headerSubtitle =
+    mainView === "metrics" || mainView === "tasks" ? project?.name ?? "No project" : subtitle;
   const activityLabel = conversationActivityLabel(connectionStatus, streaming.length > 0);
   const composerConversation =
     activeConversation && selectedChannel?.type === "text"
@@ -884,18 +901,32 @@ export function Shell({
               </Button>
             </>
           ) : showMobileProjectFilesButton ? (
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn("h-11 w-11", projectFilesOpen && "bg-accent")}
-              title="Project files"
-              aria-label="Project files"
-              aria-pressed={projectFilesOpen}
-              disabled={!projectWorkspace?.id}
-              onClick={toggleProjectFiles}
-            >
-              <FolderOpen className="h-5 w-5" />
-            </Button>
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn("h-11 w-11", mainView === "tasks" && "bg-accent")}
+                title="Tasks"
+                aria-label="Tasks"
+                aria-pressed={mainView === "tasks"}
+                disabled={!project}
+                onClick={openTasks}
+              >
+                <CalendarClock className="h-5 w-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn("h-11 w-11", projectFilesOpen && "bg-accent")}
+                title="Project files"
+                aria-label="Project files"
+                aria-pressed={projectFilesOpen}
+                disabled={!projectWorkspace?.id}
+                onClick={toggleProjectFiles}
+              >
+                <FolderOpen className="h-5 w-5" />
+              </Button>
+            </>
           ) : null}
           {!projectFilesOpen ? (
             <>
@@ -967,6 +998,15 @@ export function Shell({
               project={project}
               selectedChannel={selectedChannel}
               activeConversation={activeConversation}
+            />
+          ) : mainView === "tasks" ? (
+            <TasksPanel
+              project={project}
+              projectWorkspace={projectWorkspace}
+              channels={channels}
+              threads={threads}
+              activeConversation={activeConversation}
+              agents={activeAgents}
             />
           ) : (
             <ConversationPanel
@@ -1148,6 +1188,23 @@ export function Shell({
                     onUpdate={onUpdateChannel}
                     onDelete={onDeleteChannel}
                   />
+
+                  <button
+                    className={cn(
+                      "mt-2 flex min-h-10 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors",
+                      mainView === "tasks"
+                        ? "bg-accent text-accent-foreground"
+                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    )}
+                    disabled={!project}
+                    onClick={() => {
+                      setMobileNavOpen(false);
+                      openTasks();
+                    }}
+                  >
+                    <CalendarClock className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0 truncate">Tasks</span>
+                  </button>
 
                   <AgentsSidebar
                     agents={activeAgents}
@@ -1421,6 +1478,20 @@ export function Shell({
                     onDelete={onDeleteChannel}
                   />
 
+                  <button
+                    className={cn(
+                      "mt-2 flex min-h-10 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors",
+                      mainView === "tasks"
+                        ? "bg-accent text-accent-foreground"
+                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    )}
+                    disabled={!project}
+                    onClick={openTasks}
+                  >
+                    <CalendarClock className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0 truncate">Tasks</span>
+                  </button>
+
                   {/* Agents Section */}
                   <AgentsSidebar
                     agents={activeAgents}
@@ -1544,6 +1615,18 @@ export function Shell({
                 <Button
                   variant="ghost"
                   size="icon"
+                  className={cn("h-8 w-8", mainView === "tasks" && "bg-accent")}
+                  title="Tasks"
+                  aria-label="Tasks"
+                  aria-pressed={mainView === "tasks"}
+                  disabled={!project}
+                  onClick={openTasks}
+                >
+                  <CalendarClock className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
                   className="h-8 w-8"
                   title="Project files"
                   aria-label="Project files"
@@ -1584,6 +1667,15 @@ export function Shell({
                 project={project}
                 selectedChannel={selectedChannel}
                 activeConversation={activeConversation}
+              />
+            ) : mainView === "tasks" ? (
+              <TasksPanel
+                project={project}
+                projectWorkspace={projectWorkspace}
+                channels={channels}
+                threads={threads}
+                activeConversation={activeConversation}
+                agents={activeAgents}
               />
             ) : (
             <ConversationPanel

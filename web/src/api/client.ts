@@ -18,6 +18,9 @@ import type {
   NotificationSettings,
   Organization,
   Project,
+  ScheduledTask,
+  ScheduledTaskKind,
+  ScheduledTaskRun,
   ServerSettings,
   ServerSettingsUpdatePayload,
   Thread,
@@ -244,6 +247,69 @@ export function projectMetrics(
   const params = metricsParams(options);
   return request<AgentRunMetric[]>(
     `/api/projects/${encodeURIComponent(projectID)}/metrics${params}`
+  );
+}
+
+export type ScheduledTaskPayload = {
+  name: string;
+  kind: ScheduledTaskKind;
+  enabled: boolean;
+  schedule: string;
+  timezone: string;
+  conversation_type?: ConversationType | "";
+  conversation_id?: string;
+  agent_id?: string;
+  workspace_id?: string;
+  prompt?: string;
+  command?: string;
+  timeout_seconds: number;
+};
+
+export function scheduledTasks(projectID: string): Promise<ScheduledTask[]> {
+  return request<ScheduledTask[]>(
+    `/api/projects/${encodeURIComponent(projectID)}/scheduled-tasks`
+  );
+}
+
+export function createScheduledTask(
+  projectID: string,
+  payload: ScheduledTaskPayload
+): Promise<ScheduledTask> {
+  return request<ScheduledTask>(
+    `/api/projects/${encodeURIComponent(projectID)}/scheduled-tasks`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }
+  );
+}
+
+export function updateScheduledTask(
+  taskID: string,
+  payload: Partial<ScheduledTaskPayload>
+): Promise<ScheduledTask> {
+  return request<ScheduledTask>(`/api/scheduled-tasks/${encodeURIComponent(taskID)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteScheduledTask(taskID: string): Promise<void> {
+  return request<void>(`/api/scheduled-tasks/${encodeURIComponent(taskID)}`, {
+    method: "DELETE"
+  });
+}
+
+export function runScheduledTask(taskID: string): Promise<ScheduledTaskRun> {
+  return request<ScheduledTaskRun>(`/api/scheduled-tasks/${encodeURIComponent(taskID)}/runs`, {
+    method: "POST"
+  });
+}
+
+export function scheduledTaskRuns(taskID: string, limit = 20): Promise<ScheduledTaskRun[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return request<ScheduledTaskRun[]>(
+    `/api/scheduled-tasks/${encodeURIComponent(taskID)}/runs?${params.toString()}`
   );
 }
 

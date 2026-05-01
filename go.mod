@@ -6,6 +6,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/pressly/goose/v3 v3.27.1
+	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/crypto v0.50.0
 	golang.org/x/sync v0.20.0
 	modernc.org/sqlite v1.49.1

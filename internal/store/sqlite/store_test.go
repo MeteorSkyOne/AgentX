@@ -891,6 +891,101 @@ func TestWorkspaceTimestampRoundTrip(t *testing.T) {
 	}
 }
 
+func TestScheduledTasksRoundTripTaskAndRuns(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	defer st.Close()
+
+	fixture := seedBindingFixture(t, ctx, st)
+	project := domain.Project{
+		ID:             "prj_scheduled",
+		OrganizationID: fixture.org.ID,
+		Name:           "Scheduled",
+		WorkspaceID:    fixture.workspace1.ID,
+		CreatedBy:      fixture.user.ID,
+		CreatedAt:      fixture.now,
+		UpdatedAt:      fixture.now,
+	}
+	if err := st.Projects().Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	nextRunAt := fixture.now.Add(time.Hour)
+	task := domain.ScheduledTask{
+		ID:               "tsk_1",
+		OrganizationID:   fixture.org.ID,
+		ProjectID:        project.ID,
+		Name:             "Daily check",
+		Kind:             domain.ScheduledTaskKindAgentPrompt,
+		Enabled:          true,
+		Schedule:         "0 9 * * *",
+		Timezone:         "UTC",
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   "chn_scheduled",
+		AgentID:          fixture.agent1.ID,
+		WorkspaceID:      fixture.workspace1.ID,
+		Prompt:           "status",
+		TimeoutSeconds:   600,
+		CreatedBy:        fixture.user.ID,
+		NextRunAt:        &nextRunAt,
+		CreatedAt:        fixture.now,
+		UpdatedAt:        fixture.now,
+	}
+	if err := st.ScheduledTasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := st.ScheduledTasks().ListByProject(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != task.ID || tasks[0].NextRunAt == nil {
+		t.Fatalf("tasks = %#v", tasks)
+	}
+
+	startedAt := fixture.now.Add(2 * time.Hour)
+	run := domain.ScheduledTaskRun{
+		ID:             "trn_1",
+		TaskID:         task.ID,
+		OrganizationID: fixture.org.ID,
+		ProjectID:      project.ID,
+		Kind:           task.Kind,
+		Trigger:        domain.ScheduledTaskTriggerManual,
+		StartedAt:      startedAt,
+		Status:         domain.ScheduledTaskRunStatusRunning,
+	}
+	if err := st.ScheduledTasks().CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	exitCode := 7
+	finishedAt := startedAt.Add(time.Second)
+	run.Status = domain.ScheduledTaskRunStatusFailed
+	run.FinishedAt = &finishedAt
+	run.ExitCode = &exitCode
+	run.Stdout = "out"
+	run.Stderr = "err"
+	run.OutputTruncated = true
+	if err := st.ScheduledTasks().UpdateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ScheduledTasks().UpdateScheduleState(ctx, task.ID, run.ID, string(run.Status), &run.StartedAt, run.FinishedAt, nil, finishedAt); err != nil {
+		t.Fatal(err)
+	}
+
+	runs, err := st.ScheduledTasks().ListRunsByTask(ctx, task.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || runs[0].ExitCode == nil || *runs[0].ExitCode != exitCode || !runs[0].OutputTruncated {
+		t.Fatalf("runs = %#v", runs)
+	}
+	updated, err := st.ScheduledTasks().ByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.LastRunID != run.ID || updated.LastRunStatus != string(run.Status) || updated.NextRunAt != nil {
+		t.Fatalf("updated task = %#v", updated)
+	}
+}
+
 func TestConcurrentOpenSeparateFiles(t *testing.T) {
 	const stores = 8
 

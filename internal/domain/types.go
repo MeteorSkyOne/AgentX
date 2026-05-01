@@ -34,9 +34,9 @@ const (
 )
 
 const (
-	AgentKindFake            = "fake"
-	AgentKindCodex           = "codex"
-	AgentKindClaude          = "claude"
+	AgentKindFake             = "fake"
+	AgentKindCodex            = "codex"
+	AgentKindClaude           = "claude"
 	AgentKindClaudePersistent = "claude-persistent"
 	AgentKindCodexPersistent  = "codex-persistent"
 )
@@ -182,6 +182,74 @@ type ChannelAgent struct {
 	RunWorkspaceID string    `json:"run_workspace_id,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type ScheduledTaskKind string
+
+const (
+	ScheduledTaskKindAgentPrompt  ScheduledTaskKind = "agent_prompt"
+	ScheduledTaskKindShellCommand ScheduledTaskKind = "shell_command"
+)
+
+type ScheduledTaskTrigger string
+
+const (
+	ScheduledTaskTriggerScheduled ScheduledTaskTrigger = "scheduled"
+	ScheduledTaskTriggerManual    ScheduledTaskTrigger = "manual"
+)
+
+type ScheduledTaskRunStatus string
+
+const (
+	ScheduledTaskRunStatusRunning   ScheduledTaskRunStatus = "running"
+	ScheduledTaskRunStatusCompleted ScheduledTaskRunStatus = "completed"
+	ScheduledTaskRunStatusFailed    ScheduledTaskRunStatus = "failed"
+	ScheduledTaskRunStatusSkipped   ScheduledTaskRunStatus = "skipped"
+)
+
+type ScheduledTask struct {
+	ID               string            `json:"id"`
+	OrganizationID   string            `json:"organization_id"`
+	ProjectID        string            `json:"project_id"`
+	Name             string            `json:"name"`
+	Kind             ScheduledTaskKind `json:"kind"`
+	Enabled          bool              `json:"enabled"`
+	Schedule         string            `json:"schedule"`
+	Timezone         string            `json:"timezone"`
+	ConversationType ConversationType  `json:"conversation_type,omitempty"`
+	ConversationID   string            `json:"conversation_id,omitempty"`
+	AgentID          string            `json:"agent_id,omitempty"`
+	WorkspaceID      string            `json:"workspace_id,omitempty"`
+	Prompt           string            `json:"prompt,omitempty"`
+	Command          string            `json:"command,omitempty"`
+	TimeoutSeconds   int               `json:"timeout_seconds"`
+	CreatedBy        string            `json:"created_by"`
+	LastRunID        string            `json:"last_run_id,omitempty"`
+	LastRunStatus    string            `json:"last_run_status,omitempty"`
+	LastRunAt        *time.Time        `json:"last_run_at,omitempty"`
+	LastFinishedAt   *time.Time        `json:"last_finished_at,omitempty"`
+	NextRunAt        *time.Time        `json:"next_run_at,omitempty"`
+	CreatedAt        time.Time         `json:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at"`
+}
+
+type ScheduledTaskRun struct {
+	ID              string                 `json:"id"`
+	TaskID          string                 `json:"task_id"`
+	OrganizationID  string                 `json:"organization_id"`
+	ProjectID       string                 `json:"project_id"`
+	Kind            ScheduledTaskKind      `json:"kind"`
+	Trigger         ScheduledTaskTrigger   `json:"trigger"`
+	ScheduledFor    *time.Time             `json:"scheduled_for,omitempty"`
+	StartedAt       time.Time              `json:"started_at"`
+	FinishedAt      *time.Time             `json:"finished_at,omitempty"`
+	Status          ScheduledTaskRunStatus `json:"status"`
+	Error           string                 `json:"error,omitempty"`
+	ExitCode        *int                   `json:"exit_code,omitempty"`
+	Stdout          string                 `json:"stdout,omitempty"`
+	Stderr          string                 `json:"stderr,omitempty"`
+	OutputTruncated bool                   `json:"output_truncated"`
+	MessageID       string                 `json:"message_id,omitempty"`
 }
 
 type Message struct {

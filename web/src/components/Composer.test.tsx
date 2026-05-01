@@ -52,6 +52,21 @@ describe("selectDraftAttachmentFiles", () => {
 });
 
 describe("Composer slash command autocomplete", () => {
+  it("does not load dynamic skills until slash autocomplete is active", async () => {
+    const textarea = renderComposer({ skills: [] });
+
+    await nextTick();
+    expect(conversationSkills).not.toHaveBeenCalled();
+
+    setTextareaValue(textarea, "hello", 5);
+    await nextTick();
+    expect(conversationSkills).not.toHaveBeenCalled();
+
+    setTextareaValue(textarea, "/", 1);
+    expect(await screen.findByText("/skills")).toBeTruthy();
+    expect(conversationSkills).toHaveBeenCalledTimes(1);
+  });
+
   it("shows the static /skills command", () => {
     const textarea = renderComposer({ skills: [] });
 
@@ -167,6 +182,10 @@ function setTextareaValue(textarea: HTMLTextAreaElement, value: string, caret: n
   fireEvent.change(textarea, { target: { value } });
   textarea.setSelectionRange(caret, caret);
   fireEvent.keyUp(textarea);
+}
+
+function nextTick() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function agent(

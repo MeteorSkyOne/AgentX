@@ -157,6 +157,7 @@ export function useWorkspaceFileBrowser({
   workspaceID,
   workspacePath,
   initialPath = "",
+  autoLoadTree = true,
   onLoadTree,
   onReadFile,
   onWriteFile,
@@ -166,7 +167,7 @@ export function useWorkspaceFileBrowser({
   onDeleteEntry,
   onLoadGitStatus,
   onLoadGitDiff,
-}: Omit<WorkspaceFileBrowserProps, "theme">): WorkspaceFileBrowserController {
+}: Omit<WorkspaceFileBrowserProps, "theme"> & { autoLoadTree?: boolean }): WorkspaceFileBrowserController {
   const [filePath, setFilePath] = useState(initialPath);
   const [fileBody, setFileBody] = useState("");
   const [tree, setTree] = useState<WorkspaceTreeEntry>();
@@ -677,10 +678,10 @@ export function useWorkspaceFileBrowser({
   }, [initialPath, workspaceID]);
 
   useEffect(() => {
-    if (workspaceID) {
+    if (autoLoadTree && workspaceID) {
       void loadTree({ quiet: true });
     }
-  }, [initialPath, loadTree, workspaceID]);
+  }, [autoLoadTree, initialPath, loadTree, workspaceID]);
 
   return {
     workspaceID,

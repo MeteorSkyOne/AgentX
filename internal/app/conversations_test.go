@@ -95,6 +95,87 @@ func TestSendMessagePersistsUserMessageAndFakeBotReply(t *testing.T) {
 	}
 }
 
+func TestScheduledAgentPromptCreatesSystemMessageAndRunsAgent(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	task, err := app.CreateScheduledTask(ctx, ScheduledTaskCreateRequest{
+		UserID:           bootstrap.User.ID,
+		ProjectID:        bootstrap.Project.ID,
+		Name:             "Ping agent",
+		Kind:             domain.ScheduledTaskKindAgentPrompt,
+		Enabled:          false,
+		Schedule:         "@daily",
+		Timezone:         "UTC",
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		AgentID:          bootstrap.Agent.ID,
+		WorkspaceID:      bootstrap.ProjectWorkspace.ID,
+		Prompt:           "scheduled ping",
+		TimeoutSeconds:   60,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := app.RunScheduledTaskNow(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requireEventuallyApp(t, 2*time.Second, func() bool {
+		runs, err := app.ScheduledTaskRuns(ctx, task.ID, 10)
+		if err != nil || len(runs) == 0 {
+			return false
+		}
+		return runs[0].ID == run.ID && runs[0].Status == domain.ScheduledTaskRunStatusCompleted && runs[0].MessageID != ""
+	})
+	messages, err := app.ListMessages(ctx, domain.ConversationChannel, bootstrap.Channel.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("messages len = %d, want 2: %#v", len(messages), messages)
+	}
+	if messages[0].SenderType != domain.SenderSystem || messages[0].Body != "scheduled ping" {
+		t.Fatalf("scheduled message = %#v", messages[0])
+	}
+	if messages[1].SenderType != domain.SenderBot || messages[1].Body != "Echo: scheduled ping" {
+		t.Fatalf("bot message = %#v", messages[1])
+	}
+}
+
+func TestScheduledShellTaskRequiresGlobalEnable(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	_, err := app.CreateScheduledTask(ctx, ScheduledTaskCreateRequest{
+		UserID:         bootstrap.User.ID,
+		ProjectID:      bootstrap.Project.ID,
+		Name:           "Shell",
+		Kind:           domain.ScheduledTaskKindShellCommand,
+		Enabled:        false,
+		Schedule:       "@daily",
+		Timezone:       "UTC",
+		WorkspaceID:    bootstrap.ProjectWorkspace.ID,
+		Command:        "echo ok",
+		TimeoutSeconds: 60,
+	})
+	if !errors.Is(err, ErrInvalidInput) || !strings.Contains(InvalidInputMessage(err), "disabled") {
+		t.Fatalf("err = %v, want disabled invalid input", err)
+	}
+}
+
+func TestScheduledTaskScheduleSupportsEveryDescriptor(t *testing.T) {
+	_, err := nextScheduledTaskRunAt(domain.ScheduledTask{
+		Enabled:  true,
+		Schedule: "@every 5m",
+		Timezone: "UTC",
+	}, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSendReplyMessageResolvesReferenceAndDeletedPlaceholder(t *testing.T) {
 	ctx := context.Background()
 	app, _, bootstrap := newConversationTestApp(t, ctx)

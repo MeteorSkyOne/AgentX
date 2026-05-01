@@ -17,23 +17,24 @@ import (
 )
 
 type Options struct {
-	AdminToken        string
-	DataDir           string
-	ServerSettings    config.ServerSettings
-	ServerAddr        string
-	AddrOverride      bool
-	AddrOverrideValue string
-	DefaultAgentKind  string
-	DefaultAgentName  string
-	DefaultAgentModel string
-	Runtimes          map[string]agentruntime.Runtime
-	ProviderLimits    ProviderLimitOptions
-	WebhookHTTPClient *http.Client
-	WebhookTimeout    time.Duration
-	D2Command         string
-	D2Timeout         time.Duration
-	D2CacheTTL        time.Duration
-	D2CacheMaxEntries int
+	AdminToken            string
+	DataDir               string
+	ServerSettings        config.ServerSettings
+	ServerAddr            string
+	AddrOverride          bool
+	AddrOverrideValue     string
+	DefaultAgentKind      string
+	DefaultAgentName      string
+	DefaultAgentModel     string
+	Runtimes              map[string]agentruntime.Runtime
+	ProviderLimits        ProviderLimitOptions
+	WebhookHTTPClient     *http.Client
+	WebhookTimeout        time.Duration
+	D2Command             string
+	D2Timeout             time.Duration
+	D2CacheTTL            time.Duration
+	D2CacheMaxEntries     int
+	ScheduledShellEnabled bool
 }
 
 type pendingQuestionKey struct {
@@ -52,9 +53,12 @@ type App struct {
 	opts           Options
 	providerLimits *providerLimitService
 	d2Renderer     *d2Renderer
+	scheduledTasks *scheduledTaskScheduler
 
 	pendingQuestionsMu sync.Mutex
 	pendingQuestions   map[pendingQuestionKey]*pendingQuestion
+	scheduledRunsMu    sync.Mutex
+	scheduledRuns      map[string]struct{}
 }
 
 func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
@@ -75,6 +79,7 @@ func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
 			CacheMaxEntries: opts.D2CacheMaxEntries,
 		}),
 		pendingQuestions: make(map[pendingQuestionKey]*pendingQuestion),
+		scheduledRuns:    make(map[string]struct{}),
 	}
 }
 

@@ -566,17 +566,25 @@ export default function App() {
   }
 
   function selectChannel(channel: Channel) {
+    const nextConversation =
+      channel.type === "text"
+        ? {
+            type: "channel" as ConversationType,
+            id: channel.id,
+            projectID: channel.project_id,
+            channelID: channel.id
+          }
+        : undefined;
+    const currentKey = conversationKey(activeConversation);
+    const nextKey = conversationKey(nextConversation);
+
     setSelectedChannelID(channel.id);
+    if (currentKey === nextKey) {
+      return;
+    }
     setConversationMessages([]);
-    if (channel.type === "text") {
-      setActiveConversation({
-        type: "channel",
-        id: channel.id,
-        projectID: channel.project_id,
-        channelID: channel.id
-      });
-    } else {
-      setActiveConversation(undefined);
+    setActiveConversation(nextConversation);
+    if (!nextConversation) {
       setMessagesLoading(false);
       setOlderMessagesLoading(false);
       setMessageHistoryHasMore(false);

@@ -107,24 +107,30 @@ func main() {
 	defer shutdownRuntimes(runtimes)
 
 	a := app.New(st, bus, app.Options{
-		AdminToken:        cfg.AdminToken,
-		DataDir:           cfg.DataDir,
-		ServerSettings:    cfg.Server,
-		ServerAddr:        cfg.Addr,
-		AddrOverride:      cfg.AddrOverrideActive,
-		AddrOverrideValue: cfg.AddrOverrideValue,
-		DefaultAgentKind:  cfg.DefaultAgentKind,
-		DefaultAgentModel: cfg.DefaultAgentModel,
-		D2Command:         cfg.D2Command,
-		D2Timeout:         time.Duration(cfg.D2TimeoutSeconds) * time.Second,
-		D2CacheTTL:        time.Duration(cfg.D2CacheTTLMinutes) * time.Minute,
-		D2CacheMaxEntries: cfg.D2CacheMaxEntries,
+		AdminToken:            cfg.AdminToken,
+		DataDir:               cfg.DataDir,
+		ServerSettings:        cfg.Server,
+		ServerAddr:            cfg.Addr,
+		AddrOverride:          cfg.AddrOverrideActive,
+		AddrOverrideValue:     cfg.AddrOverrideValue,
+		DefaultAgentKind:      cfg.DefaultAgentKind,
+		DefaultAgentModel:     cfg.DefaultAgentModel,
+		D2Command:             cfg.D2Command,
+		D2Timeout:             time.Duration(cfg.D2TimeoutSeconds) * time.Second,
+		D2CacheTTL:            time.Duration(cfg.D2CacheTTLMinutes) * time.Minute,
+		D2CacheMaxEntries:     cfg.D2CacheMaxEntries,
+		ScheduledShellEnabled: cfg.ScheduledShellEnabled,
 		ProviderLimits: app.ProviderLimitOptions{
 			CodexCommand:  cfg.CodexCommand,
 			ClaudeCommand: cfg.ClaudeCommand,
 		},
 		Runtimes: runtimes,
 	})
+	if err := a.StartScheduledTasks(ctx); err != nil {
+		slog.Error("start scheduled tasks", "error", err)
+		os.Exit(1)
+	}
+	defer a.StopScheduledTasks()
 	if err := printSetupTokenIfNeeded(ctx, os.Stdout, st.Users(), cfg.AdminToken); err != nil {
 		slog.Error("check setup status", "error", err)
 		os.Exit(1)

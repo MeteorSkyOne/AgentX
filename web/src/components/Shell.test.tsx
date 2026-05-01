@@ -15,7 +15,15 @@ vi.mock("@/components/ui/resizable", () => ({
 }));
 
 vi.mock("./ChannelList", () => ({
-  ChannelList: () => <div data-testid="channel-list" />,
+  ChannelList: ({ channels, onSelect }: any) => (
+    <div data-testid="channel-list">
+      {channels[0] ? (
+        <button type="button" onClick={() => onSelect(channels[0])}>
+          {channels[0].name}
+        </button>
+      ) : null}
+    </div>
+  ),
 }));
 
 vi.mock("./shell/AgentsSidebar", () => ({
@@ -28,6 +36,10 @@ vi.mock("./shell/ConversationPanel", () => ({
 
 vi.mock("./shell/MetricsPanel", () => ({
   MetricsPanel: () => <div data-testid="metrics-panel" />,
+}));
+
+vi.mock("./shell/TasksPanel", () => ({
+  TasksPanel: () => <div data-testid="tasks-panel" />,
 }));
 
 vi.mock("./shell/AgentDetailsPanel", () => ({
@@ -141,6 +153,19 @@ describe("Shell project files overlay", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show project file tree" }));
 
     expect(screen.getByTestId("project-file-tree-pane")).toBeTruthy();
+  });
+});
+
+describe("Shell main views", () => {
+  it("returns to the conversation when the selected channel is opened from tasks", () => {
+    render(<Shell {...shellProps()} />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Tasks" })[0]);
+    expect(screen.getByTestId("tasks-panel")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "general" }));
+    expect(screen.getByTestId("conversation-panel")).toBeTruthy();
+    expect(screen.queryByTestId("tasks-panel")).toBeNull();
   });
 });
 

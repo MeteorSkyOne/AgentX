@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/BurntSushi/toml"
 	"github.com/meteorsky/agentx/internal/domain"
@@ -235,17 +236,14 @@ func discoverFilter(opts DiscoverOptions) (rootFilter, error) {
 func scanRoot(root string, reserved map[string]struct{}, filter rootFilter) ([]Skill, error) {
 	resolved, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) {
+		if pathUnavailable(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
 	info, err := os.Stat(resolved)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		if errors.Is(err, os.ErrPermission) {
+		if pathUnavailable(err) {
 			return nil, nil
 		}
 		return nil, err
@@ -290,6 +288,12 @@ func scanRoot(root string, reserved map[string]struct{}, filter rootFilter) ([]S
 		return nil, err
 	}
 	return result, nil
+}
+
+func pathUnavailable(err error) bool {
+	return errors.Is(err, os.ErrNotExist) ||
+		errors.Is(err, os.ErrPermission) ||
+		errors.Is(err, syscall.ENOTDIR)
 }
 
 func ParseFile(path string, reserved map[string]struct{}) (Skill, error) {

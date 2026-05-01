@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   WorkspaceFileEditorPane,
   WorkspaceFileTreePane,
+  useWorkspaceFileBrowser,
   type WorkspaceFileBrowserController,
   type WorkspaceFileViewMode,
 } from "./WorkspaceFileBrowser";
@@ -26,6 +27,18 @@ afterEach(() => {
 });
 
 describe("WorkspaceFileEditorPane markdown controls", () => {
+  it("can defer tree loading until explicitly requested", async () => {
+    const onLoadTree = vi.fn(async () => workspaceTreeFixture());
+
+    render(<WorkspaceFileBrowserHookHarness autoLoadTree={false} onLoadTree={onLoadTree} />);
+
+    await waitFor(() => expect(onLoadTree).not.toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Load tree" }));
+
+    await waitFor(() => expect(onLoadTree).toHaveBeenCalledTimes(1));
+  });
+
   it("collapses and expands the file path bar", () => {
     render(
       <EditorPaneHarness
@@ -149,6 +162,29 @@ describe("WorkspaceFileEditorPane markdown controls", () => {
   });
 });
 
+function WorkspaceFileBrowserHookHarness({
+  autoLoadTree,
+  onLoadTree,
+}: {
+  autoLoadTree: boolean;
+  onLoadTree: () => Promise<any>;
+}) {
+  const controller = useWorkspaceFileBrowser({
+    workspaceID: "w1",
+    workspacePath: "/workspace/AgentX",
+    autoLoadTree,
+    onLoadTree,
+    onReadFile: async () => "",
+    onWriteFile: async () => undefined,
+    onDeleteFile: async () => undefined,
+  });
+  return (
+    <button type="button" onClick={() => void controller.loadTree()}>
+      Load tree
+    </button>
+  );
+}
+
 function EditorPaneHarness({
   filePath,
   toolbarEnd,
@@ -180,6 +216,16 @@ function EditorPaneHarness({
       headerControlsPlacement={headerControlsPlacement}
     />
   );
+}
+
+function workspaceTreeFixture() {
+  return {
+    name: "",
+    path: "",
+    type: "directory" as const,
+    children: [],
+    children_loaded: true,
+  };
 }
 
 function WorkspaceFileTreePaneHarness({

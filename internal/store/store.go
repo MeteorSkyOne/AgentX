@@ -25,6 +25,7 @@ type Store interface {
 	Bindings() BindingStore
 	Sessions() SessionStore
 	Metrics() MetricsStore
+	ScheduledTasks() ScheduledTaskStore
 }
 
 type Tx interface {
@@ -44,6 +45,7 @@ type Tx interface {
 	Bindings() BindingStore
 	Sessions() SessionStore
 	Metrics() MetricsStore
+	ScheduledTasks() ScheduledTaskStore
 }
 
 type UserStore interface {
@@ -171,4 +173,17 @@ type MetricsStore interface {
 	ListAgentSummariesByConversation(ctx context.Context, conversationType domain.ConversationType, conversationID string, filter MetricsFilter) ([]domain.AgentRunMetric, error)
 	ListAgentSummariesByChannel(ctx context.Context, channelID string, filter MetricsFilter) ([]domain.AgentRunMetric, error)
 	ListAgentSummariesByProject(ctx context.Context, projectID string, filter MetricsFilter) ([]domain.AgentRunMetric, error)
+}
+
+type ScheduledTaskStore interface {
+	Create(ctx context.Context, task domain.ScheduledTask) error
+	Update(ctx context.Context, task domain.ScheduledTask) error
+	Delete(ctx context.Context, id string) error
+	ByID(ctx context.Context, id string) (domain.ScheduledTask, error)
+	ListByProject(ctx context.Context, projectID string) ([]domain.ScheduledTask, error)
+	ListEnabled(ctx context.Context) ([]domain.ScheduledTask, error)
+	UpdateScheduleState(ctx context.Context, taskID string, lastRunID string, lastRunStatus string, lastRunAt *time.Time, lastFinishedAt *time.Time, nextRunAt *time.Time, updatedAt time.Time) error
+	CreateRun(ctx context.Context, run domain.ScheduledTaskRun) error
+	UpdateRun(ctx context.Context, run domain.ScheduledTaskRun) error
+	ListRunsByTask(ctx context.Context, taskID string, limit int) ([]domain.ScheduledTaskRun, error)
 }
