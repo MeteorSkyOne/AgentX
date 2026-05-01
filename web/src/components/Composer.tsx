@@ -544,7 +544,7 @@ export function Composer({
               placeholder={conversation ? `Message ${conversation.label}` : "Select a conversation"}
               aria-label="Message"
               rows={1}
-              className="min-h-6 flex-1 resize-none border-0 bg-transparent px-0 py-0 text-sm leading-6 text-foreground placeholder:text-muted-foreground/80 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+              className="min-h-6 flex-1 resize-none border-0 bg-transparent px-0 py-0 text-base md:text-sm leading-6 text-foreground placeholder:text-muted-foreground/80 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
               style={{ height: "24px", overflow: "hidden" }}
             />
             <Button
