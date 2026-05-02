@@ -587,13 +587,23 @@ func notificationParams(msg jsonRPCMessage) map[string]any {
 	}
 }
 
+func normalizeItemType(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "-", "_")
+	return strings.ToLower(value)
+}
+
 func itemToProcessItem(item map[string]any, status string) *runtime.ProcessItem {
 	if item == nil {
 		return nil
 	}
-	itemType, _ := item["type"].(string)
+	rawType, _ := item["type"].(string)
+	itemType := normalizeItemType(rawType)
 	switch itemType {
-	case "function_call", "command_execution", "file_change", "mcp_tool_call", "web_search":
+	case "function_call", "functioncall", "command_execution", "commandexecution",
+		"file_change", "filechange", "mcp_tool_call", "mcptoolcall",
+		"web_search", "websearch", "file_search", "filesearch",
+		"dynamic_tool_call", "dynamictoolcall", "tool_call", "toolcall":
 		pi := &runtime.ProcessItem{
 			Type:       "tool_call",
 			ToolName:   itemToolName(item),

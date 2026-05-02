@@ -198,6 +198,119 @@ func TestCompletedPlanFallsBackWhenNoDeltaStreamed(t *testing.T) {
 	}
 }
 
+func TestItemToProcessItemNormalizesTypes(t *testing.T) {
+	cases := []struct {
+		name     string
+		itemType string
+		wantType string
+	}{
+		{"snake_case", "command_execution", "tool_call"},
+		{"camelCase", "commandExecution", "tool_call"},
+		{"function_call", "function_call", "tool_call"},
+		{"functionCall", "functionCall", "tool_call"},
+		{"fileChange", "fileChange", "tool_call"},
+		{"file_change", "file_change", "tool_call"},
+		{"mcpToolCall", "mcpToolCall", "tool_call"},
+		{"mcp_tool_call", "mcp_tool_call", "tool_call"},
+		{"webSearch", "webSearch", "tool_call"},
+		{"web_search", "web_search", "tool_call"},
+		{"fileSearch", "fileSearch", "tool_call"},
+		{"dynamicToolCall", "dynamicToolCall", "tool_call"},
+		{"reasoning", "reasoning", "thinking"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			item := map[string]any{
+				"type": tc.itemType,
+				"id":   "call_1",
+				"name": "test_tool",
+			}
+			if tc.wantType == "thinking" {
+				item["text"] = "thinking about it"
+			}
+			pi := itemToProcessItem(item, "started")
+			if pi == nil {
+				t.Fatalf("itemToProcessItem(%q) = nil, want %q", tc.itemType, tc.wantType)
+			}
+			if pi.Type != tc.wantType {
+				t.Fatalf("process item type = %q, want %q", pi.Type, tc.wantType)
+			}
+		})
+	}
+}
+
+func TestItemToProcessItemRejectsUnknownTypes(t *testing.T) {
+	unknowns := []string{"message", "agent_message", "plan", "unknown", ""}
+	for _, itemType := range unknowns {
+		t.Run(itemType, func(t *testing.T) {
+			item := map[string]any{"type": itemType, "id": "x"}
+			if pi := itemToProcessItem(item, "started"); pi != nil {
+				t.Fatalf("itemToProcessItem(%q) = %#v, want nil", itemType, pi)
+			}
+		})
+	}
+}
+
+func TestItemStartedEmitsToolCallProcessItem(t *testing.T) {
+	s := &persistentSession{events: make(chan runtime.Event, 4)}
+	state := newNotificationState()
+
+	s.handleNotification(jsonRPCMessage{
+		Method: "item/started",
+		Params: map[string]any{
+			"item": map[string]any{
+				"type":    "commandExecution",
+				"id":      "cmd_1",
+				"command": "ls -la",
+			},
+		},
+	}, state)
+
+	evt := <-s.events
+	if evt.Type != runtime.EventDelta {
+		t.Fatalf("event type = %v, want EventDelta", evt.Type)
+	}
+	if len(evt.Process) != 1 {
+		t.Fatalf("process items = %d, want 1", len(evt.Process))
+	}
+	pi := evt.Process[0]
+	if pi.Type != "tool_call" || pi.ToolCallID != "cmd_1" || pi.Status != "started" {
+		t.Fatalf("process item = %#v", pi)
+	}
+}
+
+func TestItemCompletedEmitsToolCallProcessItem(t *testing.T) {
+	s := &persistentSession{events: make(chan runtime.Event, 4)}
+	state := newNotificationState()
+
+	s.handleNotification(jsonRPCMessage{
+		Method: "item/completed",
+		Params: map[string]any{
+			"item": map[string]any{
+				"type":   "commandExecution",
+				"id":     "cmd_1",
+				"name":   "Bash",
+				"output": "README.md\n",
+			},
+		},
+	}, state)
+
+	evt := <-s.events
+	if evt.Type != runtime.EventDelta {
+		t.Fatalf("event type = %v, want EventDelta", evt.Type)
+	}
+	if len(evt.Process) != 1 {
+		t.Fatalf("process items = %d, want 1", len(evt.Process))
+	}
+	pi := evt.Process[0]
+	if pi.Type != "tool_call" || pi.ToolCallID != "cmd_1" || pi.Status != "completed" {
+		t.Fatalf("process item = %#v", pi)
+	}
+	if pi.Output != "README.md\n" {
+		t.Fatalf("output = %v, want README.md", pi.Output)
+	}
+}
+
 func collaborationModeFromParams(t *testing.T, params map[string]any) map[string]any {
 	t.Helper()
 	mode, ok := params["collaborationMode"].(map[string]any)
