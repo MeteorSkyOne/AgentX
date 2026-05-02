@@ -45,8 +45,17 @@ describe("CodeBlock", () => {
     render(<CodeBlock className="language-ts">const x = 1;{"\n"}</CodeBlock>);
 
     expect(screen.getByTestId("code-block")).not.toBeNull();
+    expect(screen.getByTestId("code-block-shell").className).toContain("not-prose");
+    expect(screen.getByTestId("code-block").querySelectorAll(".token[style]").length).toBeGreaterThan(0);
     expect(screen.queryByTestId("mock-mermaid")).toBeNull();
     expect(screen.queryByTestId("mock-d2")).toBeNull();
+  });
+
+  it("normalizes common markdown code fence language aliases", () => {
+    render(<CodeBlock className="language-c++">const int value = 1;{"\n"}</CodeBlock>);
+
+    expect(screen.getByText("c++")).toBeTruthy();
+    expect(screen.getByTestId("code-block").querySelectorAll(".token[style]").length).toBeGreaterThan(0);
   });
 
   it("uses a light code panel outside dark mode", () => {

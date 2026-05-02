@@ -285,6 +285,7 @@ export function Shell({
   const projectWorkspaceIDRef = useRef(projectWorkspace?.id);
   const projectLoadFileRef = useRef(projectFilesController.loadFile);
   const projectLoadTreeRef = useRef(projectFilesController.loadTree);
+  const projectFilesLoadedWorkspaceIDRef = useRef<string | undefined>(undefined);
   projectWorkspaceIDRef.current = projectWorkspace?.id;
   projectLoadFileRef.current = projectFilesController.loadFile;
   projectLoadTreeRef.current = projectFilesController.loadTree;
@@ -311,6 +312,18 @@ export function Shell({
   useEffect(() => {
     setMobileProjectFilesView("tree");
   }, [project?.id, projectWorkspace?.id]);
+
+  useEffect(() => {
+    if (!projectFilesOpen) {
+      projectFilesLoadedWorkspaceIDRef.current = undefined;
+      return;
+    }
+    if (!projectWorkspace?.id || projectFilesLoadedWorkspaceIDRef.current === projectWorkspace.id) {
+      return;
+    }
+    projectFilesLoadedWorkspaceIDRef.current = projectWorkspace.id;
+    void projectFilesController.loadTree({ quiet: true });
+  }, [projectFilesOpen, projectWorkspace?.id, projectFilesController.loadTree]);
 
   useEffect(() => {
     setAgentPanelOpen(false);
@@ -623,17 +636,20 @@ export function Shell({
     setMobileProjectFilesView("tree");
     setMobileEditorHeaderCollapsed(false);
     setProjectFilesOpen(true);
+    projectFilesLoadedWorkspaceIDRef.current = projectWorkspace.id;
     void projectFilesController.loadTree({ quiet: true });
   }
 
   const openWorkspacePath = useCallback((target: WorkspacePathTarget) => {
-    if (!projectWorkspaceIDRef.current) return;
+    const workspaceID = projectWorkspaceIDRef.current;
+    if (!workspaceID) return;
     blurActiveElement();
     setMobileNavOpen(false);
     setMobileAgentPanelOpen(false);
     setMobileMembersPanelOpen(false);
     setMobileProjectFilesView("editor");
     setProjectFilesOpen(true);
+    projectFilesLoadedWorkspaceIDRef.current = workspaceID;
     void projectLoadFileRef.current(target.path, {
       position: target.lineNumber
         ? { lineNumber: target.lineNumber, column: target.column ?? 1 }

@@ -6,6 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Shell } from "./Shell";
 import type { ShellProps } from "./shell/types";
 
+const workspaceBrowserMock = vi.hoisted(() => ({
+  loadTree: vi.fn(async () => undefined),
+  loadFile: vi.fn(async () => undefined),
+  useWorkspaceFileBrowser: vi.fn(),
+}));
+
 vi.mock("@/components/ui/resizable", () => ({
   ResizablePanelGroup: ({ children, className }: { children: ReactNode; className?: string }) => (
     <div className={className}>{children}</div>
@@ -47,41 +53,62 @@ vi.mock("./shell/AgentDetailsPanel", () => ({
 }));
 
 vi.mock("./WorkspaceFileBrowser", () => ({
-  useWorkspaceFileBrowser: () => ({
-    workspaceID: "w1",
-    workspacePath: "/workspace/AgentX",
-    filePath: "",
-    fileBody: "",
-    tree: undefined,
-    workspaceTreeResetKey: 0,
-    workspaceTreeLoading: false,
-    workspaceTreeError: null,
-    directoryLoadingPaths: new Set(),
-    directoryLoadErrors: {},
-    fileLoading: false,
-    fileLoadError: null,
-    fileSaving: false,
-    fileDeleting: false,
-    entryActionPending: false,
-    workspaceStatus: null,
-    fileOpenPosition: undefined,
-    fileOpenRequestID: 0,
-    fileViewMode: "edit",
-    trimmedPath: "",
-    canUseWorkspace: true,
-    setFilePath: () => undefined,
-    setFileBody: () => undefined,
-    setFileViewMode: () => undefined,
-    loadTree: async () => undefined,
-    loadDirectory: async () => undefined,
-    loadFile: async () => undefined,
-    saveFile: async () => undefined,
-    deleteFile: async () => undefined,
-    createEntry: async () => null,
-    renameEntry: async () => null,
-    deleteEntry: async () => undefined,
-    moveEntry: async () => null,
-  }),
+  useWorkspaceFileBrowser: (args: { workspaceID?: string; workspacePath?: string }) => {
+    workspaceBrowserMock.useWorkspaceFileBrowser(args);
+    return {
+      workspaceID: args.workspaceID,
+      workspacePath: args.workspacePath,
+      filePath: "",
+      fileBody: "",
+      tree: undefined,
+      workspaceTreeResetKey: 0,
+      workspaceTreeLoading: false,
+      workspaceTreeError: null,
+      directoryLoadingPaths: new Set(),
+      directoryLoadErrors: {},
+      fileLoading: false,
+      fileLoadError: null,
+      fileSaving: false,
+      fileDeleting: false,
+      entryActionPending: false,
+      workspaceStatus: null,
+      fileOpenPosition: undefined,
+      fileOpenRequestID: 0,
+      fileViewMode: "edit",
+      workspacePaneView: "files",
+      gitEnabled: false,
+      gitScope: "working_tree",
+      gitTarget: "",
+      gitCompare: "",
+      gitStatus: undefined,
+      gitStatusLoading: false,
+      gitStatusError: null,
+      gitDiff: undefined,
+      gitDiffLoading: false,
+      gitDiffError: null,
+      gitSelectedPath: "",
+      trimmedPath: "",
+      canUseWorkspace: Boolean(args.workspaceID),
+      setFilePath: () => undefined,
+      setFileBody: () => undefined,
+      setFileViewMode: () => undefined,
+      setWorkspacePaneView: () => undefined,
+      setGitScope: () => undefined,
+      setGitTarget: () => undefined,
+      setGitCompare: () => undefined,
+      loadTree: workspaceBrowserMock.loadTree,
+      loadDirectory: async () => undefined,
+      loadFile: workspaceBrowserMock.loadFile,
+      loadGitStatus: async () => undefined,
+      loadGitDiff: async () => undefined,
+      saveFile: async () => undefined,
+      deleteFile: async () => undefined,
+      createEntry: async () => null,
+      renameEntry: async () => null,
+      deleteEntry: async () => undefined,
+      moveEntry: async () => null,
+    };
+  },
   WorkspaceFileTreePane: ({ toolbarEnd }: { toolbarEnd?: ReactNode }) => (
     <div data-testid="project-file-tree-pane">{toolbarEnd}</div>
   ),
@@ -114,6 +141,9 @@ function setMatchMedia(matchesMaxWidth: boolean) {
 
 beforeEach(() => {
   setMatchMedia(false);
+  workspaceBrowserMock.loadTree.mockClear();
+  workspaceBrowserMock.loadFile.mockClear();
+  workspaceBrowserMock.useWorkspaceFileBrowser.mockClear();
 });
 
 afterEach(() => {
@@ -153,6 +183,37 @@ describe("Shell project files overlay", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show project file tree" }));
 
     expect(screen.getByTestId("project-file-tree-pane")).toBeTruthy();
+  });
+
+  it("reloads the tree when switching projects while project files are open", () => {
+    const props = shellProps();
+    const { rerender } = render(<Shell {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Project files" }));
+
+    expect(workspaceBrowserMock.loadTree).toHaveBeenCalledTimes(1);
+
+    const nextProject = {
+      ...props.project!,
+      id: "p2",
+      name: "Other",
+      workspace_id: "w2",
+    };
+    rerender(
+      <Shell
+        {...props}
+        projects={[props.project!, nextProject]}
+        project={nextProject}
+        projectWorkspace={{
+          ...props.projectWorkspace!,
+          id: "w2",
+          name: "Other",
+          path: "/workspace/Other",
+        }}
+      />
+    );
+
+    expect(workspaceBrowserMock.loadTree).toHaveBeenCalledTimes(2);
   });
 });
 

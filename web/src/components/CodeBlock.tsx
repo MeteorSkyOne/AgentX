@@ -21,6 +21,22 @@ import sql from "react-syntax-highlighter/dist/esm/languages/prism/sql";
 import rust from "react-syntax-highlighter/dist/esm/languages/prism/rust";
 import markdown from "react-syntax-highlighter/dist/esm/languages/prism/markdown";
 import diff from "react-syntax-highlighter/dist/esm/languages/prism/diff";
+import c from "react-syntax-highlighter/dist/esm/languages/prism/c";
+import cpp from "react-syntax-highlighter/dist/esm/languages/prism/cpp";
+import csharp from "react-syntax-highlighter/dist/esm/languages/prism/csharp";
+import docker from "react-syntax-highlighter/dist/esm/languages/prism/docker";
+import graphql from "react-syntax-highlighter/dist/esm/languages/prism/graphql";
+import hcl from "react-syntax-highlighter/dist/esm/languages/prism/hcl";
+import ini from "react-syntax-highlighter/dist/esm/languages/prism/ini";
+import java from "react-syntax-highlighter/dist/esm/languages/prism/java";
+import kotlin from "react-syntax-highlighter/dist/esm/languages/prism/kotlin";
+import lua from "react-syntax-highlighter/dist/esm/languages/prism/lua";
+import makefile from "react-syntax-highlighter/dist/esm/languages/prism/makefile";
+import php from "react-syntax-highlighter/dist/esm/languages/prism/php";
+import powershell from "react-syntax-highlighter/dist/esm/languages/prism/powershell";
+import ruby from "react-syntax-highlighter/dist/esm/languages/prism/ruby";
+import swift from "react-syntax-highlighter/dist/esm/languages/prism/swift";
+import toml from "react-syntax-highlighter/dist/esm/languages/prism/toml";
 
 SyntaxHighlighter.registerLanguage("typescript", typescript);
 SyntaxHighlighter.registerLanguage("ts", typescript);
@@ -47,6 +63,34 @@ SyntaxHighlighter.registerLanguage("rs", rust);
 SyntaxHighlighter.registerLanguage("markdown", markdown);
 SyntaxHighlighter.registerLanguage("md", markdown);
 SyntaxHighlighter.registerLanguage("diff", diff);
+SyntaxHighlighter.registerLanguage("c", c);
+SyntaxHighlighter.registerLanguage("cpp", cpp);
+SyntaxHighlighter.registerLanguage("c++", cpp);
+SyntaxHighlighter.registerLanguage("csharp", csharp);
+SyntaxHighlighter.registerLanguage("cs", csharp);
+SyntaxHighlighter.registerLanguage("c#", csharp);
+SyntaxHighlighter.registerLanguage("dockerfile", docker);
+SyntaxHighlighter.registerLanguage("docker", docker);
+SyntaxHighlighter.registerLanguage("graphql", graphql);
+SyntaxHighlighter.registerLanguage("gql", graphql);
+SyntaxHighlighter.registerLanguage("hcl", hcl);
+SyntaxHighlighter.registerLanguage("terraform", hcl);
+SyntaxHighlighter.registerLanguage("tf", hcl);
+SyntaxHighlighter.registerLanguage("ini", ini);
+SyntaxHighlighter.registerLanguage("env", ini);
+SyntaxHighlighter.registerLanguage("java", java);
+SyntaxHighlighter.registerLanguage("kotlin", kotlin);
+SyntaxHighlighter.registerLanguage("kt", kotlin);
+SyntaxHighlighter.registerLanguage("lua", lua);
+SyntaxHighlighter.registerLanguage("makefile", makefile);
+SyntaxHighlighter.registerLanguage("make", makefile);
+SyntaxHighlighter.registerLanguage("php", php);
+SyntaxHighlighter.registerLanguage("powershell", powershell);
+SyntaxHighlighter.registerLanguage("ps1", powershell);
+SyntaxHighlighter.registerLanguage("ruby", ruby);
+SyntaxHighlighter.registerLanguage("rb", ruby);
+SyntaxHighlighter.registerLanguage("swift", swift);
+SyntaxHighlighter.registerLanguage("toml", toml);
 
 type CodeTheme = "light" | "dark";
 
@@ -105,13 +149,14 @@ export function CodeBlock({
   className?: string;
   children?: ReactNode;
 }) {
-  const match = /language-([\w-]+)/.exec(className || "");
+  const match = /\blanguage-([^\s]+)/.exec(className || "");
 
   if (!match && !block) {
     return <code className={className}>{children}</code>;
   }
 
-  const language = match?.[1].toLowerCase() ?? "";
+  const displayLanguage = (match?.[1] ?? "").trim().toLowerCase();
+  const language = normalizeCodeLanguage(displayLanguage);
   const code = codeBlockText(children).replace(/\n$/, "");
 
   if (language === "mermaid" || language === "mmd") {
@@ -121,7 +166,13 @@ export function CodeBlock({
     return <D2Diagram source={code} />;
   }
 
-  return <FencedCodeBlock language={language} code={code} />;
+  return (
+    <FencedCodeBlock
+      language={language === "text" ? "" : language}
+      displayLanguage={displayLanguage || language}
+      code={code}
+    />
+  );
 }
 
 function codeBlockText(children: ReactNode): string {
@@ -134,11 +185,40 @@ function codeBlockText(children: ReactNode): string {
   return String(children);
 }
 
+function normalizeCodeLanguage(language: string): string {
+  const normalized = language.trim().toLowerCase();
+  switch (normalized) {
+    case "shell-session":
+    case "console":
+    case "terminal":
+    case "zsh":
+      return "bash";
+    case "dockerfile":
+      return "docker";
+    case "c++":
+      return "cpp";
+    case "c#":
+      return "csharp";
+    case "make":
+      return "makefile";
+    case "terraform":
+    case "tf":
+      return "hcl";
+    case "plaintext":
+    case "plain":
+      return "text";
+    default:
+      return normalized;
+  }
+}
+
 function FencedCodeBlock({
   language,
+  displayLanguage,
   code,
 }: {
   language: string;
+  displayLanguage: string;
   code: string;
 }) {
   const [copied, setCopied] = useState(false);
@@ -153,12 +233,12 @@ function FencedCodeBlock({
 
   return (
     <div
-      className="group/code relative my-2 min-w-0 w-full max-w-full overflow-hidden rounded-md border border-border bg-muted/60 dark:bg-sidebar"
+      className="not-prose group/code relative my-2 min-w-0 w-full max-w-full overflow-hidden rounded-md border border-border bg-muted/60 dark:bg-sidebar"
       data-testid="code-block-shell"
     >
       <div className="flex items-center justify-between px-3 pt-2">
-        {language && (
-          <span className="text-xs text-muted-foreground">{language}</span>
+        {displayLanguage && (
+          <span className="text-xs text-muted-foreground">{displayLanguage}</span>
         )}
         <button
           onClick={handleCopy}

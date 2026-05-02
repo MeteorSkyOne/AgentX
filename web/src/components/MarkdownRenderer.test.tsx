@@ -3,6 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
+import { waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
 import type { WorkspacePathTarget } from "@/lib/workspacePaths";
@@ -141,6 +142,23 @@ describe("MarkdownRenderer", () => {
     expect(html).toContain("<code");
     expect(html).toContain("|       |        |");
     expect(html).not.toContain("<pre");
+  });
+
+  it("renders labeled fenced code blocks with syntax highlighted tokens", async () => {
+    const { container } = renderClient(
+      <div className="prose">
+        <MarkdownRenderer text={"```ts\nconst x = 1;\n```"} />
+      </div>
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector("[data-testid='code-block-shell']")).not.toBeNull();
+    });
+
+    const shell = container.querySelector<HTMLElement>("[data-testid='code-block-shell']");
+    expect(shell?.className).toContain("not-prose");
+    expect(container.querySelectorAll("[data-testid='code-block'] .token[style]").length)
+      .toBeGreaterThan(0);
   });
 
   it("keeps external markdown links opening in a new tab", () => {
