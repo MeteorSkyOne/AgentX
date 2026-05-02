@@ -159,6 +159,30 @@ func (s *persistentSession) Close(ctx context.Context) error {
 	return nil
 }
 
+func (s *persistentSession) Stop(ctx context.Context) error {
+	s.mu.Lock()
+	s.alive = false
+	s.turnHeld = false
+	s.mu.Unlock()
+
+	s.closeOnce.Do(func() {
+		close(s.done)
+		close(s.events)
+	})
+
+	done := make(chan struct{})
+	go func() {
+		s.process.Kill()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (s *persistentSession) readEvents(ctx context.Context) {
 	defer func() {
 		s.releaseTurn()

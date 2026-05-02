@@ -47,6 +47,18 @@ type pendingQuestion struct {
 	session agentruntime.Session
 }
 
+type activeRunKey struct {
+	conversationType domain.ConversationType
+	conversationID   string
+	agentID          string
+}
+
+type activeAgentRun struct {
+	runID   string
+	cancel  context.CancelCauseFunc
+	session agentruntime.Session
+}
+
 type App struct {
 	store          store.Store
 	bus            *eventbus.Bus
@@ -57,6 +69,8 @@ type App struct {
 
 	pendingQuestionsMu sync.Mutex
 	pendingQuestions   map[pendingQuestionKey]*pendingQuestion
+	activeRunsMu       sync.Mutex
+	activeRuns         map[activeRunKey]map[string]*activeAgentRun
 	scheduledRunsMu    sync.Mutex
 	scheduledRuns      map[string]struct{}
 }
@@ -79,6 +93,7 @@ func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
 			CacheMaxEntries: opts.D2CacheMaxEntries,
 		}),
 		pendingQuestions: make(map[pendingQuestionKey]*pendingQuestion),
+		activeRuns:       make(map[activeRunKey]map[string]*activeAgentRun),
 		scheduledRuns:    make(map[string]struct{}),
 	}
 }
@@ -116,6 +131,70 @@ func (a *App) RespondToInputRequest(_ context.Context, conversationType domain.C
 		return errors.New("no pending question found")
 	}
 	return pq.session.RespondToInputRequest(questionID, answer)
+}
+
+func (a *App) registerActiveAgentRun(key activeRunKey, run *activeAgentRun) {
+	a.activeRunsMu.Lock()
+	defer a.activeRunsMu.Unlock()
+	runs := a.activeRuns[key]
+	if runs == nil {
+		runs = make(map[string]*activeAgentRun)
+		a.activeRuns[key] = runs
+	}
+	runs[run.runID] = run
+}
+
+func (a *App) setActiveAgentRunSession(key activeRunKey, runID string, session agentruntime.Session) {
+	a.activeRunsMu.Lock()
+	defer a.activeRunsMu.Unlock()
+	if run := a.activeRuns[key][runID]; run != nil {
+		run.session = session
+	}
+}
+
+func (a *App) removeActiveAgentRun(key activeRunKey, runID string) {
+	a.activeRunsMu.Lock()
+	defer a.activeRunsMu.Unlock()
+	runs := a.activeRuns[key]
+	if runs == nil {
+		return
+	}
+	delete(runs, runID)
+	if len(runs) == 0 {
+		delete(a.activeRuns, key)
+	}
+}
+
+func (a *App) stopActiveAgentRuns(ctx context.Context, key activeRunKey) int {
+	a.activeRunsMu.Lock()
+	runs := a.activeRuns[key]
+	if len(runs) == 0 {
+		a.activeRunsMu.Unlock()
+		return 0
+	}
+	stopping := make([]*activeAgentRun, 0, len(runs))
+	for runID, run := range runs {
+		stopping = append(stopping, run)
+		delete(runs, runID)
+	}
+	delete(a.activeRuns, key)
+	a.activeRunsMu.Unlock()
+
+	a.removePendingQuestions(key.conversationType, key.conversationID)
+	for _, run := range stopping {
+		run.cancel(errAgentRunStopped)
+		if run.session == nil {
+			continue
+		}
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		if stopper, ok := run.session.(agentruntime.Stopper); ok {
+			_ = stopper.Stop(closeCtx)
+		} else {
+			_ = run.session.Close(closeCtx)
+		}
+		cancel()
+	}
+	return len(stopping)
 }
 
 func (a *App) runtimeForAgent(agent domain.Agent) (agentruntime.Runtime, bool) {

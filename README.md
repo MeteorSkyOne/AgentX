@@ -10,7 +10,7 @@ A self-hosted AI coding agent management service. Coordinate multiple AI agents 
 - **Real-time streaming** — agent output, thinking, and tool calls streamed over WebSocket
 - **Workspace file browsing** — browse and edit agent working directories from the UI
 - **Markdown diagrams** — render Mermaid blocks in the browser and D2 blocks through a cached CLI-backed SVG renderer
-- **Slash commands** — `/new`, `/compact`, `/plan`, `/commit`, `/push`, `/review` and more, with `@agent` mention targeting
+- **Slash commands** — `/new`, `/stop`, `/compact`, `/plan`, `/commit`, `/push`, `/review` and more, with `@agent` mention targeting
 - **Team coordination** — multi-agent collaboration with leader/worker phases and turn budgets
 - **Notifications** — webhook notifications with HMAC-SHA256 signing, plus browser native notifications
 - **TLS support** — optional HTTPS with cert/key configuration via UI or config file

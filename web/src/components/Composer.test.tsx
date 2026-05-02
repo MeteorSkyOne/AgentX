@@ -67,12 +67,12 @@ describe("Composer slash command autocomplete", () => {
     expect(conversationSkills).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the static /skills command", () => {
+  it("shows the static /stop command", () => {
     const textarea = renderComposer({ skills: [] });
 
-    setTextareaValue(textarea, "/", 1);
+    setTextareaValue(textarea, "/st", 3);
 
-    expect(screen.getByText("/skills")).toBeTruthy();
+    expect(screen.getByText("/stop")).toBeTruthy();
     expect(screen.queryByText("/skill")).toBeNull();
   });
 

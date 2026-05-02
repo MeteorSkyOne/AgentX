@@ -19,6 +19,8 @@ import (
 const runtimeContextMessageLimit = 40
 const runtimeContextBodyLimit = 4000
 
+var errAgentRunStopped = errors.New("agent run stopped")
+
 type agentRunOptions struct {
 	Prompt            string
 	Context           string
@@ -69,6 +71,18 @@ func (a *App) runAgentForMessage(ctx context.Context, userMessage domain.Message
 }
 
 func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage domain.Message, target ConversationAgentContext, runID string, opts agentRunOptions) {
+	runCtx, cancelRun := context.WithCancelCause(ctx)
+	ctx = runCtx
+	defer cancelRun(nil)
+
+	activeKey := activeRunKey{
+		conversationType: userMessage.ConversationType,
+		conversationID:   userMessage.ConversationID,
+		agentID:          target.Agent.ID,
+	}
+	a.registerActiveAgentRun(activeKey, &activeAgentRun{runID: runID, cancel: cancelRun})
+	defer a.removeActiveAgentRun(activeKey, runID)
+
 	var tracker *agentRunTracker
 	resultSent := false
 	sendResult := func(message domain.Message, err error) {
@@ -113,6 +127,9 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 	}
 	tracker = &runTracker
 	failRun := func(failCtx context.Context, providerSessionID string, err error) {
+		if failCtx.Err() != nil {
+			failCtx = context.WithoutCancel(failCtx)
+		}
 		a.setFailedAgentSession(failCtx, agent.ID, userMessage, providerSessionID)
 		a.recordAgentRunMetric(failCtx, runTracker.metric(agentRunMetricInput{
 			Status:            "failed",
@@ -189,6 +206,7 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 			failRun(ctx, "", err)
 			return
 		}
+		a.setActiveAgentRunSession(activeKey, runID, session)
 
 		providerSessionID := session.CurrentSessionID()
 		if err := a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, providerSessionID, "running"); err != nil {
@@ -227,11 +245,16 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 		for {
 			select {
 			case <-ctx.Done():
-				failRun(context.WithoutCancel(ctx), session.CurrentSessionID(), ctx.Err())
+				failRun(context.WithoutCancel(ctx), session.CurrentSessionID(), agentRunContextError(ctx))
 				_ = session.Close(context.WithoutCancel(ctx))
 				return
 			case evt, ok := <-session.Events():
 				if !ok {
+					if ctx.Err() != nil {
+						failRun(context.WithoutCancel(ctx), session.CurrentSessionID(), agentRunContextError(ctx))
+						_ = session.Close(context.WithoutCancel(ctx))
+						return
+					}
 					err := errors.New("agent runtime event stream closed")
 					a.publishAgentRunFailedWithContext(userMessage, runID, agent.ID, opts.Team, err)
 					sendResult(domain.Message{}, err)
@@ -867,6 +890,16 @@ func runtimeEventError(evt agentruntime.Event) error {
 		return errors.New(evt.Error)
 	}
 	return errors.New("agent runtime failed")
+}
+
+func agentRunContextError(ctx context.Context) error {
+	if err := context.Cause(ctx); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return context.Canceled
 }
 
 func agentRunLogAttrs(runID string, message domain.Message, agent domain.Agent, workspace string, instructionWorkspace string) []any {

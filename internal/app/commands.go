@@ -48,6 +48,7 @@ var builtinSlashCommands = map[string]struct{}{
 	"commit":  {},
 	"push":    {},
 	"review":  {},
+	"stop":    {},
 }
 
 func builtinSlashCommandNames() []string {
@@ -106,6 +107,13 @@ func (a *App) dispatchSlashCommand(ctx context.Context, req SendMessageRequest, 
 			return domain.Message{}, err
 		}
 		return a.handleNewCommand(ctx, req, targets, len(command.Targets) == 0)
+	}
+	if command.Name == "stop" {
+		targets, err := resolveNewCommandTargets(agents, command.Targets)
+		if err != nil {
+			return domain.Message{}, err
+		}
+		return a.handleStopCommand(ctx, req, targets, len(command.Targets) == 0)
 	}
 
 	target, err := resolveSlashCommandTarget(agents, command.Targets)
@@ -254,6 +262,60 @@ func newContextScope(allAgents bool) string {
 		return "all"
 	}
 	return "selected"
+}
+
+func (a *App) handleStopCommand(ctx context.Context, req SendMessageRequest, targets []ConversationAgentContext, allAgents bool) (domain.Message, error) {
+	stopped := 0
+	stoppedHandles := make([]string, 0, len(targets))
+	agentIDs := make([]string, 0, len(targets))
+	agentHandles := make([]string, 0, len(targets))
+	for _, target := range targets {
+		agentIDs = append(agentIDs, target.Agent.ID)
+		agentHandles = append(agentHandles, target.Agent.Handle)
+		count := a.stopActiveAgentRuns(ctx, activeRunKey{
+			conversationType: req.ConversationType,
+			conversationID:   req.ConversationID,
+			agentID:          target.Agent.ID,
+		})
+		if count > 0 {
+			stopped += count
+			stoppedHandles = append(stoppedHandles, target.Agent.Handle)
+		}
+	}
+	body := stopCommandMessageBody(agentHandles, stoppedHandles, stopped, allAgents)
+	return a.createCommandSystemMessage(ctx, req, body, map[string]any{
+		"command_name":  "stop",
+		"agent_ids":     agentIDs,
+		"agent_handles": agentHandles,
+		"stopped_runs":  stopped,
+		"scope":         newContextScope(allAgents),
+	})
+}
+
+func stopCommandMessageBody(handles []string, stoppedHandles []string, stopped int, allAgents bool) string {
+	if stopped == 0 {
+		if allAgents {
+			return "No active agent runs to stop"
+		}
+		if len(handles) == 1 {
+			return fmt.Sprintf("No active run for @%s", handles[0])
+		}
+		return "No active runs for selected agents"
+	}
+	if allAgents {
+		if stopped == 1 {
+			return "Stopped 1 active agent run"
+		}
+		return fmt.Sprintf("Stopped %d active agent runs", stopped)
+	}
+	mentions := make([]string, 0, len(stoppedHandles))
+	for _, handle := range stoppedHandles {
+		mentions = append(mentions, "@"+handle)
+	}
+	if stopped == 1 && len(mentions) == 1 {
+		return fmt.Sprintf("Stopped active run for %s", mentions[0])
+	}
+	return fmt.Sprintf("Stopped %d active agent runs for %s", stopped, strings.Join(mentions, ", "))
 }
 
 func (a *App) handleCompactCommand(ctx context.Context, req SendMessageRequest, target ConversationAgentContext, args string) (domain.Message, error) {

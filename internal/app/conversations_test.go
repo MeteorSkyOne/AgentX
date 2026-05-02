@@ -1850,6 +1850,75 @@ func TestSlashNonNewCommandRequiresTargetWhenConversationHasMultipleAgents(t *te
 	}
 }
 
+func TestSlashStopStopsActiveAgentRun(t *testing.T) {
+	ctx := context.Background()
+	app, bus, bootstrap := newConversationTestApp(t, ctx)
+	blocking := newBlockingRuntime()
+	app.opts.Runtimes[domain.AgentKindFake] = blocking
+
+	events, unsubscribe := bus.Subscribe(ctx, eventbus.Filter{
+		OrganizationID: bootstrap.Organization.ID,
+		ConversationID: bootstrap.Channel.ID,
+	})
+	defer unsubscribe()
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "keep running",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-blocking.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for blocking runtime start")
+	}
+
+	message, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/stop",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.SenderType != domain.SenderSystem || message.Body != "Stopped 1 active agent run" || message.Metadata["command_name"] != "stop" {
+		t.Fatalf("/stop message = %#v", message)
+	}
+
+	select {
+	case <-blocking.closed:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for blocking runtime close")
+	}
+
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-events:
+			if evt.Type != domain.EventAgentRunFailed {
+				continue
+			}
+			payload, ok := evt.Payload.(domain.AgentRunFailedPayload)
+			if !ok {
+				t.Fatalf("failed payload type = %T, want domain.AgentRunFailedPayload", evt.Payload)
+			}
+			if payload.AgentID != bootstrap.Agent.ID || payload.Error != errAgentRunStopped.Error() {
+				t.Fatalf("failed payload = %#v", payload)
+			}
+			return
+		case <-timeout:
+			t.Fatal("timed out waiting for stopped run failure event")
+		}
+	}
+}
+
 func TestSlashModelAndEffortPersistAgentConfig(t *testing.T) {
 	ctx := context.Background()
 	app, _, bootstrap := newConversationTestApp(t, ctx)
@@ -2857,6 +2926,73 @@ func (s *scriptedSession) RespondToInputRequest(questionID string, answer string
 
 func (s *scriptedSession) Close(ctx context.Context) error {
 	close(s.events)
+	return nil
+}
+
+type blockingRuntime struct {
+	started chan struct{}
+	closed  chan struct{}
+}
+
+func newBlockingRuntime() *blockingRuntime {
+	return &blockingRuntime{
+		started: make(chan struct{}),
+		closed:  make(chan struct{}),
+	}
+}
+
+func (r *blockingRuntime) StartSession(ctx context.Context, req agentruntime.StartSessionRequest) (agentruntime.Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return &blockingSession{
+		id:      "blocking:" + req.SessionKey,
+		events:  make(chan agentruntime.Event),
+		started: r.started,
+		closed:  r.closed,
+	}, nil
+}
+
+type blockingSession struct {
+	id          string
+	events      chan agentruntime.Event
+	started     chan struct{}
+	closed      chan struct{}
+	startedOnce sync.Once
+	closeOnce   sync.Once
+}
+
+func (s *blockingSession) Send(ctx context.Context, input agentruntime.Input) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.startedOnce.Do(func() {
+		close(s.started)
+	})
+	return nil
+}
+
+func (s *blockingSession) Events() <-chan agentruntime.Event {
+	return s.events
+}
+
+func (s *blockingSession) CurrentSessionID() string {
+	return s.id
+}
+
+func (s *blockingSession) Alive() bool {
+	return true
+}
+
+func (s *blockingSession) RespondToInputRequest(questionID string, answer string) error {
+	return nil
+}
+
+func (s *blockingSession) Close(ctx context.Context) error {
+	s.closeOnce.Do(func() {
+		close(s.closed)
+		close(s.events)
+	})
 	return nil
 }
 

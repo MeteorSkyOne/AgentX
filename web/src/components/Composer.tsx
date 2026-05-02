@@ -586,7 +586,8 @@ const slashCommands: SlashCommandDefinition[] = [
   { kind: "command", name: "effort", description: "Set reasoning effort" },
   { kind: "command", name: "commit", description: "Commit workspace changes" },
   { kind: "command", name: "push", description: "Push the current branch" },
-  { kind: "command", name: "review", description: "Review workspace changes" }
+  { kind: "command", name: "review", description: "Review workspace changes" },
+  { kind: "command", name: "stop", description: "Stop active agent runs" }
 ];
 
 function buildSlashCommandOptions(

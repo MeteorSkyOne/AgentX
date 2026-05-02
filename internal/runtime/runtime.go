@@ -166,6 +166,10 @@ type Session interface {
 	RespondToInputRequest(questionID string, answer string) error
 }
 
+type Stopper interface {
+	Stop(ctx context.Context) error
+}
+
 type Shutdowner interface {
 	Shutdown(ctx context.Context) error
 }
