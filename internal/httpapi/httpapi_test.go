@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/meteorsky/agentx/internal/domain"
 	"github.com/meteorsky/agentx/internal/eventbus"
 	"github.com/meteorsky/agentx/internal/id"
+	agentruntime "github.com/meteorsky/agentx/internal/runtime"
 	"github.com/meteorsky/agentx/internal/store"
 	sqlitestore "github.com/meteorsky/agentx/internal/store/sqlite"
 	"golang.org/x/crypto/bcrypt"
@@ -1504,6 +1506,86 @@ func TestWebSocketStreamsMessageHistoryBeforeLiveEvents(t *testing.T) {
 	}
 }
 
+func TestWebSocketReplaysActiveRunAfterHistory(t *testing.T) {
+	runtime := activeReplayRuntime{}
+	env := newTestEnvWithOptions(t, app.Options{
+		Runtimes: map[string]agentruntime.Runtime{
+			domain.AgentKindFake: runtime,
+		},
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	boot := setupApp(t, ctx, env.app)
+	events, unsubscribe := env.bus.Subscribe(ctx, eventbus.Filter{
+		OrganizationID:   boot.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   boot.Channel.ID,
+	})
+	defer unsubscribe()
+
+	if _, err := env.app.SendMessage(ctx, app.SendMessageRequest{
+		UserID:           boot.User.ID,
+		OrganizationID:   boot.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   boot.Channel.ID,
+		Body:             "needs input",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var runID string
+	for runID == "" {
+		select {
+		case evt := <-events:
+			if evt.Type != domain.EventAgentInputRequest {
+				continue
+			}
+			payload, ok := evt.Payload.(domain.AgentInputRequestPayload)
+			if !ok {
+				t.Fatalf("input payload type = %T, want domain.AgentInputRequestPayload", evt.Payload)
+			}
+			runID = payload.RunID
+		case <-ctx.Done():
+			t.Fatal("timed out waiting for active input request")
+		}
+	}
+
+	wsURL := "ws" + strings.TrimPrefix(env.server.URL, "http") + "/api/ws?token=" + boot.SessionToken
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	err = conn.Write(ctx, websocket.MessageText, []byte(`{"type":"subscribe","organization_id":"`+boot.Organization.ID+`","conversation_type":"channel","conversation_id":"`+boot.Channel.ID+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireWebSocketSubscribed(t, ctx, conn)
+	requireWebSocketHistoryCompleted(t, ctx, conn, false)
+
+	startedFrame := requireWebSocketEventType(t, ctx, conn, domain.EventAgentRunStarted)
+	var started domain.AgentRunPayload
+	unmarshalWebSocketPayload(t, startedFrame, &started)
+	if started.RunID != runID || started.AgentID != boot.Agent.ID {
+		t.Fatalf("started replay = %#v, want run %q agent %q", started, runID, boot.Agent.ID)
+	}
+
+	deltaFrame := requireWebSocketEventType(t, ctx, conn, domain.EventAgentOutputDelta)
+	var delta domain.AgentOutputDeltaPayload
+	unmarshalWebSocketPayload(t, deltaFrame, &delta)
+	if delta.RunID != runID || delta.AgentID != boot.Agent.ID || delta.Text != "partial answer" {
+		t.Fatalf("delta replay = %#v", delta)
+	}
+
+	inputFrame := requireWebSocketEventType(t, ctx, conn, domain.EventAgentInputRequest)
+	var input domain.AgentInputRequestPayload
+	unmarshalWebSocketPayload(t, inputFrame, &input)
+	if input.RunID != runID || input.QuestionID != "question-1" || input.Question != "continue?" {
+		t.Fatalf("input replay = %#v", input)
+	}
+}
+
 func TestWebSocketHistoryUsesLatestRecentWindow(t *testing.T) {
 	env := newTestEnv(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -1703,6 +1785,62 @@ type testEnv struct {
 	store  *sqlitestore.Store
 	app    *app.App
 	bus    *eventbus.Bus
+}
+
+type activeReplayRuntime struct{}
+
+func (activeReplayRuntime) StartSession(ctx context.Context, req agentruntime.StartSessionRequest) (agentruntime.Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return &activeReplaySession{
+		id:     "active-replay:" + req.SessionKey,
+		events: make(chan agentruntime.Event, 2),
+	}, nil
+}
+
+type activeReplaySession struct {
+	id        string
+	events    chan agentruntime.Event
+	closeOnce sync.Once
+}
+
+func (s *activeReplaySession) Send(ctx context.Context, input agentruntime.Input) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.events <- agentruntime.Event{Type: agentruntime.EventDelta, Text: "partial answer"}
+	s.events <- agentruntime.Event{
+		Type: agentruntime.EventInputRequest,
+		InputRequest: &agentruntime.InputRequest{
+			QuestionID: "question-1",
+			Question:   "continue?",
+		},
+	}
+	return nil
+}
+
+func (s *activeReplaySession) Events() <-chan agentruntime.Event {
+	return s.events
+}
+
+func (s *activeReplaySession) CurrentSessionID() string {
+	return s.id
+}
+
+func (s *activeReplaySession) Alive() bool {
+	return true
+}
+
+func (s *activeReplaySession) RespondToInputRequest(questionID string, answer string) error {
+	return nil
+}
+
+func (s *activeReplaySession) Close(ctx context.Context) error {
+	s.closeOnce.Do(func() {
+		close(s.events)
+	})
+	return nil
 }
 
 func setupHTTP(t *testing.T, baseURL string) app.BootstrapResult {

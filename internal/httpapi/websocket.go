@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -123,6 +124,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close(websocket.StatusInternalError, "failed to stream message history")
 		return
 	}
+	activeRunReplays := s.app.ActiveRunReplayEvents(resolvedOrganizationID, conversationType, msg.ConversationID)
+	if err := s.streamWebSocketActiveRunReplays(ctx, conn, activeRunReplays); err != nil {
+		_ = conn.Close(websocket.StatusInternalError, "failed to stream active runs")
+		return
+	}
 
 	readDone := make(chan struct{})
 	historyRequests := make(chan historyLoadRequest, 4)
@@ -161,6 +167,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
+			if shouldSkipReplayedActiveRunEvent(event, activeRunReplays) {
+				continue
+			}
 			event = redactEventProcessDetails(event)
 			if err := writeWebSocketJSON(ctx, conn, event); err != nil {
 				_ = conn.Close(websocket.StatusInternalError, "failed to marshal event")
@@ -172,6 +181,77 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+}
+
+func (s *Server) streamWebSocketActiveRunReplays(ctx context.Context, conn *websocket.Conn, replays map[string]app.ActiveRunReplay) error {
+	if len(replays) == 0 {
+		return nil
+	}
+	runIDs := make([]string, 0, len(replays))
+	for runID := range replays {
+		runIDs = append(runIDs, runID)
+	}
+	sort.Slice(runIDs, func(i, j int) bool {
+		left := replaySortTime(replays[runIDs[i]])
+		right := replaySortTime(replays[runIDs[j]])
+		if left.Equal(right) {
+			return runIDs[i] < runIDs[j]
+		}
+		return left.Before(right)
+	})
+	for _, runID := range runIDs {
+		for _, event := range replays[runID].Events {
+			if event.ID == "" {
+				event.ID = id.New("evt")
+			}
+			if event.CreatedAt.IsZero() {
+				event.CreatedAt = time.Now().UTC()
+			}
+			event = redactEventProcessDetails(event)
+			if err := writeWebSocketJSON(ctx, conn, event); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func replaySortTime(replay app.ActiveRunReplay) time.Time {
+	if len(replay.Events) == 0 {
+		return replay.Captured
+	}
+	return replay.Events[0].CreatedAt
+}
+
+func shouldSkipReplayedActiveRunEvent(event domain.Event, replays map[string]app.ActiveRunReplay) bool {
+	if len(replays) == 0 {
+		return false
+	}
+	runID, ok := activeRunEventRunID(event)
+	if !ok {
+		return false
+	}
+	replay, ok := replays[runID]
+	if !ok {
+		return false
+	}
+	return !event.CreatedAt.After(replay.Captured)
+}
+
+func activeRunEventRunID(event domain.Event) (string, bool) {
+	switch event.Type {
+	case domain.EventAgentRunStarted:
+		payload, ok := event.Payload.(domain.AgentRunPayload)
+		return payload.RunID, ok && payload.RunID != ""
+	case domain.EventAgentOutputDelta:
+		payload, ok := event.Payload.(domain.AgentOutputDeltaPayload)
+		return payload.RunID, ok && payload.RunID != ""
+	case domain.EventAgentInputRequest:
+		payload, ok := event.Payload.(domain.AgentInputRequestPayload)
+		return payload.RunID, ok && payload.RunID != ""
+	default:
+		return "", false
 	}
 }
 

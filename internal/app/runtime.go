@@ -75,12 +75,23 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 	ctx = runCtx
 	defer cancelRun(nil)
 
+	startedAt := time.Now().UTC()
+	activeRun := &activeAgentRun{
+		runID:            runID,
+		agentID:          target.Agent.ID,
+		organizationID:   userMessage.OrganizationID,
+		conversationType: userMessage.ConversationType,
+		conversationID:   userMessage.ConversationID,
+		startedAt:        startedAt,
+		team:             cloneTeamMetadata(opts.Team),
+		cancel:           cancelRun,
+	}
 	activeKey := activeRunKey{
 		conversationType: userMessage.ConversationType,
 		conversationID:   userMessage.ConversationID,
 		agentID:          target.Agent.ID,
 	}
-	a.registerActiveAgentRun(activeKey, &activeAgentRun{runID: runID, cancel: cancelRun})
+	a.registerActiveAgentRun(activeKey, activeRun)
 	defer a.removeActiveAgentRun(activeKey, runID)
 
 	var tracker *agentRunTracker
@@ -113,7 +124,6 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 	agent := target.Agent
 	workspace := target.RunWorkspace
 	runAttrs := agentRunLogAttrs(runID, userMessage, agent, workspace.Path, target.ConfigWorkspace.Path)
-	startedAt := time.Now().UTC()
 	scope, scopeErr := a.conversationScope(ctx, userMessage.ConversationType, userMessage.ConversationID)
 	if scopeErr != nil {
 		slog.Warn("agent run metrics scope lookup failed", append(runAttrs, "error", scopeErr)...)
@@ -278,6 +288,7 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 					if evt.Text == "" && evt.Thinking == "" && len(process) == 0 {
 						continue
 					}
+					activeRun.appendDelta(evt.Text, evt.Thinking, process, opts.Team)
 					a.publishConversationEvent(domain.Event{
 						Type:             domain.EventAgentOutputDelta,
 						OrganizationID:   userMessage.OrganizationID,
@@ -324,24 +335,26 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 					return
 				case agentruntime.EventInputRequest:
 					if evt.InputRequest != nil {
+						payload := domain.AgentInputRequestPayload{
+							RunID:      runID,
+							AgentID:    agent.ID,
+							QuestionID: evt.InputRequest.QuestionID,
+							Question:   evt.InputRequest.Question,
+							Options:    toAgentInputOptions(evt.InputRequest.Options),
+							Team:       opts.Team,
+						}
+						activeRun.setPendingQuestion(payload)
 						a.registerPendingQuestion(pendingQuestionKey{
 							conversationType: userMessage.ConversationType,
 							conversationID:   userMessage.ConversationID,
 							questionID:       evt.InputRequest.QuestionID,
-						}, &pendingQuestion{session: session})
+						}, &pendingQuestion{session: session, run: activeRun})
 						a.publishConversationEvent(domain.Event{
 							Type:             domain.EventAgentInputRequest,
 							OrganizationID:   userMessage.OrganizationID,
 							ConversationType: userMessage.ConversationType,
 							ConversationID:   userMessage.ConversationID,
-							Payload: domain.AgentInputRequestPayload{
-								RunID:      runID,
-								AgentID:    agent.ID,
-								QuestionID: evt.InputRequest.QuestionID,
-								Question:   evt.InputRequest.Question,
-								Options:    toAgentInputOptions(evt.InputRequest.Options),
-								Team:       opts.Team,
-							},
+							Payload:          payload,
 						})
 					}
 				case agentruntime.EventFailed:

@@ -1919,6 +1919,90 @@ func TestSlashStopStopsActiveAgentRun(t *testing.T) {
 	}
 }
 
+func TestActiveRunReplayEventsIncludeStreamingAndPendingQuestion(t *testing.T) {
+	ctx := context.Background()
+	app, bus, bootstrap := newConversationTestApp(t, ctx)
+	app.opts.Runtimes[domain.AgentKindFake] = scriptedRuntime{events: []agentruntime.Event{
+		{Type: agentruntime.EventDelta, Text: "partial answer"},
+		{
+			Type: agentruntime.EventInputRequest,
+			InputRequest: &agentruntime.InputRequest{
+				QuestionID: "question-1",
+				Question:   "continue?",
+				Options: []agentruntime.InputRequestOption{
+					{Label: "yes", Description: "continue the run"},
+				},
+			},
+		},
+	}}
+
+	events, unsubscribe := bus.Subscribe(ctx, eventbus.Filter{
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+	})
+	defer unsubscribe()
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "needs input",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var runID string
+	timeout := time.After(2 * time.Second)
+	for runID == "" {
+		select {
+		case evt := <-events:
+			if evt.Type != domain.EventAgentInputRequest {
+				continue
+			}
+			payload, ok := evt.Payload.(domain.AgentInputRequestPayload)
+			if !ok {
+				t.Fatalf("input payload type = %T, want domain.AgentInputRequestPayload", evt.Payload)
+			}
+			runID = payload.RunID
+		case <-timeout:
+			t.Fatal("timed out waiting for input request")
+		}
+	}
+
+	replays := app.ActiveRunReplayEvents(bootstrap.Organization.ID, domain.ConversationChannel, bootstrap.Channel.ID)
+	replay, ok := replays[runID]
+	if !ok {
+		t.Fatalf("missing replay for run %q: %#v", runID, replays)
+	}
+	if len(replay.Events) != 3 {
+		t.Fatalf("replay event count = %d, want 3: %#v", len(replay.Events), replay.Events)
+	}
+	if replay.Events[0].Type != domain.EventAgentRunStarted {
+		t.Fatalf("first replay event = %s, want AgentRunStarted", replay.Events[0].Type)
+	}
+	delta, ok := replay.Events[1].Payload.(domain.AgentOutputDeltaPayload)
+	if !ok || replay.Events[1].Type != domain.EventAgentOutputDelta || delta.Text != "partial answer" {
+		t.Fatalf("delta replay = %#v", replay.Events[1])
+	}
+	input, ok := replay.Events[2].Payload.(domain.AgentInputRequestPayload)
+	if !ok || replay.Events[2].Type != domain.EventAgentInputRequest || input.QuestionID != "question-1" || input.Question != "continue?" {
+		t.Fatalf("input replay = %#v", replay.Events[2])
+	}
+
+	if err := app.RespondToInputRequest(ctx, domain.ConversationChannel, bootstrap.Channel.ID, "question-1", "yes"); err != nil {
+		t.Fatal(err)
+	}
+	replays = app.ActiveRunReplayEvents(bootstrap.Organization.ID, domain.ConversationChannel, bootstrap.Channel.ID)
+	replay = replays[runID]
+	for _, evt := range replay.Events {
+		if evt.Type == domain.EventAgentInputRequest {
+			t.Fatalf("input request still replayed after response: %#v", replay.Events)
+		}
+	}
+}
+
 func TestSlashModelAndEffortPersistAgentConfig(t *testing.T) {
 	ctx := context.Background()
 	app, _, bootstrap := newConversationTestApp(t, ctx)
