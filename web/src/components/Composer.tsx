@@ -216,7 +216,8 @@ export function Composer({
       return;
     }
 
-    const submittedBody = trimmed;
+    const submittedDisplayBody = trimmed;
+    const submittedBody = mentionDisplayNamesToHandles(submittedDisplayBody, mentionAgents);
     const submittedAttachments = attachments;
     setError(null);
     setSubmitting(true);
@@ -235,8 +236,8 @@ export function Composer({
       onSent(message);
       revokeAttachmentPreviews(submittedAttachments);
     } catch (err) {
-      setBody(submittedBody);
-      setCaret(submittedBody.length);
+      setBody(submittedDisplayBody);
+      setCaret(submittedDisplayBody.length);
       setAttachments(submittedAttachments);
       setError(err instanceof Error ? err.message : "Message failed");
     } finally {
@@ -244,10 +245,11 @@ export function Composer({
     }
   }
 
-  function insertMention(agent: Pick<Agent, "handle">) {
+  function insertMention(agent: Pick<Agent, "name" | "handle">) {
     if (!mentionToken) return;
-    const next = `${body.slice(0, mentionToken.start)}@${agent.handle} ${body.slice(mentionToken.end)}`;
-    const nextCaret = mentionToken.start + agent.handle.length + 2;
+    const label = mentionDisplayName(agent);
+    const next = `${body.slice(0, mentionToken.start)}@${label} ${body.slice(mentionToken.end)}`;
+    const nextCaret = mentionToken.start + label.length + 2;
     setBody(next);
     setCaret(nextCaret);
     setDismissedMentionKey(null);
@@ -264,7 +266,7 @@ export function Composer({
     const args = [beforeToken, afterToken].filter(Boolean).join(" ");
     const prefix =
       command.kind === "skill" && command.agentHandle && mentionAgents.length > 1
-        ? `/${command.name} @${command.agentHandle}`
+        ? `/${command.name} @${command.agentName ?? command.agentHandle}`
         : `/${command.name}`;
     const next = args ? `${prefix} ${args}` : `${prefix} `;
     const nextCaret = next.length;
@@ -709,6 +711,63 @@ function messageSenderLabel(
 function messagePreview(body: string): string {
   const preview = body.replace(/\s+/g, " ").trim();
   return preview || "(empty)";
+}
+
+function mentionDisplayName(agent: Pick<Agent, "name" | "handle">): string {
+  return agent.name.trim() || agent.handle;
+}
+
+function mentionDisplayNamesToHandles(
+  value: string,
+  agents: Pick<Agent, "name" | "handle">[]
+): string {
+  const mentions = agents
+    .map((agent) => ({
+      label: mentionDisplayName(agent),
+      handle: agent.handle
+    }))
+    .filter((mention) => mention.label && mention.handle)
+    .sort((a, b) => b.label.length - a.label.length);
+  if (mentions.length === 0) return value;
+
+  let result = "";
+  let index = 0;
+  while (index < value.length) {
+    if (value[index] !== "@" || !isMentionBoundaryBefore(value, index)) {
+      result += value[index];
+      index += 1;
+      continue;
+    }
+
+    const mention = mentions.find((candidate) => {
+      const start = index + 1;
+      const end = start + candidate.label.length;
+      return (
+        value.startsWith(candidate.label, start) &&
+        isMentionBoundaryAfter(value, end)
+      );
+    });
+
+    if (!mention) {
+      result += value[index];
+      index += 1;
+      continue;
+    }
+
+    result += `@${mention.handle}`;
+    index += mention.label.length + 1;
+  }
+  return result;
+}
+
+function isMentionBoundaryBefore(value: string, index: number): boolean {
+  if (index === 0) return true;
+  return /[\s([{]/.test(value[index - 1]);
+}
+
+function isMentionBoundaryAfter(value: string, index: number): boolean {
+  if (index >= value.length) return true;
+  return !/[A-Za-z0-9_-]/.test(value[index]);
 }
 
 const maxDraftAttachments = 5;

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { conversationSkills, sendMessage } from "../api/client";
 import type { Agent, ConversationAgentSkills } from "../api/types";
@@ -101,7 +101,7 @@ describe("Composer slash command autocomplete", () => {
     expect(screen.getByText("Review code")).toBeTruthy();
   });
 
-  it("inserts a multi-agent skill with the target handle", async () => {
+  it("inserts a multi-agent skill with the target name and sends the handle", async () => {
     const textarea = renderComposer({
       mentionAgents: [agent("agt_codex", "Codex", "codex"), agent("agt_claude", "Claude", "claude")],
       skills: [
@@ -124,7 +124,17 @@ describe("Composer slash command autocomplete", () => {
     setTextareaValue(textarea, "/rev please", 4);
     fireEvent.mouseDown((await screen.findByText("/reviewer")).closest("button")!);
 
-    expect(textarea.value).toBe("/reviewer @codex please");
+    expect(textarea.value).toBe("/reviewer @Codex please");
+
+    fireEvent.submit(textarea.closest("form")!);
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith(
+        "channel",
+        "chn_1",
+        "/reviewer @codex please",
+        expect.objectContaining({ files: [] })
+      );
+    });
   });
 
   it("inserts a single-agent skill without a target handle", async () => {
@@ -153,6 +163,40 @@ describe("Composer slash command autocomplete", () => {
   });
 });
 
+describe("Composer mention autocomplete", () => {
+  it("shows handles in suggestions while inserting names into the composer", async () => {
+    const textarea = renderComposer({
+      skills: [],
+      mentionAgents: [agent("agt_codex", "Codex", "codex")]
+    });
+
+    setTextareaValue(textarea, "@co", 3);
+    const handleHint = await screen.findByText("@codex");
+    fireEvent.mouseDown(handleHint.closest("button")!);
+
+    expect(textarea.value).toBe("@Codex ");
+  });
+
+  it("sends composer mention names as handles", async () => {
+    const textarea = renderComposer({
+      skills: [],
+      mentionAgents: [agent("agt_codex", "Codex", "codex")]
+    });
+
+    setTextareaValue(textarea, "please ask @Codex", 17);
+    fireEvent.submit(textarea.closest("form")!);
+
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith(
+        "channel",
+        "chn_1",
+        "please ask @codex",
+        expect.objectContaining({ files: [] })
+      );
+    });
+  });
+});
+
 function renderComposer({
   skills,
   mentionAgents = [agent("agt_codex", "Codex", "codex")]
@@ -161,6 +205,17 @@ function renderComposer({
   mentionAgents?: Pick<Agent, "id" | "name" | "handle" | "kind" | "bot_user_id">[];
 }): HTMLTextAreaElement {
   vi.mocked(conversationSkills).mockResolvedValue(skills);
+  vi.mocked(sendMessage).mockResolvedValue({
+    id: "msg_1",
+    organization_id: "org_1",
+    conversation_type: "channel",
+    conversation_id: "chn_1",
+    sender_type: "user",
+    sender_id: "usr_1",
+    kind: "text",
+    body: "",
+    created_at: "2026-05-02T00:00:00Z"
+  });
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false }
