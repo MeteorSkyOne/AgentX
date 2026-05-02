@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createContext, lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent, WheelEvent } from "react";
 import {
   Brain,
@@ -50,6 +50,7 @@ import type { WorkspaceFileBrowserController } from "./WorkspaceFileBrowser";
 import { AgentAvatar, agentKindColor } from "./AgentAvatar";
 import { messageMetricsParts } from "./messageMetrics";
 import type { PendingQuestion } from "./shell/types";
+import type { MentionLabels } from "./MarkdownRenderer";
 
 const MarkdownRenderer = lazy(() =>
   import("./MarkdownRenderer").then((module) => ({ default: module.MarkdownRenderer }))
@@ -60,6 +61,8 @@ const LazyWorkspaceFileEditor = lazy(() =>
 
 const messageBodyClassName =
   "prose prose-sm min-w-0 w-full max-w-full overflow-x-auto break-words select-text dark:prose-invert";
+const MentionLabelsContext = createContext<MentionLabels | undefined>(undefined);
+const MENTION_TEXT_RE = /@([A-Za-z0-9][A-Za-z0-9_-]*)/g;
 
 interface StreamingMessage {
   runID: string;
@@ -123,6 +126,7 @@ export function MessagePane({
   const agentByID = new Map(agents.map((item) => [item.agent.id, item.agent]));
   const messagesByID = new Map(messages.map((message) => [message.id, message]));
   const messageItems = groupTeamDiscussionMessages(messages);
+  const mentionLabels = useMemo(() => buildMentionLabels(agents), [agents]);
 
   useLayoutEffect(() => {
     const anchorID = olderAnchorMessageIDRef.current;
@@ -185,28 +189,57 @@ export function MessagePane({
   }
 
   return (
-    <ScrollArea
-      className="min-h-0 min-w-0 flex-1"
-      aria-label="Messages"
-      viewportRef={viewportRef}
-      viewportClassName="[&>div]:!block [&>div]:!min-w-0 [&>div]:!w-full [&>div]:!max-w-full"
-      onViewportScroll={handleScroll}
-    >
-      <section className="min-w-0 max-w-full p-3 md:p-4">
-        <div className="min-w-0 max-w-full space-y-4">
-          {isLoadingOlder && (
-            <div className="py-2 text-center text-xs text-muted-foreground">
-              Loading older messages...
-            </div>
-          )}
-          {messageItems.map((item) => {
-            if (item.type === "team") {
+    <MentionLabelsContext.Provider value={mentionLabels}>
+      <ScrollArea
+        className="min-h-0 min-w-0 flex-1"
+        aria-label="Messages"
+        viewportRef={viewportRef}
+        viewportClassName="[&>div]:!block [&>div]:!min-w-0 [&>div]:!w-full [&>div]:!max-w-full"
+        onViewportScroll={handleScroll}
+      >
+        <section className="min-w-0 max-w-full p-3 md:p-4">
+          <div className="min-w-0 max-w-full space-y-4">
+            {isLoadingOlder && (
+              <div className="py-2 text-center text-xs text-muted-foreground">
+                Loading older messages...
+              </div>
+            )}
+            {messageItems.map((item) => {
+              if (item.type === "team") {
+                return (
+                  <TeamDiscussionItem
+                    key={`team:${item.sessionID}`}
+                    messages={item.messages}
+                    agentByBotID={agentByBotID}
+                    messagesByID={messagesByID}
+                    preferences={preferences}
+                    onUpdateMessage={onUpdateMessage}
+                    onDeleteMessage={onDeleteMessage}
+                    onReplyMessage={onReplyMessage}
+                    onJumpToReplyMessage={jumpToMessage}
+                    theme={theme}
+                    workspacePath={workspacePath}
+                    onOpenWorkspacePath={onOpenWorkspacePath}
+                  />
+                );
+              }
+              const message = item.message;
+              const agent = agentByBotID.get(message.sender_id);
+              const replyAgent =
+                message.reply_to?.sender_type === "bot"
+                  ? agentByBotID.get(message.reply_to.sender_id ?? "")
+                  : undefined;
               return (
-                <TeamDiscussionItem
-                  key={`team:${item.sessionID}`}
-                  messages={item.messages}
-                  agentByBotID={agentByBotID}
-                  messagesByID={messagesByID}
+                <MessageItem
+                  key={message.id}
+                  message={message}
+                  agentName={agent?.name}
+                  agentKind={agent?.kind}
+                  agentID={agent?.id}
+                  replyAgentName={replyAgent?.name}
+                  replyTargetLoaded={Boolean(
+                    message.reply_to && messagesByID.has(message.reply_to.message_id)
+                  )}
                   preferences={preferences}
                   onUpdateMessage={onUpdateMessage}
                   onDeleteMessage={onDeleteMessage}
@@ -217,64 +250,37 @@ export function MessagePane({
                   onOpenWorkspacePath={onOpenWorkspacePath}
                 />
               );
-            }
-            const message = item.message;
-            const agent = agentByBotID.get(message.sender_id);
-            const replyAgent =
-              message.reply_to?.sender_type === "bot"
-                ? agentByBotID.get(message.reply_to.sender_id ?? "")
-                : undefined;
-            return (
-              <MessageItem
-                key={message.id}
-                message={message}
-                agentName={agent?.name}
-                agentKind={agent?.kind}
-                agentID={agent?.id}
-                replyAgentName={replyAgent?.name}
-                replyTargetLoaded={Boolean(
-                  message.reply_to && messagesByID.has(message.reply_to.message_id)
-                )}
-                preferences={preferences}
-                onUpdateMessage={onUpdateMessage}
-                onDeleteMessage={onDeleteMessage}
-                onReplyMessage={onReplyMessage}
-                onJumpToReplyMessage={jumpToMessage}
-                theme={theme}
-                workspacePath={workspacePath}
-                onOpenWorkspacePath={onOpenWorkspacePath}
-              />
-            );
-          })}
-          {streaming.map((item) => {
-            const agent = agentByID.get(item.agentID ?? "");
-            return (
-              <StreamingItem
-                key={item.runID}
-                item={item}
-                agentName={agent?.name}
-                agentKind={agent?.kind}
-                agentID={agent?.id}
+            })}
+            {streaming.map((item) => {
+              const agent = agentByID.get(item.agentID ?? "");
+              return (
+                <StreamingItem
+                  key={item.runID}
+                  item={item}
+                  agentName={agent?.name}
+                  agentKind={agent?.kind}
+                  agentID={agent?.id}
+                  hideAvatar={preferences.hide_avatars}
+                  workspacePath={workspacePath}
+                  onOpenWorkspacePath={onOpenWorkspacePath}
+                />
+              );
+            })}
+            {pendingQuestion && onRespondToQuestion && (
+              <QuestionPrompt
+                question={pendingQuestion}
+                agentName={agentByID.get(pendingQuestion.agentID)?.name}
+                agentKind={agentByID.get(pendingQuestion.agentID)?.kind}
+                agentID={pendingQuestion.agentID}
                 hideAvatar={preferences.hide_avatars}
-                workspacePath={workspacePath}
-                onOpenWorkspacePath={onOpenWorkspacePath}
+                onSubmit={(answer) => onRespondToQuestion(pendingQuestion.questionID, answer)}
               />
-            );
-          })}
-          {pendingQuestion && onRespondToQuestion && (
-            <QuestionPrompt
-              question={pendingQuestion}
-              agentName={agentByID.get(pendingQuestion.agentID)?.name}
-              agentKind={agentByID.get(pendingQuestion.agentID)?.kind}
-              agentID={pendingQuestion.agentID}
-              hideAvatar={preferences.hide_avatars}
-              onSubmit={(answer) => onRespondToQuestion(pendingQuestion.questionID, answer)}
-            />
-          )}
-          <div ref={bottomRef} />
-        </div>
-      </section>
-    </ScrollArea>
+            )}
+            <div ref={bottomRef} />
+          </div>
+        </section>
+      </ScrollArea>
+    </MentionLabelsContext.Provider>
   );
 }
 
@@ -283,6 +289,24 @@ function cssEscape(value: string): string {
     return CSS.escape(value);
   }
   return value.replace(/"/g, '\\"');
+}
+
+function buildMentionLabels(agents: ConversationAgentContext[]): MentionLabels {
+  const labels: MentionLabels = {};
+  for (const { agent } of agents) {
+    if (agent.handle && agent.name) {
+      labels[agent.handle.toLowerCase()] = agent.name;
+    }
+  }
+  return labels;
+}
+
+function displayMentionLabels(text: string, mentionLabels?: MentionLabels): string {
+  if (!mentionLabels) return text;
+  return text.replace(MENTION_TEXT_RE, (match, handle: string) => {
+    const label = mentionLabels[handle.toLowerCase()]?.trim();
+    return label ? `@${label}` : match;
+  });
 }
 
 function MessageMarkdown({
@@ -294,19 +318,23 @@ function MessageMarkdown({
   workspacePath?: string;
   onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
 }) {
+  const mentionLabels = useContext(MentionLabelsContext);
+
   return (
     <Suspense fallback={<MarkdownFallback text={text} />}>
       <MarkdownRenderer
         text={text}
         workspacePath={workspacePath}
         onOpenWorkspacePath={onOpenWorkspacePath}
+        mentionLabels={mentionLabels}
       />
     </Suspense>
   );
 }
 
 function MarkdownFallback({ text }: { text: string }) {
-  return <p className="whitespace-pre-wrap">{text}</p>;
+  const mentionLabels = useContext(MentionLabelsContext);
+  return <p className="whitespace-pre-wrap">{displayMentionLabels(text, mentionLabels)}</p>;
 }
 
 async function copyTextToClipboard(text: string) {
@@ -1237,11 +1265,12 @@ function MessageReferencePreview({
   loaded: boolean;
   onOpen?: (messageID: string) => void;
 }) {
+  const mentionLabels = useContext(MentionLabelsContext);
   const deleted = Boolean(reference.deleted);
   const label = deleted ? "Referenced message" : messageReferenceSenderLabel(reference, agentName);
   const body = deleted
     ? "Referenced message deleted"
-    : messageReferencePreview(reference.body ?? "", reference.attachment_count ?? 0);
+    : messageReferencePreview(reference.body ?? "", reference.attachment_count ?? 0, mentionLabels);
   const className =
     "flex min-w-0 max-w-full items-center gap-2 rounded-md border border-border bg-muted/35 px-2 py-1.5 text-left text-xs text-muted-foreground";
   const content = (
@@ -1282,8 +1311,12 @@ function messageReferenceSenderLabel(reference: MessageReference, agentName?: st
   return "Message";
 }
 
-function messageReferencePreview(body: string, attachmentCount = 0): string {
-  const preview = body.replace(/\s+/g, " ").trim();
+function messageReferencePreview(
+  body: string,
+  attachmentCount = 0,
+  mentionLabels?: MentionLabels
+): string {
+  const preview = displayMentionLabels(body, mentionLabels).replace(/\s+/g, " ").trim();
   if (preview) {
     return preview;
   }
@@ -1294,11 +1327,14 @@ function messageReferencePreview(body: string, attachmentCount = 0): string {
 }
 
 function ContextSeparator({ message }: { message: Message }) {
+  const mentionLabels = useContext(MentionLabelsContext);
   return (
     <div className="flex items-center gap-3 py-2" data-message-id={message.id}>
       <div className="h-px flex-1 bg-border" />
       <div className="flex min-w-0 shrink items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground shadow-sm">
-        <span className="truncate font-medium">{message.body}</span>
+        <span className="truncate font-medium">
+          {displayMentionLabels(message.body, mentionLabels)}
+        </span>
         <span className="shrink-0 text-[11px]">{formatTime(message.created_at)}</span>
       </div>
       <div className="h-px flex-1 bg-border" />
@@ -1841,6 +1877,7 @@ function QuestionPrompt({
 }) {
   const [answer, setAnswer] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const mentionLabels = useContext(MentionLabelsContext);
   const label = agentName ?? "Agent";
 
   async function handleSubmit() {
@@ -1872,8 +1909,8 @@ function QuestionPrompt({
           <Badge variant="outline" className="text-xs text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-600">QUESTION</Badge>
         </div>
         <div className={messageBodyClassName} data-testid="question-body">
-          <Suspense fallback={<p>{question.question}</p>}>
-            <MarkdownRenderer text={question.question} />
+          <Suspense fallback={<p>{displayMentionLabels(question.question, mentionLabels)}</p>}>
+            <MarkdownRenderer text={question.question} mentionLabels={mentionLabels} />
           </Suspense>
         </div>
         {question.options && question.options.length > 0 && (

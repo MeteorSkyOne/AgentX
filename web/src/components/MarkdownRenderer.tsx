@@ -20,20 +20,35 @@ interface RendererOptions {
   workspacePath?: string;
   relativeLinkBasePath?: string;
   onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
+  mentionLabels?: MentionLabels;
 }
 
-function renderMentions(text: string, keyPrefix: string): ReactNode[] {
+export type MentionLabels = Record<string, string>;
+
+function mentionDisplayValue(handle: string, mentionLabels?: MentionLabels): string {
+  const label = mentionLabels?.[handle.toLowerCase()]?.trim();
+  return label ? `@${label}` : `@${handle}`;
+}
+
+function renderMentions(
+  text: string,
+  keyPrefix: string,
+  mentionLabels?: MentionLabels
+): ReactNode[] {
   const parts = text.split(MENTION_RE);
   if (parts.length === 1) return [text];
   return parts.map((part, i) => {
     if (SINGLE_MENTION_RE.test(part)) {
+      const handle = part.slice(1);
+      const display = mentionDisplayValue(handle, mentionLabels);
       return (
         <span
           key={`${keyPrefix}-mention-${i}`}
-          data-mention={part.slice(1)}
+          data-mention={handle}
           className="rounded bg-primary/10 px-1 py-0.5 font-medium text-primary"
+          title={display === part ? undefined : part}
         >
-          {part}
+          {display}
         </span>
       );
     }
@@ -47,13 +62,13 @@ function renderInlineText(
   keyPrefix: string
 ): ReactNode[] {
   if (!options.workspacePath || !options.onOpenWorkspacePath) {
-    return renderMentions(text, keyPrefix);
+    return renderMentions(text, keyPrefix, options.mentionLabels);
   }
 
   const onOpenWorkspacePath = options.onOpenWorkspacePath;
   return splitWorkspacePathTargets(text, options.workspacePath).flatMap((segment, i) => {
     if (typeof segment === "string") {
-      return renderMentions(segment, `${keyPrefix}-${i}`);
+      return renderMentions(segment, `${keyPrefix}-${i}`, options.mentionLabels);
     }
     return (
       <WorkspacePathButton
@@ -279,6 +294,7 @@ interface Props {
   workspacePath?: string;
   relativeLinkBasePath?: string;
   onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
+  mentionLabels?: MentionLabels;
 }
 
 export const MarkdownRenderer = memo(function MarkdownRenderer({
@@ -286,10 +302,11 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   workspacePath,
   relativeLinkBasePath,
   onOpenWorkspacePath,
+  mentionLabels,
 }: Props) {
   const components = useMemo(
-    () => createComponents({ workspacePath, relativeLinkBasePath, onOpenWorkspacePath }),
-    [workspacePath, relativeLinkBasePath, onOpenWorkspacePath]
+    () => createComponents({ workspacePath, relativeLinkBasePath, onOpenWorkspacePath, mentionLabels }),
+    [workspacePath, relativeLinkBasePath, onOpenWorkspacePath, mentionLabels]
   );
 
   return (

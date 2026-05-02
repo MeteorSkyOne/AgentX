@@ -69,6 +69,18 @@ describe("MarkdownRenderer", () => {
     expect(container.textContent).toBe("Open web/src/App.tsx:12:3.");
   });
 
+  it("displays known mentions by agent name", () => {
+    const { container } = renderClient(
+      <MarkdownRenderer text="Ask @codex and @unknown." mentionLabels={{ codex: "Codex" }} />
+    );
+
+    const mentions = Array.from(container.querySelectorAll<HTMLElement>("[data-mention]"));
+    expect(mentions.map((mention) => mention.dataset.mention)).toEqual(["codex", "unknown"]);
+    expect(mentions.map((mention) => mention.textContent)).toEqual(["@Codex", "@unknown"]);
+    expect(mentions[0].getAttribute("title")).toBe("@codex");
+    expect(container.textContent).toBe("Ask @Codex and @unknown.");
+  });
+
   it("renders multiple text paths in one paragraph", () => {
     const { container } = renderClient(
       <MarkdownRenderer

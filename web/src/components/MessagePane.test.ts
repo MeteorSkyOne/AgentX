@@ -19,13 +19,19 @@ vi.mock("./MarkdownRenderer", async () => {
       text,
       workspacePath,
       onOpenWorkspacePath,
+      mentionLabels,
     }: {
       text: string;
       workspacePath?: string;
       onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
+      mentionLabels?: Record<string, string>;
     }) => {
+      const renderedText = text.replace(/@([A-Za-z0-9][A-Za-z0-9_-]*)/g, (match, handle) => {
+        const label = mentionLabels?.[String(handle).toLowerCase()];
+        return label ? `@${label}` : match;
+      });
       const label = workspacePath
-        ? text.split(/\s+/).find((part) => /[A-Za-z0-9._/-]+\.[A-Za-z0-9._-]+/.test(part))
+        ? renderedText.split(/\s+/).find((part) => /[A-Za-z0-9._/-]+\.[A-Za-z0-9._-]+/.test(part))
         : undefined;
       const target = label ? { path: label.replace(/^\.\//, ""), label } : null;
       return React.createElement(
@@ -39,7 +45,7 @@ vi.mock("./MarkdownRenderer", async () => {
             if (target) onOpenWorkspacePath?.(target);
           },
         },
-        text
+        renderedText
       );
     },
   };
@@ -100,6 +106,23 @@ describe("createReadOnlyAttachmentEditorController", () => {
 });
 
 describe("MessagePane workspace links", () => {
+  it("displays known mentions by agent name in persisted messages", async () => {
+    const { container } = await renderMessagePane({
+      messages: [
+        message({
+          id: "message-1",
+          body: "Please review @agent",
+          sender_type: "user",
+          sender_id: "user-1",
+        }),
+      ],
+      streaming: [],
+      onOpenWorkspacePath: () => undefined,
+    });
+
+    expect(markdownButtons(container)[0].textContent).toBe("Please review @Agent");
+  });
+
   it("passes workspace path open behavior to persisted messages", async () => {
     const opened: WorkspacePathTarget[] = [];
     const { container } = await renderMessagePane({
