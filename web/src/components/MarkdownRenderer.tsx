@@ -1,4 +1,10 @@
-import { lazy, memo, Suspense, useMemo, type ReactNode } from "react";
+import {
+  lazy,
+  memo,
+  Suspense,
+  useMemo,
+  type ReactNode,
+} from "react";
 import Markdown, { defaultUrlTransform, type Components, type UrlTransform } from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
@@ -137,8 +143,8 @@ function createComponents(options: RendererOptions): Components {
   return {
     pre: ({ children }) => <>{children}</>,
     code: ({ node: _node, ...props }) => {
-      const isFencedCode = /\blanguage-/.test(props.className ?? "");
-      const target = isFencedCode
+      const isBlockCode = isMarkdownCodeBlock(props.className, props.children);
+      const target = isBlockCode
         ? null
         : inlineCodePathTarget(props.children, options.workspacePath);
       if (target && options.onOpenWorkspacePath) {
@@ -155,7 +161,7 @@ function createComponents(options: RendererOptions): Components {
 
       return (
         <Suspense fallback={<code className={props.className}>{props.children}</code>}>
-          <CodeBlock {...props} />
+          <CodeBlock block={isBlockCode} {...props} />
         </Suspense>
       );
     },
@@ -203,6 +209,12 @@ function createComponents(options: RendererOptions): Components {
       </div>
     ),
   };
+}
+
+function isMarkdownCodeBlock(className: string | undefined, children: ReactNode): boolean {
+  if (/\blanguage-/.test(className ?? "")) return true;
+  const text = singleTextChild(children);
+  return Boolean(text && text.includes("\n"));
 }
 
 function inlineCodePathTarget(

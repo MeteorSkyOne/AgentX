@@ -133,6 +133,16 @@ describe("MarkdownRenderer", () => {
     expect(html).not.toContain("data-workspace-path");
   });
 
+  it("renders unlabeled fenced code blocks without a typography pre wrapper", () => {
+    const html = renderToStaticMarkup(
+      <MarkdownRenderer text={"```\n| App A |  App B |\n|       |        |\n```"} />
+    );
+
+    expect(html).toContain("<code");
+    expect(html).toContain("|       |        |");
+    expect(html).not.toContain("<pre");
+  });
+
   it("keeps external markdown links opening in a new tab", () => {
     const html = renderToStaticMarkup(
       <MarkdownRenderer

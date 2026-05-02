@@ -1,6 +1,7 @@
-import { useState, useCallback, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import SyntaxHighlighter from "react-syntax-highlighter/dist/esm/prism-light";
 import oneDark from "react-syntax-highlighter/dist/esm/styles/prism/one-dark";
+import oneLight from "react-syntax-highlighter/dist/esm/styles/prism/one-light";
 import { Copy, Check } from "lucide-react";
 import { D2Diagram } from "./D2Diagram";
 import { MermaidDiagram } from "./MermaidDiagram";
@@ -47,35 +48,70 @@ SyntaxHighlighter.registerLanguage("markdown", markdown);
 SyntaxHighlighter.registerLanguage("md", markdown);
 SyntaxHighlighter.registerLanguage("diff", diff);
 
-const codeStyle: Record<string, React.CSSProperties> = {
-  ...oneDark,
-  'pre[class*="language-"]': {
-    ...(oneDark['pre[class*="language-"]'] as React.CSSProperties),
-    background: "transparent",
-    margin: 0,
-    padding: "0.75rem",
-    fontSize: "0.875rem",
-  },
-  'code[class*="language-"]': {
-    ...(oneDark['code[class*="language-"]'] as React.CSSProperties),
-    background: "transparent",
-  },
+type CodeTheme = "light" | "dark";
+
+function createCodeStyle(style: Record<string, React.CSSProperties>): Record<string, React.CSSProperties> {
+  return {
+    ...style,
+    'pre[class*="language-"]': {
+      ...(style['pre[class*="language-"]'] as React.CSSProperties),
+      background: "transparent",
+      margin: 0,
+      padding: "0.75rem",
+      fontSize: "0.875rem",
+    },
+    'code[class*="language-"]': {
+      ...(style['code[class*="language-"]'] as React.CSSProperties),
+      background: "transparent",
+    },
+  };
+}
+
+const codeStyles: Record<CodeTheme, Record<string, React.CSSProperties>> = {
+  dark: createCodeStyle(oneDark),
+  light: createCodeStyle(oneLight),
 };
 
+function documentTheme(): CodeTheme {
+  if (typeof document === "undefined") return "dark";
+  return document.documentElement.classList.contains("dark") ? "dark" : "light";
+}
+
+function useDocumentTheme(): CodeTheme {
+  const [theme, setTheme] = useState<CodeTheme>(() => documentTheme());
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const root = document.documentElement;
+    const updateTheme = () => setTheme(documentTheme());
+    updateTheme();
+
+    const observer = new MutationObserver(updateTheme);
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+
+    return () => observer.disconnect();
+  }, []);
+
+  return theme;
+}
+
 export function CodeBlock({
+  block = false,
   className,
   children,
 }: {
+  block?: boolean;
   className?: string;
   children?: ReactNode;
 }) {
   const match = /language-([\w-]+)/.exec(className || "");
 
-  if (!match) {
+  if (!match && !block) {
     return <code className={className}>{children}</code>;
   }
 
-  const language = match[1].toLowerCase();
+  const language = match?.[1].toLowerCase() ?? "";
   const code = codeBlockText(children).replace(/\n$/, "");
 
   if (language === "mermaid" || language === "mmd") {
@@ -106,6 +142,8 @@ function FencedCodeBlock({
   code: string;
 }) {
   const [copied, setCopied] = useState(false);
+  const theme = useDocumentTheme();
+  const codeStyle = codeStyles[theme];
 
   const handleCopy = useCallback(async () => {
     await navigator.clipboard.writeText(code);
@@ -114,14 +152,17 @@ function FencedCodeBlock({
   }, [code]);
 
   return (
-    <div className="group/code relative my-2 min-w-0 w-full max-w-full overflow-hidden rounded-md bg-[#282c34] dark:bg-sidebar">
+    <div
+      className="group/code relative my-2 min-w-0 w-full max-w-full overflow-hidden rounded-md border border-border bg-muted/60 dark:bg-sidebar"
+      data-testid="code-block-shell"
+    >
       <div className="flex items-center justify-between px-3 pt-2">
         {language && (
-          <span className="text-xs text-white/60 dark:text-muted-foreground">{language}</span>
+          <span className="text-xs text-muted-foreground">{language}</span>
         )}
         <button
           onClick={handleCopy}
-          className="rounded p-1 text-white/60 opacity-100 transition-opacity hover:text-white md:opacity-0 md:group-hover/code:opacity-100 dark:text-muted-foreground dark:hover:text-foreground"
+          className="rounded p-1 text-muted-foreground opacity-100 transition-opacity hover:text-foreground md:opacity-0 md:group-hover/code:opacity-100"
           aria-label="Copy code"
           title="Copy code"
         >
@@ -134,10 +175,30 @@ function FencedCodeBlock({
       </div>
       <div className="min-w-0 w-full max-w-full overflow-x-auto" data-testid="code-block">
         <SyntaxHighlighter
-          language={language}
+          language={language || undefined}
           style={codeStyle}
           PreTag="div"
-          customStyle={{ background: "transparent", margin: 0, minWidth: "max-content" }}
+          codeTagProps={{
+            style: {
+              background: "transparent",
+              borderRadius: 0,
+              fontSize: "inherit",
+              fontWeight: "inherit",
+              overflowWrap: "normal",
+              padding: 0,
+              whiteSpace: "pre",
+              wordBreak: "normal",
+            },
+          }}
+          customStyle={{
+            background: "transparent",
+            margin: 0,
+            minWidth: "max-content",
+            overflowWrap: "normal",
+            whiteSpace: "pre",
+            wordBreak: "normal",
+          }}
+          wrapLongLines={false}
         >
           {code}
         </SyntaxHighlighter>

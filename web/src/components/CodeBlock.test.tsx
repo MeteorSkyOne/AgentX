@@ -48,4 +48,20 @@ describe("CodeBlock", () => {
     expect(screen.queryByTestId("mock-mermaid")).toBeNull();
     expect(screen.queryByTestId("mock-d2")).toBeNull();
   });
+
+  it("uses a light code panel outside dark mode", () => {
+    document.documentElement.classList.remove("dark");
+
+    render(<CodeBlock className="language-ts">const x = 1;{"\n"}</CodeBlock>);
+
+    const shell = screen.getByTestId("code-block-shell");
+    expect(shell.className).toContain("bg-muted/60");
+    expect(shell.className).not.toContain("bg-[#282c34]");
+  });
+
+  it("keeps unlabeled fenced code as a preformatted code block", () => {
+    render(<CodeBlock block>{"| App A |  App B |\n|       |        |\n"}</CodeBlock>);
+
+    expect(screen.getByTestId("code-block").textContent).toContain("|       |        |");
+  });
 });
