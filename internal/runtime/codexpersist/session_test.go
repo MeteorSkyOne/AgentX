@@ -50,6 +50,38 @@ func TestAddTurnOverridesUsesPlanMode(t *testing.T) {
 	}
 }
 
+func TestBuildUserInputTreatsOnlyImageKindAsLocalImage(t *testing.T) {
+	items := buildUserInput(runtime.Input{
+		Prompt: "inspect this file",
+		Attachments: []runtime.Attachment{{
+			ID:          "att_svg",
+			Filename:    "diagram.svg",
+			ContentType: "image/svg+xml",
+			Kind:        "file",
+			LocalPath:   "/tmp/diagram.svg",
+		}},
+	})
+
+	if len(items) != 1 {
+		t.Fatalf("items = %#v, want only text input", items)
+	}
+	if got := items[0]["type"]; got != "text" {
+		t.Fatalf("first item type = %#v, want text", got)
+	}
+}
+
+func TestEmitAfterCloseEventStreamDoesNotPanic(t *testing.T) {
+	s := &persistentSession{
+		events: make(chan runtime.Event, 1),
+		done:   make(chan struct{}),
+	}
+	s.closeEventStream()
+
+	for i := 0; i < 1000; i++ {
+		s.emit(runtime.Event{Type: runtime.EventFailed, Error: "late event"})
+	}
+}
+
 func TestAddTurnOverridesDefaultsPlanEffortToMedium(t *testing.T) {
 	s := &persistentSession{
 		req: runtime.StartSessionRequest{

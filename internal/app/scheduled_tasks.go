@@ -480,13 +480,13 @@ func (a *App) executeScheduledAgentPrompt(ctx context.Context, task domain.Sched
 		}
 		return message.ID, invalidInput("agent is not bound to the target conversation")
 	}
-	if targets := mentionedAgentsForBody(agents, message.Body); len(targets) > 0 {
-		a.runAgentTeamForMessage(ctx, message, scope, agents, targets)
-		return message.ID, nil
+	targets := agents
+	if mentioned := mentionedAgentsForBody(agents, message.Body); len(mentioned) > 0 {
+		targets = mentioned
 	}
 	errCh := make(chan error, len(agents))
 	var wg sync.WaitGroup
-	for _, target := range agents {
+	for _, target := range targets {
 		wg.Add(1)
 		go func(target ConversationAgentContext) {
 			defer wg.Done()

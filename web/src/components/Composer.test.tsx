@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { conversationSkills, sendMessage } from "../api/client";
 import type { Agent, ConversationAgentSkills } from "../api/types";
-import { Composer, isAcceptedDraftAttachment, selectDraftAttachmentFiles } from "./Composer";
+import { Composer, selectDraftAttachmentFiles } from "./Composer";
 
 vi.mock("../api/client", () => ({
   conversationSkills: vi.fn(),
@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 describe("selectDraftAttachmentFiles", () => {
-  it("keeps valid files when another dropped file is unsupported", () => {
+  it("accepts binary files as generic attachments", () => {
     const image = new File([new Uint8Array([1, 2, 3])], "screen.png", { type: "image/png" });
     const binary = new File([new Uint8Array([1, 2, 3])], "tool.exe", {
       type: "application/octet-stream"
@@ -27,14 +27,26 @@ describe("selectDraftAttachmentFiles", () => {
 
     const result = selectDraftAttachmentFiles([], [image, binary]);
 
-    expect(result.accepted).toEqual([image]);
-    expect(result.rejected).toEqual(["tool.exe is not a supported attachment type"]);
+    expect(result.accepted).toEqual([image, binary]);
+    expect(result.rejected).toEqual([]);
   });
 
-  it("accepts source files selected by extension when the browser omits MIME type", () => {
+  it("accepts files selected when the browser omits MIME type", () => {
     const source = new File(["package main"], "main.go", { type: "" });
 
-    expect(isAcceptedDraftAttachment(source)).toBe(true);
+    const result = selectDraftAttachmentFiles([], [source]);
+
+    expect(result.accepted).toEqual([source]);
+    expect(result.rejected).toEqual([]);
+  });
+
+  it("rejects empty files before sending", () => {
+    const empty = new File([], "empty.bin", { type: "application/octet-stream" });
+
+    const result = selectDraftAttachmentFiles([], [empty]);
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected).toEqual(["empty.bin is empty"]);
   });
 
   it("rejects files beyond the per-message attachment limit without dropping available slots", () => {

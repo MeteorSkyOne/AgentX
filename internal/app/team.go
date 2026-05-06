@@ -43,7 +43,9 @@ func (a *App) dispatchAgentRunsForMessage(ctx context.Context, message domain.Me
 		return
 	}
 	if targets := mentionedAgentsForBody(agents, message.Body); len(targets) > 0 {
-		go a.runAgentTeamForMessage(ctx, message, scope, agents, targets)
+		for _, target := range targets {
+			go a.runAgentForMessage(ctx, message, target)
+		}
 		return
 	}
 	for _, agent := range agents {

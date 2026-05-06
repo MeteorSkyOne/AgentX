@@ -123,3 +123,15 @@ func TestPersistentSessionProcessDeath(t *testing.T) {
 		t.Fatalf("expected EventFailed on dead process, got %v", lastEvt.Type)
 	}
 }
+
+func TestEmitAfterCloseEventStreamDoesNotPanic(t *testing.T) {
+	sess := &persistentSession{
+		events: make(chan runtime.Event, 1),
+		done:   make(chan struct{}),
+	}
+	sess.closeEventStream()
+
+	for i := 0; i < 1000; i++ {
+		sess.emit(runtime.Event{Type: runtime.EventFailed, Error: "late event"})
+	}
+}

@@ -25,7 +25,7 @@ func TestBuildArgsStartsAndResumesCodexExec(t *testing.T) {
 
 	req = runtime.StartSessionRequest{Model: "gpt-test", YoloMode: true}
 	args = rt.buildArgs(req, runtime.Input{Prompt: "ship it"})
-	want = []string{"exec", "--json", "--model", "gpt-test", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "ship it"}
+	want = []string{"exec", "--json", "--model", "gpt-test", "--yolo", "--skip-git-repo-check", "ship it"}
 	assertArgs(t, args, want)
 
 	req = runtime.StartSessionRequest{Model: "gpt-test", Effort: "high"}
@@ -108,6 +108,32 @@ func TestBuildArgsUsesStdinPromptAfterCodexImages(t *testing.T) {
 	}
 	if prompt := string(stdin); !strings.Contains(prompt, "describe this image") || !strings.Contains(prompt, imagePath) {
 		t.Fatalf("stdin prompt = %q, want rendered prompt with attachment path", prompt)
+	}
+}
+
+func TestBuildArgsDoesNotTreatGenericImageContentTypeAsCodexImage(t *testing.T) {
+	dir := t.TempDir()
+	svgPath := filepath.Join(dir, "diagram.svg")
+	rt := Runtime{opts: Options{SkipGitRepoCheck: true}}
+	args, stdin := rt.buildArgsAndStdin(runtime.StartSessionRequest{}, runtime.Input{
+		Prompt: "inspect this file",
+		Attachments: []runtime.Attachment{{
+			ID:          "att_svg",
+			Filename:    "diagram.svg",
+			ContentType: "image/svg+xml",
+			Kind:        "file",
+			LocalPath:   svgPath,
+		}},
+	})
+
+	if got := countArg(args, "--image"); got != 0 {
+		t.Fatalf("args = %#v, want no --image args, got %d", args, got)
+	}
+	if len(stdin) != 0 {
+		t.Fatalf("stdin = %q, want prompt passed as argument", string(stdin))
+	}
+	if !strings.Contains(strings.Join(args, "\n"), svgPath) {
+		t.Fatalf("args = %#v, want rendered attachment path", args)
 	}
 }
 

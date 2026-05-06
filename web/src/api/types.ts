@@ -448,7 +448,7 @@ export interface MessageAttachment {
   message_id: string;
   filename: string;
   content_type: string;
-  kind: "image" | "text";
+  kind: "image" | "text" | "file";
   size_bytes: number;
   created_at: string;
 }

@@ -256,7 +256,7 @@ func appendUniqueDirs(existing []string, dirs ...string) []string {
 
 func hasImageAttachments(input runtime.Input) bool {
 	for _, attachment := range input.Attachments {
-		if attachment.Kind == stringAttachmentImage || strings.HasPrefix(strings.ToLower(attachment.ContentType), "image/") {
+		if attachment.Kind == stringAttachmentImage {
 			return true
 		}
 	}
@@ -275,7 +275,7 @@ func claudeStreamJSONInput(input runtime.Input) ([]byte, error) {
 		"text": input.RenderedPrompt(),
 	}}
 	for _, attachment := range input.Attachments {
-		if attachment.Kind != stringAttachmentImage && !strings.HasPrefix(strings.ToLower(attachment.ContentType), "image/") {
+		if attachment.Kind != stringAttachmentImage {
 			continue
 		}
 		localPath := strings.TrimSpace(attachment.LocalPath)

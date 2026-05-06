@@ -27,6 +27,7 @@ type persistentSession struct {
 	events  chan runtime.Event
 
 	mu                  sync.Mutex
+	eventMu             sync.Mutex
 	sessionID           string
 	alive               bool
 	started             bool
@@ -152,10 +153,7 @@ func (s *persistentSession) Close(ctx context.Context) error {
 	if turnHeld {
 		s.process.ReleaseTurn()
 	}
-	s.closeOnce.Do(func() {
-		close(s.done)
-		close(s.events)
-	})
+	s.closeEventStream()
 	return nil
 }
 
@@ -165,10 +163,7 @@ func (s *persistentSession) Stop(ctx context.Context) error {
 	s.turnHeld = false
 	s.mu.Unlock()
 
-	s.closeOnce.Do(func() {
-		close(s.done)
-		close(s.events)
-	})
+	s.closeEventStream()
 
 	done := make(chan struct{})
 	go func() {
@@ -189,10 +184,7 @@ func (s *persistentSession) readEvents(ctx context.Context) {
 		s.mu.Lock()
 		s.alive = false
 		s.mu.Unlock()
-		s.closeOnce.Do(func() {
-			close(s.done)
-			close(s.events)
-		})
+		s.closeEventStream()
 	}()
 
 	var textBuf strings.Builder
@@ -339,9 +331,21 @@ func (s *persistentSession) waitForInputResponse(ctx context.Context, inputReq *
 }
 
 func (s *persistentSession) emit(evt runtime.Event) {
+	s.eventMu.Lock()
+	defer s.eventMu.Unlock()
+	if s.events == nil {
+		return
+	}
+	if s.done != nil {
+		select {
+		case <-s.done:
+			return
+		default:
+		}
+	}
 	select {
-	case <-s.done:
 	case s.events <- evt:
+	default:
 	}
 }
 
@@ -350,9 +354,19 @@ func (s *persistentSession) emitFailed(errText string) {
 	s.mu.Lock()
 	s.alive = false
 	s.mu.Unlock()
+	s.closeEventStream()
+}
+
+func (s *persistentSession) closeEventStream() {
 	s.closeOnce.Do(func() {
-		close(s.done)
-		close(s.events)
+		s.eventMu.Lock()
+		defer s.eventMu.Unlock()
+		if s.done != nil {
+			close(s.done)
+		}
+		if s.events != nil {
+			close(s.events)
+		}
 	})
 }
 

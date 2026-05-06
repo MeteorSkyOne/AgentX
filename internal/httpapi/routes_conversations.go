@@ -372,8 +372,12 @@ func (s *Server) handleAttachmentContent(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
+	disposition := "inline"
+	if attachment.Kind == domain.MessageAttachmentFile {
+		disposition = "attachment"
+	}
 	w.Header().Set("Content-Type", attachment.ContentType)
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": attachment.Filename}))
+	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": attachment.Filename}))
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")

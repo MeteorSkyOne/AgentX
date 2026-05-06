@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -335,11 +336,11 @@ func TestSendAttachmentOnlyMessagePersistsAndPassesFilesToRuntime(t *testing.T) 
 	}
 }
 
-func TestSendMessageRejectsInvalidAttachmentsAndSlashCommandAttachments(t *testing.T) {
+func TestSendMessageAcceptsGenericFileAttachmentsAndRejectsSlashCommandAttachments(t *testing.T) {
 	ctx := context.Background()
 	application, _, bootstrap := newConversationTestApp(t, ctx)
 
-	if _, err := application.SendMessage(ctx, SendMessageRequest{
+	message, err := application.SendMessage(ctx, SendMessageRequest{
 		UserID:           bootstrap.User.ID,
 		OrganizationID:   bootstrap.Organization.ID,
 		ConversationType: domain.ConversationChannel,
@@ -350,8 +351,19 @@ func TestSendMessageRejectsInvalidAttachmentsAndSlashCommandAttachments(t *testi
 			ContentType: "application/octet-stream",
 			Data:        []byte{0x00, 0x01, 0x02},
 		}},
-	}); !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("binary attachment error = %v, want ErrInvalidInput", err)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(message.Attachments) != 1 {
+		t.Fatalf("attachments = %#v, want one", message.Attachments)
+	}
+	attachment := message.Attachments[0]
+	if attachment.Filename != "blob.bin" || attachment.Kind != domain.MessageAttachmentFile || attachment.ContentType != "application/octet-stream" {
+		t.Fatalf("attachment = %#v, want generic file attachment", attachment)
+	}
+	if body, err := os.ReadFile(attachment.StoragePath); err != nil || !bytes.Equal(body, []byte{0x00, 0x01, 0x02}) {
+		t.Fatalf("stored attachment body = %v, %v; want binary body", body, err)
 	}
 
 	if _, err := application.SendMessage(ctx, SendMessageRequest{
@@ -1091,7 +1103,7 @@ func TestSendMessageRejectsEmptyBody(t *testing.T) {
 	}
 }
 
-func TestSendMessageDispatchesAllAgentsOrOnlyMentionedHandles(t *testing.T) {
+func TestSendMessageDispatchesAllAgentsOrOnlyMentionedHandlesInParallel(t *testing.T) {
 	ctx := context.Background()
 	app, _, bootstrap := newConversationTestApp(t, ctx)
 
@@ -1158,6 +1170,36 @@ func TestSendMessageDispatchesAllAgentsOrOnlyMentionedHandles(t *testing.T) {
 		}
 		return secondReplies == 1 && firstReplies == 0
 	})
+
+	multiMention := "@" + bootstrap.Agent.Handle + " @agent_two split this task"
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             multiMention,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	requireEventuallyApp(t, time.Second, func() bool {
+		messages, err := app.ListMessages(ctx, domain.ConversationChannel, bootstrap.Channel.ID, 80)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var replies int
+		for _, message := range messages {
+			if message.Body != "Echo: "+multiMention || message.SenderType != domain.SenderBot {
+				continue
+			}
+			if message.Metadata["team"] != nil {
+				t.Fatalf("parallel mention reply has team metadata: %#v", message.Metadata["team"])
+			}
+			if message.SenderID == bootstrap.Agent.BotUserID || message.SenderID == second.BotUserID {
+				replies++
+			}
+		}
+		return replies == 2
+	})
 }
 
 func TestAgentTeamHandoffRunsMemberAndLeaderSummary(t *testing.T) {
@@ -1200,7 +1242,7 @@ func TestAgentTeamHandoffRunsMemberAndLeaderSummary(t *testing.T) {
 		OrganizationID:   bootstrap.Organization.ID,
 		ConversationType: domain.ConversationChannel,
 		ConversationID:   bootstrap.Channel.ID,
-		Body:             "@" + bootstrap.Agent.Handle + " plan the team feature",
+		Body:             "/discuss @" + bootstrap.Agent.Handle + " @agent_two plan the team feature",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1288,7 +1330,7 @@ func TestAgentTeamDoesNotRepeatInitiallyMentionedAgent(t *testing.T) {
 		OrganizationID:   bootstrap.Organization.ID,
 		ConversationType: domain.ConversationChannel,
 		ConversationID:   bootstrap.Channel.ID,
-		Body:             "@" + bootstrap.Agent.Handle + " @agent_two plan the team feature",
+		Body:             "/discuss @" + bootstrap.Agent.Handle + " @agent_two plan the team feature",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1367,7 +1409,7 @@ func TestAgentTeamIgnoresMemberHandoffForScheduling(t *testing.T) {
 		OrganizationID:   bootstrap.Organization.ID,
 		ConversationType: domain.ConversationChannel,
 		ConversationID:   bootstrap.Channel.ID,
-		Body:             "@" + bootstrap.Agent.Handle + " plan the team feature",
+		Body:             "/discuss @" + bootstrap.Agent.Handle + " @agent_two plan the team feature",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1433,7 +1475,7 @@ func TestAgentTeamLeaderCanContinueAfterMemberRound(t *testing.T) {
 		OrganizationID:   bootstrap.Organization.ID,
 		ConversationType: domain.ConversationChannel,
 		ConversationID:   bootstrap.Channel.ID,
-		Body:             "@" + bootstrap.Agent.Handle + " plan the team feature",
+		Body:             "/discuss @" + bootstrap.Agent.Handle + " @agent_two plan the team feature",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1500,7 +1542,7 @@ func TestAgentTeamStopsAtChannelBudgetAndSummarizes(t *testing.T) {
 		OrganizationID:   bootstrap.Organization.ID,
 		ConversationType: domain.ConversationChannel,
 		ConversationID:   bootstrap.Channel.ID,
-		Body:             "@" + bootstrap.Agent.Handle + " plan within budget",
+		Body:             "/discuss @" + bootstrap.Agent.Handle + " @agent_two plan within budget",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1847,6 +1889,44 @@ func TestSlashNonNewCommandRequiresTargetWhenConversationHasMultipleAgents(t *te
 	})
 	if !IsCommandInputError(err) {
 		t.Fatalf("error = %v, want command input error", err)
+	}
+}
+
+func TestSlashDiscussRequiresTwoTargetsAndPrompt(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	second, err := app.CreateAgent(ctx, AgentCreateRequest{
+		UserID:         bootstrap.User.ID,
+		OrganizationID: bootstrap.Organization.ID,
+		Name:           "Agent Two",
+		Handle:         "agent_two",
+		Kind:           domain.AgentKindFake,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SetChannelAgents(ctx, bootstrap.Channel.ID, []domain.ChannelAgent{
+		{AgentID: bootstrap.Agent.ID},
+		{AgentID: second.ID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, body := range []string{
+		"/discuss @" + bootstrap.Agent.Handle + " plan",
+		"/discuss @" + bootstrap.Agent.Handle + " @agent_two",
+	} {
+		_, err := app.SendMessage(ctx, SendMessageRequest{
+			UserID:           bootstrap.User.ID,
+			OrganizationID:   bootstrap.Organization.ID,
+			ConversationType: domain.ConversationChannel,
+			ConversationID:   bootstrap.Channel.ID,
+			Body:             body,
+		})
+		if !IsCommandInputError(err) {
+			t.Fatalf("body %q error = %v, want command input error", body, err)
+		}
 	}
 }
 

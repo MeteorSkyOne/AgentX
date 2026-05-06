@@ -273,6 +273,7 @@ type MessageAttachmentKind string
 const (
 	MessageAttachmentImage MessageAttachmentKind = "image"
 	MessageAttachmentText  MessageAttachmentKind = "text"
+	MessageAttachmentFile  MessageAttachmentKind = "file"
 )
 
 type MessageAttachment struct {

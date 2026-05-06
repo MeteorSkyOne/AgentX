@@ -1032,18 +1032,18 @@ function FileAttachment({
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewBody, setPreviewBody] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const canPreview = isTextAttachmentPreviewSupported(attachment);
 
   async function preview() {
+    if (!canPreview) {
+      return;
+    }
     setBusy("preview");
     setError(null);
     try {
       const blob = await fetchAttachmentBlob(attachment.id);
-      if (isTextAttachmentPreviewSupported(attachment, blob)) {
-        setPreviewBody(await blob.text());
-        setPreviewOpen(true);
-      } else {
-        openBlob(blob);
-      }
+      setPreviewBody(await blob.text());
+      setPreviewOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Preview failed");
     } finally {
@@ -1072,18 +1072,20 @@ function FileAttachment({
           <div className="text-muted-foreground">{formatAttachmentBytes(attachment.size_bytes)}</div>
           {error && <div className="text-destructive">{error}</div>}
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 shrink-0"
-          title="Preview attachment"
-          aria-label="Preview attachment"
-          disabled={busy !== null}
-          onClick={preview}
-        >
-          <Eye className="h-3.5 w-3.5" />
-        </Button>
+        {canPreview && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0"
+            title="Preview attachment"
+            aria-label="Preview attachment"
+            disabled={busy !== null}
+            onClick={preview}
+          >
+            <Eye className="h-3.5 w-3.5" />
+          </Button>
+        )}
         <Button
           type="button"
           variant="ghost"
@@ -1102,7 +1104,7 @@ function FileAttachment({
           <DialogHeader className="shrink-0 border-b border-border px-4 py-3 pr-12">
             <DialogTitle className="truncate text-sm">{attachment.filename}</DialogTitle>
             <DialogDescription>
-              {attachment.content_type || "text attachment"} · {formatAttachmentBytes(attachment.size_bytes)}
+              {attachment.content_type || "file attachment"} · {formatAttachmentBytes(attachment.size_bytes)}
             </DialogDescription>
           </DialogHeader>
           <AttachmentReadOnlyEditor
@@ -1232,16 +1234,6 @@ async function downloadAttachment(attachment: MessageAttachment) {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function openBlob(blob: Blob) {
-  const url = URL.createObjectURL(blob);
-  openObjectURL(url);
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
-
-function openObjectURL(url: string) {
-  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function formatAttachmentBytes(bytes: number): string {

@@ -118,17 +118,10 @@ func classifyAttachment(upload AttachmentUpload) (attachmentClassification, erro
 	detectedType := mediaType(http.DetectContentType(sniffBytes(upload.Data)))
 	ext := strings.ToLower(filepath.Ext(filename))
 
-	if ext == ".svg" || headerType == "image/svg+xml" || detectedType == "image/svg+xml" {
-		return attachmentClassification{}, invalidInput("SVG attachments are not supported")
-	}
-
-	if isAllowedImageType(headerType) || isAllowedImageType(detectedType) {
+	if isAllowedImageType(detectedType) || (isAllowedImageType(headerType) && detectedType == "application/octet-stream") {
 		contentType := detectedType
-		if contentType == "" {
-			contentType = headerType
-		}
 		if !isAllowedImageType(contentType) {
-			return attachmentClassification{}, invalidInput("unsupported image attachment type")
+			contentType = headerType
 		}
 		return attachmentClassification{
 			Filename:    filename,
@@ -152,7 +145,18 @@ func classifyAttachment(upload AttachmentUpload) (attachmentClassification, erro
 		}, nil
 	}
 
-	return attachmentClassification{}, invalidInput("unsupported attachment type")
+	contentType := headerType
+	if contentType == "" || contentType == "application/octet-stream" {
+		contentType = detectedType
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	return attachmentClassification{
+		Filename:    filename,
+		ContentType: contentType,
+		Kind:        domain.MessageAttachmentFile,
+	}, nil
 }
 
 func sniffBytes(data []byte) []byte {

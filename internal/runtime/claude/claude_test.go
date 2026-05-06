@@ -153,6 +153,25 @@ func TestClaudeStreamJSONInputRejectsImageAttachmentWithoutLocalPath(t *testing.
 	}
 }
 
+func TestClaudeStreamJSONInputIgnoresGenericImageContentTypeAttachment(t *testing.T) {
+	stdin, err := claudeStreamJSONInput(runtime.Input{
+		Prompt: "inspect this file",
+		Attachments: []runtime.Attachment{{
+			ID:          "att_svg",
+			Filename:    "diagram.svg",
+			ContentType: "image/svg+xml",
+			Kind:        "file",
+			LocalPath:   filepath.Join(t.TempDir(), "diagram.svg"),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdin != nil {
+		t.Fatalf("stdin = %q, want nil stream-json image payload", string(stdin))
+	}
+}
+
 func TestBuildArgsAppendsExpandedAgentWorkspaceInstructions(t *testing.T) {
 	tempDir := t.TempDir()
 	projectWorkspace := filepath.Join(tempDir, "project")

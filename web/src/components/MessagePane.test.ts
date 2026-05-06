@@ -298,6 +298,12 @@ describe("isTextAttachmentPreviewSupported", () => {
       isTextAttachmentPreviewSupported({ kind: "image", content_type: "image/png" })
     ).toBe(false);
   });
+
+  it("does not open generic binary attachments in the text editor", () => {
+    expect(
+      isTextAttachmentPreviewSupported({ kind: "file", content_type: "application/octet-stream" })
+    ).toBe(false);
+  });
 });
 
 describe("imageAttachmentPreviewDialogLabel", () => {

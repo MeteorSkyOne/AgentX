@@ -49,6 +49,7 @@ var builtinSlashCommands = map[string]struct{}{
 	"push":    {},
 	"review":  {},
 	"stop":    {},
+	"discuss": {},
 }
 
 func builtinSlashCommandNames() []string {
@@ -100,7 +101,7 @@ func slashTargetToken(field string) (string, bool) {
 	return strings.ToLower(handle), true
 }
 
-func (a *App) dispatchSlashCommand(ctx context.Context, req SendMessageRequest, agents []ConversationAgentContext, command slashCommand) (domain.Message, error) {
+func (a *App) dispatchSlashCommand(ctx context.Context, req SendMessageRequest, scope conversationScope, agents []ConversationAgentContext, command slashCommand) (domain.Message, error) {
 	if command.Name == "new" {
 		targets, err := resolveNewCommandTargets(agents, command.Targets)
 		if err != nil {
@@ -114,6 +115,13 @@ func (a *App) dispatchSlashCommand(ctx context.Context, req SendMessageRequest, 
 			return domain.Message{}, err
 		}
 		return a.handleStopCommand(ctx, req, targets, len(command.Targets) == 0)
+	}
+	if command.Name == "discuss" {
+		targets, err := resolveDiscussCommandTargets(agents, command.Targets)
+		if err != nil {
+			return domain.Message{}, err
+		}
+		return a.handleDiscussCommand(ctx, req, scope, targets, command.Args)
 	}
 
 	target, err := resolveSlashCommandTarget(agents, command.Targets)
@@ -216,6 +224,23 @@ func resolveNewCommandTargets(agents []ConversationAgentContext, handles []strin
 	return targets, nil
 }
 
+func resolveDiscussCommandTargets(agents []ConversationAgentContext, handles []string) ([]ConversationAgentContext, error) {
+	if len(agents) == 0 {
+		return nil, commandInputError("no agents are available in this conversation")
+	}
+	if len(handles) == 0 {
+		return nil, commandInputError("/discuss requires at least two @agent targets")
+	}
+	targets, err := resolveNewCommandTargets(agents, handles)
+	if err != nil {
+		return nil, err
+	}
+	if len(targets) < 2 {
+		return nil, commandInputError("/discuss requires at least two unique @agent targets")
+	}
+	return targets, nil
+}
+
 func (a *App) handleNewCommand(ctx context.Context, req SendMessageRequest, targets []ConversationAgentContext, allAgents bool) (domain.Message, error) {
 	agentIDs := make([]string, 0, len(targets))
 	agentHandles := make([]string, 0, len(targets))
@@ -262,6 +287,28 @@ func newContextScope(allAgents bool) string {
 		return "all"
 	}
 	return "selected"
+}
+
+func (a *App) handleDiscussCommand(ctx context.Context, req SendMessageRequest, scope conversationScope, targets []ConversationAgentContext, args string) (domain.Message, error) {
+	args = strings.TrimSpace(args)
+	if args == "" {
+		return domain.Message{}, commandInputError("/discuss requires a prompt")
+	}
+	message, err := a.createConversationMessage(ctx, req, domain.SenderUser, req.UserID, discussMessageBody(targets, args), nil)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	go a.runAgentTeamForMessage(context.WithoutCancel(ctx), message, scope, targets, targets)
+	return message, nil
+}
+
+func discussMessageBody(targets []ConversationAgentContext, args string) string {
+	parts := make([]string, 0, len(targets)+1)
+	for _, target := range targets {
+		parts = append(parts, "@"+target.Agent.Handle)
+	}
+	parts = append(parts, strings.TrimSpace(args))
+	return strings.Join(parts, " ")
 }
 
 func (a *App) handleStopCommand(ctx context.Context, req SendMessageRequest, targets []ConversationAgentContext, allAgents bool) (domain.Message, error) {

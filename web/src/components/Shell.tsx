@@ -2477,7 +2477,7 @@ export function Shell({
               <div className="space-y-1">
                 <p className="text-sm font-medium">Team discussion budget</p>
                 <p className="text-xs leading-5 text-muted-foreground">
-                  Used when a message mentions agents. The first mentioned agent leads each round, and agent runs cap total sequential replies before the final answer.
+                  Used by /discuss. The first selected agent leads each round, and agent runs cap total sequential replies before the final answer.
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-3">

@@ -92,7 +92,9 @@ func (r Runtime) buildArgsAndStdin(req runtime.StartSessionRequest, input runtim
 	if instructions := codexDeveloperInstructions(req); instructions != "" {
 		args = append(args, "-c", "developer_instructions="+strconv.Quote(instructions))
 	}
-	if r.opts.BypassSandbox || req.YoloMode {
+	if req.YoloMode {
+		args = append(args, "--yolo")
+	} else if r.opts.BypassSandbox {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	} else if r.opts.FullAuto {
 		args = append(args, "--full-auto")
@@ -138,7 +140,7 @@ func hasImageAttachments(input runtime.Input) bool {
 }
 
 func isImageAttachment(attachment runtime.Attachment) bool {
-	return attachment.Kind == "image" || strings.HasPrefix(strings.ToLower(attachment.ContentType), "image/")
+	return attachment.Kind == "image"
 }
 
 func attachmentDirs(input runtime.Input) []string {

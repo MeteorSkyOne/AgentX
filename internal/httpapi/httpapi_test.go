@@ -1219,6 +1219,30 @@ func TestHTTPMultipartAttachmentsCanBeSentDownloadedAndAuthorized(t *testing.T) 
 		t.Fatalf("html content-security-policy = %q, want locked down attachment policy", csp)
 	}
 
+	var binaryMessage domain.Message
+	binaryBody := []byte{0x00, 0x01, 0x02, 0xff}
+	postMultipartMessage(t, env.server.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages", bootstrap.SessionToken, map[string]string{
+		"body": "binary attachment",
+	}, []multipartTestFile{{
+		Field:       "files[]",
+		Filename:    "archive.bin",
+		ContentType: "application/octet-stream",
+		Body:        binaryBody,
+	}}, http.StatusOK, &binaryMessage)
+	if len(binaryMessage.Attachments) != 1 || binaryMessage.Attachments[0].Kind != domain.MessageAttachmentFile {
+		t.Fatalf("binary attachment message = %#v, want generic file attachment", binaryMessage)
+	}
+	status, headers, body = getRaw(t, env.server.URL+"/api/attachments/"+binaryMessage.Attachments[0].ID+"/content", bootstrap.SessionToken)
+	if status != http.StatusOK {
+		t.Fatalf("binary attachment content status = %d", status)
+	}
+	if !bytes.Equal(body, binaryBody) {
+		t.Fatalf("binary attachment body = %v, want %v", body, binaryBody)
+	}
+	if disposition := headers.Get("Content-Disposition"); !strings.HasPrefix(disposition, "attachment;") || !strings.Contains(disposition, "archive.bin") {
+		t.Fatalf("binary content-disposition = %q, want attachment filename", disposition)
+	}
+
 	otherOrg := domain.Organization{ID: "org_other_attachment", Name: "Other", CreatedAt: time.Now().UTC()}
 	otherWorkspace := domain.Workspace{
 		ID: "wks_other_attachment", OrganizationID: otherOrg.ID, Type: "project", Name: "Other Workspace",

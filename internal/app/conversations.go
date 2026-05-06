@@ -160,7 +160,7 @@ func (a *App) SendMessage(ctx context.Context, req SendMessageRequest) (domain.M
 		if len(req.Attachments) > 0 {
 			return domain.Message{}, invalidInput("slash commands cannot include attachments")
 		}
-		return a.dispatchSlashCommand(ctx, req, agents, command)
+		return a.dispatchSlashCommand(ctx, req, scope, agents, command)
 	}
 
 	message, err := a.createConversationMessage(ctx, req, domain.SenderUser, req.UserID, body, nil)

@@ -30,6 +30,7 @@ type persistentSession struct {
 	model    string
 
 	mu           sync.Mutex
+	eventMu      sync.Mutex
 	sessionID    string
 	alive        bool
 	started      bool
@@ -117,10 +118,7 @@ func (s *persistentSession) Close(ctx context.Context) error {
 	if turnHeld {
 		s.process.ReleaseTurn()
 	}
-	s.closeOnce.Do(func() {
-		close(s.done)
-		close(s.events)
-	})
+	s.closeEventStream()
 	return nil
 }
 
@@ -130,10 +128,7 @@ func (s *persistentSession) Stop(ctx context.Context) error {
 	s.turnHeld = false
 	s.mu.Unlock()
 
-	s.closeOnce.Do(func() {
-		close(s.done)
-		close(s.events)
-	})
+	s.closeEventStream()
 
 	done := make(chan struct{})
 	go func() {
@@ -154,10 +149,7 @@ func (s *persistentSession) runTurn(ctx context.Context, input runtime.Input) {
 		s.mu.Lock()
 		s.alive = false
 		s.mu.Unlock()
-		s.closeOnce.Do(func() {
-			close(s.done)
-			close(s.events)
-		})
+		s.closeEventStream()
 	}()
 
 	if s.threadID == "" {
@@ -542,9 +534,21 @@ func (s *persistentSession) handleUserInputRequest(msg jsonRPCMessage) {
 }
 
 func (s *persistentSession) emit(evt runtime.Event) {
+	s.eventMu.Lock()
+	defer s.eventMu.Unlock()
+	if s.events == nil {
+		return
+	}
+	if s.done != nil {
+		select {
+		case <-s.done:
+			return
+		default:
+		}
+	}
 	select {
-	case <-s.done:
 	case s.events <- evt:
+	default:
 	}
 }
 
@@ -553,9 +557,19 @@ func (s *persistentSession) emitFailed(errText string) {
 	s.mu.Lock()
 	s.alive = false
 	s.mu.Unlock()
+	s.closeEventStream()
+}
+
+func (s *persistentSession) closeEventStream() {
 	s.closeOnce.Do(func() {
-		close(s.done)
-		close(s.events)
+		s.eventMu.Lock()
+		defer s.eventMu.Unlock()
+		if s.done != nil {
+			close(s.done)
+		}
+		if s.events != nil {
+			close(s.events)
+		}
 	})
 }
 
@@ -574,7 +588,7 @@ func buildUserInput(input runtime.Input) []map[string]any {
 		{"type": "text", "text": input.RenderedPrompt()},
 	}
 	for _, att := range input.Attachments {
-		if att.Kind == "image" || strings.HasPrefix(strings.ToLower(att.ContentType), "image/") {
+		if att.Kind == "image" {
 			if att.LocalPath != "" {
 				items = append(items, map[string]any{"type": "localImage", "path": att.LocalPath})
 			}

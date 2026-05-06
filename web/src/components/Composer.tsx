@@ -361,7 +361,6 @@ export function Composer({
             type="file"
             multiple
             className="hidden"
-            accept={draftAttachmentAccept}
             onChange={handleFileInputChange}
           />
           {commandOpen && (
@@ -587,7 +586,8 @@ const slashCommands: SlashCommandDefinition[] = [
   { kind: "command", name: "commit", description: "Commit workspace changes" },
   { kind: "command", name: "push", description: "Push the current branch" },
   { kind: "command", name: "review", description: "Review workspace changes" },
-  { kind: "command", name: "stop", description: "Stop active agent runs" }
+  { kind: "command", name: "stop", description: "Stop active agent runs" },
+  { kind: "command", name: "discuss", description: "Start a multi-agent discussion" }
 ];
 
 function buildSlashCommandOptions(
@@ -774,44 +774,6 @@ function isMentionBoundaryAfter(value: string, index: number): boolean {
 const maxDraftAttachments = 5;
 const maxDraftAttachmentBytes = 10 * 1024 * 1024;
 const maxDraftAttachmentTotalBytes = 25 * 1024 * 1024;
-const draftAttachmentAccept = [
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "image/gif",
-  "text/*",
-  ".txt",
-  ".md",
-  ".markdown",
-  ".json",
-  ".jsonl",
-  ".csv",
-  ".log",
-  ".yaml",
-  ".yml",
-  ".toml",
-  ".xml",
-  ".html",
-  ".css",
-  ".js",
-  ".jsx",
-  ".ts",
-  ".tsx",
-  ".go",
-  ".py",
-  ".rs",
-  ".java",
-  ".c",
-  ".cc",
-  ".cpp",
-  ".h",
-  ".hpp",
-  ".sh",
-  ".sql",
-  ".env",
-  ".ini",
-  ".conf"
-].join(",");
 
 function createDraftAttachment(file: File): DraftAttachment {
   const previewURL = isImageFile(file) ? URL.createObjectURL(file) : undefined;
@@ -844,12 +806,12 @@ export function selectDraftAttachmentFiles(
       rejected.push(`${name} exceeds the ${maxDraftAttachments} file limit`);
       continue;
     }
-    if (file.size > maxDraftAttachmentBytes) {
-      rejected.push(`${name} exceeds 10 MiB`);
+    if (file.size === 0) {
+      rejected.push(`${name} is empty`);
       continue;
     }
-    if (!isAcceptedDraftAttachment(file)) {
-      rejected.push(`${name} is not a supported attachment type`);
+    if (file.size > maxDraftAttachmentBytes) {
+      rejected.push(`${name} exceeds 10 MiB`);
       continue;
     }
     if (totalBytes + file.size > maxDraftAttachmentTotalBytes) {
@@ -864,75 +826,11 @@ export function selectDraftAttachmentFiles(
   return { accepted, rejected };
 }
 
-export function isAcceptedDraftAttachment(file: File): boolean {
-  const type = file.type.toLowerCase();
-  const ext = fileExtension(file.name);
-  if (type === "image/svg+xml" || ext === ".svg") {
-    return false;
-  }
-  if (isImageFile(file)) {
-    return true;
-  }
-  if (type.startsWith("text/") || textDraftContentTypes.has(type)) {
-    return true;
-  }
-  if (type === "" || type === "application/octet-stream") {
-    return textDraftExtensions.has(ext);
-  }
-  return false;
-}
-
 function isImageFile(file: File): boolean {
   return imageDraftContentTypes.has(file.type.toLowerCase());
 }
 
 const imageDraftContentTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-const textDraftContentTypes = new Set([
-  "application/json",
-  "application/x-ndjson",
-  "application/xml",
-  "application/yaml",
-  "application/x-yaml",
-  "application/toml"
-]);
-const textDraftExtensions = new Set([
-  ".txt",
-  ".md",
-  ".markdown",
-  ".json",
-  ".jsonl",
-  ".csv",
-  ".log",
-  ".yaml",
-  ".yml",
-  ".toml",
-  ".xml",
-  ".html",
-  ".css",
-  ".js",
-  ".jsx",
-  ".ts",
-  ".tsx",
-  ".go",
-  ".py",
-  ".rs",
-  ".java",
-  ".c",
-  ".cc",
-  ".cpp",
-  ".h",
-  ".hpp",
-  ".sh",
-  ".sql",
-  ".env",
-  ".ini",
-  ".conf"
-]);
-
-function fileExtension(name: string): string {
-  const lastDot = name.lastIndexOf(".");
-  return lastDot >= 0 ? name.slice(lastDot).toLowerCase() : "";
-}
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1024 * 1024) {
