@@ -1999,6 +1999,70 @@ func TestSlashStopStopsActiveAgentRun(t *testing.T) {
 	}
 }
 
+func TestSlashStopReturnsBeforeRuntimeCloseCompletes(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+	blocking := newBlockingCloseRuntime()
+	app.opts.Runtimes[domain.AgentKindFake] = blocking
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "keep running",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blocking.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for blocking runtime start")
+	}
+
+	type stopResult struct {
+		message domain.Message
+		err     error
+	}
+	done := make(chan stopResult, 1)
+	go func() {
+		message, err := app.SendMessage(ctx, SendMessageRequest{
+			UserID:           bootstrap.User.ID,
+			OrganizationID:   bootstrap.Organization.ID,
+			ConversationType: domain.ConversationChannel,
+			ConversationID:   bootstrap.Channel.ID,
+			Body:             "/stop",
+		})
+		done <- stopResult{message: message, err: err}
+	}()
+
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		if result.message.Metadata["command_name"] != "stop" {
+			t.Fatalf("/stop message = %#v", result.message)
+		}
+	case <-blocking.closeStarted:
+		select {
+		case result := <-done:
+			if result.err != nil {
+				t.Fatal(result.err)
+			}
+			if result.message.Metadata["command_name"] != "stop" {
+				t.Fatalf("/stop message = %#v", result.message)
+			}
+		case <-time.After(200 * time.Millisecond):
+			t.Fatal("/stop blocked waiting for runtime close")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for /stop response or runtime close")
+	}
+
+	close(blocking.releaseClose)
+}
+
 func TestActiveRunReplayEventsIncludeStreamingAndPendingQuestion(t *testing.T) {
 	ctx := context.Background()
 	app, bus, bootstrap := newConversationTestApp(t, ctx)
@@ -3157,6 +3221,87 @@ func (s *blockingSession) Close(ctx context.Context) error {
 		close(s.closed)
 		close(s.events)
 	})
+	return nil
+}
+
+type blockingCloseRuntime struct {
+	started      chan struct{}
+	closeStarted chan struct{}
+	releaseClose chan struct{}
+}
+
+func newBlockingCloseRuntime() *blockingCloseRuntime {
+	return &blockingCloseRuntime{
+		started:      make(chan struct{}),
+		closeStarted: make(chan struct{}),
+		releaseClose: make(chan struct{}),
+	}
+}
+
+func (r *blockingCloseRuntime) StartSession(ctx context.Context, req agentruntime.StartSessionRequest) (agentruntime.Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return &blockingCloseSession{
+		id:           "blocking-close:" + req.SessionKey,
+		events:       make(chan agentruntime.Event),
+		started:      r.started,
+		closeStarted: r.closeStarted,
+		releaseClose: r.releaseClose,
+	}, nil
+}
+
+type blockingCloseSession struct {
+	id           string
+	events       chan agentruntime.Event
+	started      chan struct{}
+	closeStarted chan struct{}
+	releaseClose chan struct{}
+	startedOnce  sync.Once
+	closeOnce    sync.Once
+}
+
+func (s *blockingCloseSession) Send(ctx context.Context, input agentruntime.Input) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.startedOnce.Do(func() {
+		close(s.started)
+	})
+	return nil
+}
+
+func (s *blockingCloseSession) Events() <-chan agentruntime.Event {
+	return s.events
+}
+
+func (s *blockingCloseSession) CurrentSessionID() string {
+	return s.id
+}
+
+func (s *blockingCloseSession) Alive() bool {
+	return true
+}
+
+func (s *blockingCloseSession) RespondToInputRequest(questionID string, answer string) error {
+	return nil
+}
+
+func (s *blockingCloseSession) Close(ctx context.Context) error {
+	s.startedOnce.Do(func() {
+		close(s.started)
+	})
+	s.closeOnce.Do(func() {
+		close(s.closeStarted)
+		select {
+		case <-s.releaseClose:
+		case <-ctx.Done():
+		}
+		close(s.events)
+	})
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return nil
 }
 

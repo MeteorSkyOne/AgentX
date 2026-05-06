@@ -208,15 +208,19 @@ func (a *App) stopActiveAgentRuns(ctx context.Context, key activeRunKey) int {
 		if run.session == nil {
 			continue
 		}
-		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		if stopper, ok := run.session.(agentruntime.Stopper); ok {
-			_ = stopper.Stop(closeCtx)
-		} else {
-			_ = run.session.Close(closeCtx)
-		}
-		cancel()
+		go stopAgentRunSession(context.WithoutCancel(ctx), run.session)
 	}
 	return len(stopping)
+}
+
+func stopAgentRunSession(ctx context.Context, session agentruntime.Session) {
+	closeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if stopper, ok := session.(agentruntime.Stopper); ok {
+		_ = stopper.Stop(closeCtx)
+		return
+	}
+	_ = session.Close(closeCtx)
 }
 
 func (a *App) ActiveRunReplayEvents(organizationID string, conversationType domain.ConversationType, conversationID string) map[string]ActiveRunReplay {
