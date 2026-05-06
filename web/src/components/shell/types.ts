@@ -140,6 +140,11 @@ export interface ShellProps {
   onTestNotificationSettings: () => Promise<void>;
   onLoadWorkspaceTree: (workspaceID: string, path?: string) => Promise<WorkspaceTreeEntry>;
   onReadWorkspaceFile: (workspaceID: string, path: string) => Promise<string>;
+  onFetchWorkspaceFileBlob: (
+    workspaceID: string,
+    path: string,
+    options?: { download?: boolean }
+  ) => Promise<Blob>;
   onWriteWorkspaceFile: (workspaceID: string, path: string, body: string) => Promise<void>;
   onDeleteWorkspaceFile: (workspaceID: string, path: string) => Promise<void>;
   onCreateWorkspaceEntry: (

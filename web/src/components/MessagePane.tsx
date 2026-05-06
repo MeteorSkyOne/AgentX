@@ -1171,6 +1171,7 @@ export function createReadOnlyAttachmentEditorController(
     fileLoading: false,
     fileLoadError: null,
     fileSaving: false,
+    fileDownloading: false,
     fileDeleting: false,
     entryActionPending: false,
     workspaceStatus: null,
@@ -1191,6 +1192,7 @@ export function createReadOnlyAttachmentEditorController(
     fileViewMode: "edit",
     trimmedPath: attachment.filename.trim(),
     canUseWorkspace: false,
+    canFetchFileBlob: false,
     setFilePath: noop,
     setFileBody: noop,
     setFileViewMode: noop,
@@ -1204,6 +1206,10 @@ export function createReadOnlyAttachmentEditorController(
     loadGitStatus: asyncNoop,
     loadGitDiff: asyncNoop,
     saveFile: asyncNoop,
+    fetchFileBlob: async () => {
+      throw new Error("File content is not available");
+    },
+    downloadFile: asyncNoop,
     deleteFile: asyncNoop,
     createEntry: async () => null,
     renameEntry: async () => null,

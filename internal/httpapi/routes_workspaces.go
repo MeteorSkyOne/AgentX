@@ -3,6 +3,8 @@ package httpapi
 import (
 	"bytes"
 	"errors"
+	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -154,6 +156,63 @@ func (s *Server) handleWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 	}
 	body := string(data)
 	writeJSON(w, http.StatusOK, workspaceFileResponse{Path: relPath, Body: body, Content: body})
+}
+
+func (s *Server) handleWorkspaceFileContent(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	workspace, ok, err := s.authorizedWorkspace(r, userID, chi.URLParam(r, "workspaceID"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+	relPath, err := cleanWorkspaceRelPath(r.URL.Query().Get("path"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+	target, err := safeWorkspacePath(workspace.Path, relPath)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+	file, err := os.Open(target)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, http.StatusNotFound, "file not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	defer file.Close()
+	stat, err := file.Stat()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if stat.IsDir() {
+		writeError(w, http.StatusBadRequest, "path is a directory")
+		return
+	}
+
+	disposition := "inline"
+	if r.URL.Query().Get("download") == "1" {
+		disposition = "attachment"
+	}
+	w.Header().Set("Content-Type", workspaceFileContentType(relPath, file))
+	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": filepath.Base(relPath)}))
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeContent(w, r, filepath.Base(relPath), stat.ModTime(), file)
 }
 
 func (s *Server) handlePutWorkspaceFile(w http.ResponseWriter, r *http.Request) {
@@ -538,6 +597,21 @@ func workspaceEntryType(info os.FileInfo) string {
 		return "directory"
 	}
 	return "file"
+}
+
+func workspaceFileContentType(relPath string, file *os.File) string {
+	if contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(relPath))); contentType != "" {
+		return contentType
+	}
+	var sample [512]byte
+	n, err := file.Read(sample[:])
+	if err == nil || errors.Is(err, io.EOF) {
+		if _, seekErr := file.Seek(0, io.SeekStart); seekErr == nil && n > 0 {
+			return http.DetectContentType(sample[:n])
+		}
+	}
+	_, _ = file.Seek(0, io.SeekStart)
+	return "application/octet-stream"
 }
 
 var errWorkspaceTreePathNotDirectory = errors.New("workspace tree path is not a directory")

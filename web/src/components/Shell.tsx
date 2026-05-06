@@ -85,6 +85,7 @@ import {
 import type { ShellProps } from "./shell/types";
 import {
   AGENT_EFFORT_OPTIONS,
+  AGENT_RUNTIME_OPTIONS,
   agentToneColor,
   blurActiveElement,
   browserPermissionLabel,
@@ -148,6 +149,7 @@ export function Shell({
   onTestNotificationSettings,
   onLoadWorkspaceTree,
   onReadWorkspaceFile,
+  onFetchWorkspaceFileBlob,
   onWriteWorkspaceFile,
   onDeleteWorkspaceFile,
   onCreateWorkspaceEntry,
@@ -274,6 +276,7 @@ export function Shell({
     autoLoadTree: false,
     onLoadTree: onLoadWorkspaceTree,
     onReadFile: onReadWorkspaceFile,
+    onFetchFileBlob: onFetchWorkspaceFileBlob,
     onWriteFile: onWriteWorkspaceFile,
     onDeleteFile: onDeleteWorkspaceFile,
     onCreateEntry: onCreateWorkspaceEntry,
@@ -1330,6 +1333,7 @@ export function Shell({
               onDeleteAgent={onDeleteAgent}
               onLoadWorkspaceTree={onLoadWorkspaceTree}
               onReadWorkspaceFile={onReadWorkspaceFile}
+              onFetchWorkspaceFileBlob={onFetchWorkspaceFileBlob}
               onWriteWorkspaceFile={onWriteWorkspaceFile}
               onDeleteWorkspaceFile={onDeleteWorkspaceFile}
               onCreateWorkspaceEntry={onCreateWorkspaceEntry}
@@ -1756,6 +1760,7 @@ export function Shell({
                 onDeleteAgent={onDeleteAgent}
                 onLoadWorkspaceTree={onLoadWorkspaceTree}
                 onReadWorkspaceFile={onReadWorkspaceFile}
+                onFetchWorkspaceFileBlob={onFetchWorkspaceFileBlob}
                 onWriteWorkspaceFile={onWriteWorkspaceFile}
                 onDeleteWorkspaceFile={onDeleteWorkspaceFile}
                 onCreateWorkspaceEntry={onCreateWorkspaceEntry}
@@ -2623,9 +2628,11 @@ export function Shell({
                   onChange={(e) => setNewAgentKind(e.target.value)}
                   aria-label="New agent runtime"
                 >
-                  <option value="fake">Fake</option>
-                  <option value="codex">Codex</option>
-                  <option value="claude">Claude</option>
+                  {AGENT_RUNTIME_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                 </Select>
               </div>
               <div className="space-y-2">

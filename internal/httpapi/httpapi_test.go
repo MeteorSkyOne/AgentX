@@ -742,6 +742,60 @@ func TestHTTPWorkspaceFilesRejectTraversalAndRoundTripText(t *testing.T) {
 	getJSON(t, fileURL, bootstrap.SessionToken, http.StatusNotFound, nil)
 }
 
+func TestHTTPWorkspaceFileContentStreamsBinaryAndPDFs(t *testing.T) {
+	ts := newTestServer(t)
+
+	bootstrap := setupHTTP(t, ts.URL)
+	docsDir := filepath.Join(bootstrap.Workspace.Path, "docs")
+	if err := os.MkdirAll(docsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pdfBody := []byte("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n")
+	if err := os.WriteFile(filepath.Join(docsDir, "manual.pdf"), pdfBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	binaryBody := []byte{0x00, 0x01, 0x02, 0xff}
+	if err := os.WriteFile(filepath.Join(bootstrap.Workspace.Path, "archive.bin"), binaryBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	baseURL := ts.URL + "/api/workspaces/" + bootstrap.Workspace.ID + "/files/content"
+	status, headers, body := getRaw(t, baseURL+"?path=docs/manual.pdf", bootstrap.SessionToken)
+	if status != http.StatusOK {
+		t.Fatalf("pdf content status = %d, body = %s", status, string(body))
+	}
+	if !bytes.Equal(body, pdfBody) {
+		t.Fatalf("pdf body = %q, want %q", body, pdfBody)
+	}
+	if contentType := headers.Get("Content-Type"); !strings.HasPrefix(contentType, "application/pdf") {
+		t.Fatalf("pdf content-type = %q, want application/pdf", contentType)
+	}
+	if disposition := headers.Get("Content-Disposition"); !strings.HasPrefix(disposition, "inline;") || !strings.Contains(disposition, "manual.pdf") {
+		t.Fatalf("pdf content-disposition = %q, want inline filename", disposition)
+	}
+
+	status, headers, body = getRaw(t, baseURL+"?path=archive.bin&download=1", bootstrap.SessionToken)
+	if status != http.StatusOK {
+		t.Fatalf("binary content status = %d, body = %s", status, string(body))
+	}
+	if !bytes.Equal(body, binaryBody) {
+		t.Fatalf("binary body = %v, want %v", body, binaryBody)
+	}
+	if disposition := headers.Get("Content-Disposition"); !strings.HasPrefix(disposition, "attachment;") || !strings.Contains(disposition, "archive.bin") {
+		t.Fatalf("binary content-disposition = %q, want attachment filename", disposition)
+	}
+	if cacheControl := headers.Get("Cache-Control"); cacheControl != "private, no-store" {
+		t.Fatalf("cache-control = %q, want private, no-store", cacheControl)
+	}
+	if csp := headers.Get("Content-Security-Policy"); csp != "default-src 'none'; sandbox" {
+		t.Fatalf("content-security-policy = %q, want locked down policy", csp)
+	}
+
+	getJSON(t, baseURL+"?path=../secret", bootstrap.SessionToken, http.StatusBadRequest, nil)
+	getJSON(t, baseURL+"?path=docs/missing.pdf", bootstrap.SessionToken, http.StatusNotFound, nil)
+	getJSON(t, baseURL+"?path=docs", bootstrap.SessionToken, http.StatusBadRequest, nil)
+}
+
 func TestHTTPWorkspaceEntriesManageFilesAndDirectories(t *testing.T) {
 	ts := newTestServer(t)
 

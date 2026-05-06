@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { cloneElement, type ComponentProps, type ReactElement } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceFileEditor, WorkspaceGitDiffViewer } from "./WorkspaceFileEditor";
 import type { WorkspaceFileBrowserController } from "./WorkspaceFileBrowser";
 
@@ -60,6 +60,17 @@ vi.mock("@monaco-editor/react", async () => {
       );
     },
   };
+});
+
+beforeEach(() => {
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    value: vi.fn(() => "blob:workspace-pdf"),
+  });
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    value: vi.fn(),
+  });
 });
 
 afterEach(() => {
@@ -124,6 +135,41 @@ describe("WorkspaceFileEditor markdown preview", () => {
 
     expect(screen.getByTestId("mock-monaco-editor")).toBeTruthy();
     expect(screen.queryByTestId("workspace-file-markdown-preview")).toBeNull();
+  });
+
+  it("renders PDF files inline from workspace blobs", async () => {
+    const fetchFileBlob = vi.fn(async () => new Blob(["%PDF-1.7"], { type: "application/pdf" }));
+    const { unmount } = renderEditor({
+      filePath: "docs/manual.pdf",
+      fetchFileBlob,
+    });
+
+    await waitFor(() => expect(fetchFileBlob).toHaveBeenCalledWith("docs/manual.pdf"));
+
+    expect(screen.queryByTestId("mock-monaco-editor")).toBeNull();
+    expect(screen.getByTestId("workspace-file-pdf-frame").getAttribute("src")).toBe("blob:workspace-pdf");
+
+    unmount();
+
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:workspace-pdf");
+  });
+
+  it("shows PDF preview failures and retries", async () => {
+    const fetchFileBlob = vi.fn()
+      .mockRejectedValueOnce(new Error("preview unavailable"))
+      .mockResolvedValueOnce(new Blob(["%PDF-1.7"], { type: "application/pdf" }));
+
+    renderEditor({
+      filePath: "docs/manual.pdf",
+      fetchFileBlob,
+    });
+
+    expect(await screen.findByText("preview unavailable")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(fetchFileBlob).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("workspace-file-pdf-frame")).toBeTruthy();
   });
 });
 
@@ -243,7 +289,7 @@ function renderDiffViewer(
 
 function renderEditor(overrides: Partial<WorkspaceFileBrowserController> = {}) {
   const controller = controllerFixture(overrides);
-  render(
+  return render(
     <WorkspaceFileEditor
       controller={controller}
       theme="dark"
@@ -271,6 +317,7 @@ function controllerFixture(
     fileLoading: false,
     fileLoadError: null,
     fileSaving: false,
+    fileDownloading: false,
     fileDeleting: false,
     entryActionPending: false,
     workspaceStatus: null,
@@ -290,6 +337,7 @@ function controllerFixture(
     fileOpenRequestID: 0,
     fileViewMode: "edit",
     canUseWorkspace: true,
+    canFetchFileBlob: true,
     setFilePath: vi.fn(),
     setFileBody: vi.fn(),
     setFileViewMode: vi.fn(),
@@ -303,6 +351,8 @@ function controllerFixture(
     loadGitStatus: vi.fn(async () => undefined),
     loadGitDiff: vi.fn(async () => undefined),
     saveFile: vi.fn(async () => undefined),
+    fetchFileBlob: vi.fn(async () => new Blob(["%PDF-1.7"])),
+    downloadFile: vi.fn(async () => undefined),
     deleteFile: vi.fn(async () => undefined),
     createEntry: vi.fn(async () => null),
     renameEntry: vi.fn(async () => null),

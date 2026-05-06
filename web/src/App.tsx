@@ -18,6 +18,7 @@ import {
   deleteThread,
   deleteWorkspaceEntry,
   deleteWorkspaceFile,
+  fetchWorkspaceFileBlob,
   getToken,
   logout as logoutRequest,
   me,
@@ -805,6 +806,14 @@ export default function App() {
     return file.body;
   }
 
+  async function handleFetchWorkspaceFileBlob(
+    workspaceID: string,
+    path: string,
+    options?: { download?: boolean }
+  ): Promise<Blob> {
+    return fetchWorkspaceFileBlob(workspaceID, path, options);
+  }
+
   async function handleLoadWorkspaceTree(workspaceID: string, path?: string): Promise<WorkspaceTreeEntry> {
     return workspaceTree(workspaceID, path);
   }
@@ -933,6 +942,7 @@ export default function App() {
       onTestNotificationSettings={handleTestNotificationSettings}
       onLoadWorkspaceTree={handleLoadWorkspaceTree}
       onReadWorkspaceFile={handleReadWorkspaceFile}
+      onFetchWorkspaceFileBlob={handleFetchWorkspaceFileBlob}
       onWriteWorkspaceFile={handleWriteWorkspaceFile}
       onDeleteWorkspaceFile={handleDeleteWorkspaceFile}
       onCreateWorkspaceEntry={handleCreateWorkspaceEntry}

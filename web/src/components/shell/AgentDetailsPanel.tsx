@@ -45,6 +45,7 @@ import { AgentProviderLimitsView } from "./AgentProviderLimits";
 import type { ShellProps } from "./types";
 import {
   AGENT_EFFORT_OPTIONS,
+  AGENT_RUNTIME_OPTIONS,
   agentKindLabel,
   agentToneColor,
   defaultAgentInstructionPath,
@@ -61,6 +62,7 @@ export function AgentDetailsPanel({
   onDeleteAgent,
   onLoadWorkspaceTree,
   onReadWorkspaceFile,
+  onFetchWorkspaceFileBlob,
   onWriteWorkspaceFile,
   onDeleteWorkspaceFile,
   onCreateWorkspaceEntry,
@@ -79,6 +81,7 @@ export function AgentDetailsPanel({
   onDeleteAgent: ShellProps["onDeleteAgent"];
   onLoadWorkspaceTree: ShellProps["onLoadWorkspaceTree"];
   onReadWorkspaceFile: ShellProps["onReadWorkspaceFile"];
+  onFetchWorkspaceFileBlob: ShellProps["onFetchWorkspaceFileBlob"];
   onWriteWorkspaceFile: ShellProps["onWriteWorkspaceFile"];
   onDeleteWorkspaceFile: ShellProps["onDeleteWorkspaceFile"];
   onCreateWorkspaceEntry: ShellProps["onCreateWorkspaceEntry"];
@@ -363,11 +366,11 @@ export function AgentDetailsPanel({
                     onChange={(e) => setKind(e.target.value)}
                     aria-label="Agent runtime"
                   >
-                    <option value="fake">Fake</option>
-                    <option value="codex">Codex</option>
-                    <option value="claude">Claude</option>
-                    <option value="claude-persistent">Claude (persistent)</option>
-                    <option value="codex-persistent">Codex (persistent)</option>
+                    {AGENT_RUNTIME_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
                   </Select>
                 </div>
                 <div className="space-y-2">
@@ -531,6 +534,7 @@ export function AgentDetailsPanel({
               theme={theme}
               onLoadTree={onLoadWorkspaceTree}
               onReadFile={onReadWorkspaceFile}
+              onFetchFileBlob={onFetchWorkspaceFileBlob}
               onWriteFile={onWriteWorkspaceFile}
               onDeleteFile={onDeleteWorkspaceFile}
               onCreateEntry={onCreateWorkspaceEntry}

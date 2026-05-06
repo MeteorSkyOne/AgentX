@@ -111,6 +111,39 @@ describe("WorkspaceFileEditorPane markdown controls", () => {
     expect(screen.queryByRole("button", { name: "Split Markdown view" })).toBeNull();
   });
 
+  it("selects PDF files without reading them as text", async () => {
+    const onReadFile = vi.fn(async () => "should not load");
+
+    render(<PdfLoadHarness onReadFile={onReadFile} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open PDF" }));
+
+    await waitFor(() => expect(screen.getByTestId("loaded-path").textContent).toBe("docs/manual.pdf"));
+    expect(onReadFile).not.toHaveBeenCalled();
+    expect(screen.getByTestId("loaded-body").textContent).toBe("");
+  });
+
+  it("downloads files from the toolbar and disables saving PDFs", () => {
+    const downloadFile = vi.fn(async () => undefined);
+
+    render(
+      <WorkspaceFileEditorPane
+        controller={controllerFixture({
+          filePath: "docs/manual.pdf",
+          downloadFile,
+        })}
+        theme="dark"
+        contentAriaLabel="File content"
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Download file" }));
+
+    expect(downloadFile).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole("button", { name: "Save file" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+  });
+
   it("renders project changes in the file tree pane", async () => {
     const loadGitDiff = vi.fn(async () => undefined);
     const setGitTarget = vi.fn();
@@ -228,6 +261,32 @@ function workspaceTreeFixture() {
   };
 }
 
+function PdfLoadHarness({
+  onReadFile,
+}: {
+  onReadFile: (workspaceID: string, path: string) => Promise<string>;
+}) {
+  const controller = useWorkspaceFileBrowser({
+    workspaceID: "w1",
+    workspacePath: "/workspace/AgentX",
+    autoLoadTree: false,
+    onLoadTree: async () => workspaceTreeFixture(),
+    onReadFile,
+    onFetchFileBlob: async () => new Blob(["%PDF-1.7"]),
+    onWriteFile: async () => undefined,
+    onDeleteFile: async () => undefined,
+  });
+  return (
+    <div>
+      <button type="button" onClick={() => void controller.loadFile("docs/manual.pdf")}>
+        Open PDF
+      </button>
+      <div data-testid="loaded-path">{controller.filePath}</div>
+      <div data-testid="loaded-body">{controller.fileBody}</div>
+    </div>
+  );
+}
+
 function WorkspaceFileTreePaneHarness({
   controller,
 }: {
@@ -260,6 +319,7 @@ function controllerFixture(
     fileLoading: false,
     fileLoadError: null,
     fileSaving: false,
+    fileDownloading: false,
     fileDeleting: false,
     entryActionPending: false,
     workspaceStatus: null,
@@ -279,6 +339,7 @@ function controllerFixture(
     fileOpenRequestID: 0,
     fileViewMode: "edit",
     canUseWorkspace: true,
+    canFetchFileBlob: true,
     setFilePath: vi.fn(),
     setFileBody: vi.fn(),
     setFileViewMode: vi.fn(),
@@ -292,6 +353,8 @@ function controllerFixture(
     loadGitStatus: vi.fn(async () => undefined),
     loadGitDiff: vi.fn(async () => undefined),
     saveFile: vi.fn(async () => undefined),
+    fetchFileBlob: vi.fn(async () => new Blob(["file"])),
+    downloadFile: vi.fn(async () => undefined),
     deleteFile: vi.fn(async () => undefined),
     createEntry: vi.fn(async () => null),
     renameEntry: vi.fn(async () => null),

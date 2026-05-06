@@ -50,3 +50,8 @@ export function monacoLanguageForPath(path: string): string {
 export function isMarkdownFilePath(path: string): boolean {
   return monacoLanguageForPath(path) === "markdown";
 }
+
+export function isPdfFilePath(path: string): boolean {
+  const fileName = path.trim().split(/[\\/]/).pop()?.toLowerCase() ?? "";
+  return fileName.endsWith(".pdf");
+}

@@ -470,6 +470,31 @@ export function workspaceFile(workspaceID: string, path: string): Promise<Worksp
   );
 }
 
+export async function fetchWorkspaceFileBlob(
+  workspaceID: string,
+  path: string,
+  options: { download?: boolean } = {}
+): Promise<Blob> {
+  const token = getToken();
+  const headers = new Headers();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  const params = new URLSearchParams({ path });
+  if (options.download) {
+    params.set("download", "1");
+  }
+  const response = await fetch(
+    `/api/workspaces/${encodeURIComponent(workspaceID)}/files/content?${params.toString()}`,
+    { headers }
+  );
+  if (!response.ok) {
+    const message = await errorMessage(response);
+    throw new Error(message);
+  }
+  return response.blob();
+}
+
 export function putWorkspaceFile(
   workspaceID: string,
   path: string,

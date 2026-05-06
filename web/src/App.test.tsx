@@ -72,6 +72,7 @@ vi.mock("./api/client", () => ({
   deleteThread: vi.fn(),
   deleteWorkspaceEntry: vi.fn(),
   deleteWorkspaceFile: vi.fn(),
+  fetchWorkspaceFileBlob: vi.fn(async () => new Blob(["file"])),
   getToken: vi.fn(() => "session-token"),
   login: vi.fn(),
   logout: vi.fn(),

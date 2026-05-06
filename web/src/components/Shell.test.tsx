@@ -33,7 +33,13 @@ vi.mock("./ChannelList", () => ({
 }));
 
 vi.mock("./shell/AgentsSidebar", () => ({
-  AgentsSidebar: () => <div data-testid="agents-sidebar" />,
+  AgentsSidebar: ({ onCreateAgent }: { onCreateAgent: () => void }) => (
+    <div data-testid="agents-sidebar">
+      <button type="button" onClick={onCreateAgent}>
+        Create agent
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock("./shell/ConversationPanel", () => ({
@@ -69,6 +75,7 @@ vi.mock("./WorkspaceFileBrowser", () => ({
       fileLoading: false,
       fileLoadError: null,
       fileSaving: false,
+      fileDownloading: false,
       fileDeleting: false,
       entryActionPending: false,
       workspaceStatus: null,
@@ -89,6 +96,7 @@ vi.mock("./WorkspaceFileBrowser", () => ({
       gitSelectedPath: "",
       trimmedPath: "",
       canUseWorkspace: Boolean(args.workspaceID),
+      canFetchFileBlob: Boolean(args.workspaceID),
       setFilePath: () => undefined,
       setFileBody: () => undefined,
       setFileViewMode: () => undefined,
@@ -102,6 +110,8 @@ vi.mock("./WorkspaceFileBrowser", () => ({
       loadGitStatus: async () => undefined,
       loadGitDiff: async () => undefined,
       saveFile: async () => undefined,
+      fetchFileBlob: async () => new Blob(["file"]),
+      downloadFile: async () => undefined,
       deleteFile: async () => undefined,
       createEntry: async () => null,
       renameEntry: async () => null,
@@ -228,6 +238,18 @@ describe("Shell main views", () => {
     expect(screen.getByTestId("conversation-panel")).toBeTruthy();
     expect(screen.queryByTestId("tasks-panel")).toBeNull();
   });
+
+  it("offers persistent runtimes when creating an agent", () => {
+    render(<Shell {...shellProps()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
+
+    const runtimeSelect = screen.getByRole("combobox", { name: "New agent runtime" });
+    const optionValues = Array.from(runtimeSelect.querySelectorAll("option")).map((option) => option.value);
+
+    expect(optionValues).toContain("claude-persistent");
+    expect(optionValues).toContain("codex-persistent");
+  });
 });
 
 describe("Shell mobile panels", () => {
@@ -337,6 +359,7 @@ function shellProps(): ShellProps {
     onTestNotificationSettings: vi.fn(),
     onLoadWorkspaceTree: vi.fn(),
     onReadWorkspaceFile: vi.fn(),
+    onFetchWorkspaceFileBlob: vi.fn(async () => new Blob(["file"])),
     onWriteWorkspaceFile: vi.fn(),
     onDeleteWorkspaceFile: vi.fn(),
     onCreateWorkspaceEntry: vi.fn(),

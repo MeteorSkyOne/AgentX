@@ -4,6 +4,14 @@ import type { SocketConnectionStatus } from "../../ws/useConversationSocket";
 
 export const AGENT_EFFORT_OPTIONS = ["low", "medium", "high", "xhigh"] as const;
 
+export const AGENT_RUNTIME_OPTIONS = [
+  { value: "fake", label: "Fake" },
+  { value: "codex", label: "Codex" },
+  { value: "claude", label: "Claude" },
+  { value: "claude-persistent", label: "Claude (persistent)" },
+  { value: "codex-persistent", label: "Codex (persistent)" },
+] as const;
+
 export function runWorkspaceOptions(
   agent: Agent,
   boundAgents: ConversationAgentContext[],

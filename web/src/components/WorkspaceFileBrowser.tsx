@@ -6,6 +6,7 @@ import {
   Code2,
   Columns2,
   Database,
+  Download,
   Eye,
   FileDiff,
   FileText,
@@ -43,7 +44,7 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { FileTree } from "./FileTree";
-import { isMarkdownFilePath } from "./workspaceFileLanguages";
+import { isMarkdownFilePath, isPdfFilePath } from "./workspaceFileLanguages";
 
 const LazyWorkspaceFileEditor = lazy(() =>
   import("./WorkspaceFileEditor").then((module) => ({ default: module.WorkspaceFileEditor }))
@@ -56,6 +57,11 @@ const LazyWorkspaceGitDiffViewer = lazy(() =>
 export interface WorkspaceFileBrowserActions {
   onLoadTree: (workspaceID: string, path?: string) => Promise<WorkspaceTreeEntry>;
   onReadFile: (workspaceID: string, path: string) => Promise<string>;
+  onFetchFileBlob?: (
+    workspaceID: string,
+    path: string,
+    options?: { download?: boolean }
+  ) => Promise<Blob>;
   onWriteFile: (workspaceID: string, path: string, body: string) => Promise<void>;
   onDeleteFile: (workspaceID: string, path: string) => Promise<void>;
   onCreateEntry?: (workspaceID: string, path: string, type: WorkspaceEntryType) => Promise<void>;
@@ -109,6 +115,7 @@ export interface WorkspaceFileBrowserController {
   fileLoading: boolean;
   fileLoadError: string | null;
   fileSaving: boolean;
+  fileDownloading: boolean;
   fileDeleting: boolean;
   entryActionPending: boolean;
   workspaceStatus: string | null;
@@ -129,6 +136,7 @@ export interface WorkspaceFileBrowserController {
   fileViewMode: WorkspaceFileViewMode;
   trimmedPath: string;
   canUseWorkspace: boolean;
+  canFetchFileBlob: boolean;
   setFilePath: (path: string) => void;
   setFileBody: (body: string) => void;
   setFileViewMode: (mode: WorkspaceFileViewMode) => void;
@@ -142,6 +150,8 @@ export interface WorkspaceFileBrowserController {
   loadGitStatus: (options?: { quiet?: boolean; scope?: WorkspaceGitScope; target?: string; compare?: string }) => Promise<void>;
   loadGitDiff: (path: string) => Promise<void>;
   saveFile: () => Promise<void>;
+  fetchFileBlob: (path?: string, options?: { download?: boolean }) => Promise<Blob>;
+  downloadFile: () => Promise<void>;
   deleteFile: () => Promise<void>;
   createEntry: (
     parentPath: string,
@@ -160,6 +170,7 @@ export function useWorkspaceFileBrowser({
   autoLoadTree = true,
   onLoadTree,
   onReadFile,
+  onFetchFileBlob,
   onWriteFile,
   onDeleteFile,
   onCreateEntry,
@@ -179,6 +190,7 @@ export function useWorkspaceFileBrowser({
   const [fileLoading, setFileLoading] = useState(false);
   const [fileLoadError, setFileLoadError] = useState<string | null>(null);
   const [fileSaving, setFileSaving] = useState(false);
+  const [fileDownloading, setFileDownloading] = useState(false);
   const [fileDeleting, setFileDeleting] = useState(false);
   const [entryActionPending, setEntryActionPending] = useState(false);
   const [workspaceStatus, setWorkspaceStatus] = useState<string | null>(null);
@@ -204,6 +216,7 @@ export function useWorkspaceFileBrowser({
 
   const trimmedPath = filePath.trim();
   const canUseWorkspace = Boolean(workspaceID);
+  const canFetchFileBlob = Boolean(workspaceID && onFetchFileBlob);
   const gitEnabled = Boolean(onLoadGitStatus && onLoadGitDiff);
 
   const loadTree = useCallback(
@@ -328,6 +341,13 @@ export function useWorkspaceFileBrowser({
       setFileOpenPosition(normalizeWorkspaceFilePosition(options.position));
       setFileOpenRequestID(requestID);
       try {
+        if (isPdfFilePath(targetPath)) {
+          if (fileRequestRef.current !== requestID) return;
+          setFileBody("");
+          setFileLoadError(null);
+          setWorkspaceStatus("Loaded");
+          return;
+        }
         const body = await onReadFile(workspaceID, targetPath);
         if (fileRequestRef.current !== requestID) return;
         setFileBody(body);
@@ -474,6 +494,10 @@ export function useWorkspaceFileBrowser({
   const saveFile = useCallback(async () => {
     const targetPath = filePath.trim();
     if (!workspaceID || !targetPath) return;
+    if (isPdfFilePath(targetPath)) {
+      setWorkspaceStatus("PDF files cannot be edited here");
+      return;
+    }
     setFileSaving(true);
     try {
       await onWriteFile(workspaceID, targetPath, fileBody);
@@ -487,6 +511,32 @@ export function useWorkspaceFileBrowser({
       setFileSaving(false);
     }
   }, [fileBody, filePath, onWriteFile, refreshTreeForFilePath, workspaceID]);
+
+  const fetchFileBlob = useCallback(
+    async (path = filePath, options: { download?: boolean } = {}) => {
+      const targetPath = path.trim();
+      if (!workspaceID || !targetPath || !onFetchFileBlob) {
+        throw new Error("File content is not available");
+      }
+      return onFetchFileBlob(workspaceID, targetPath, options);
+    },
+    [filePath, onFetchFileBlob, workspaceID]
+  );
+
+  const downloadFile = useCallback(async () => {
+    const targetPath = filePath.trim();
+    if (!workspaceID || !targetPath || !onFetchFileBlob) return;
+    setFileDownloading(true);
+    try {
+      const blob = await onFetchFileBlob(workspaceID, targetPath, { download: true });
+      downloadWorkspaceFileBlob(blob, workspaceFileDownloadName(targetPath));
+      setWorkspaceStatus("Downloaded");
+    } catch (err) {
+      setWorkspaceStatus(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setFileDownloading(false);
+    }
+  }, [filePath, onFetchFileBlob, workspaceID]);
 
   const deleteFile = useCallback(async () => {
     const targetPath = filePath.trim();
@@ -658,6 +708,7 @@ export function useWorkspaceFileBrowser({
     setWorkspaceTreeLoading(false);
     setFileLoading(false);
     setFileSaving(false);
+    setFileDownloading(false);
     setFileDeleting(false);
     setEntryActionPending(false);
     setWorkspacePaneViewState("files");
@@ -697,6 +748,7 @@ export function useWorkspaceFileBrowser({
     fileLoading,
     fileLoadError,
     fileSaving,
+    fileDownloading,
     fileDeleting,
     entryActionPending,
     workspaceStatus,
@@ -717,6 +769,7 @@ export function useWorkspaceFileBrowser({
     fileViewMode,
     trimmedPath,
     canUseWorkspace,
+    canFetchFileBlob,
     setFilePath,
     setFileBody,
     setFileViewMode,
@@ -730,6 +783,8 @@ export function useWorkspaceFileBrowser({
     loadGitStatus,
     loadGitDiff,
     saveFile,
+    fetchFileBlob,
+    downloadFile,
     deleteFile,
     createEntry,
     renameEntry,
@@ -746,6 +801,22 @@ function normalizeWorkspaceFilePosition(
     lineNumber: position.lineNumber,
     column: position.column && position.column > 0 ? position.column : 1,
   };
+}
+
+function downloadWorkspaceFileBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename || "download";
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function workspaceFileDownloadName(path: string): string {
+  return path.trim().split(/[\\/]/).pop() || "download";
 }
 
 function normalizeWorkspaceTreePath(path: string): string {
@@ -1717,6 +1788,7 @@ function WorkspaceFileToolbar({
   onOpenTree?: () => void;
 }) {
   const markdownControlsVisible = isMarkdownFilePath(controller.trimmedPath);
+  const pdfFileSelected = isPdfFilePath(controller.trimmedPath);
 
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -1791,10 +1863,20 @@ function WorkspaceFileToolbar({
         <RefreshCw className={cn("h-3.5 w-3.5", controller.workspaceTreeLoading && "animate-spin")} />
       </Button>
       <Button
+        size="icon-sm"
+        variant="outline"
+        onClick={() => void controller.downloadFile()}
+        disabled={controller.fileDownloading || !controller.canFetchFileBlob || !controller.trimmedPath}
+        title="Download file"
+        aria-label="Download file"
+      >
+        <Download className="h-3.5 w-3.5" />
+      </Button>
+      <Button
         size="sm"
         className="gap-1.5"
         onClick={() => void controller.saveFile()}
-        disabled={controller.fileSaving || !controller.canUseWorkspace || !controller.trimmedPath}
+        disabled={controller.fileSaving || pdfFileSelected || !controller.canUseWorkspace || !controller.trimmedPath}
       >
         <Save className="h-3.5 w-3.5" />
         Save file

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Editor, { DiffEditor, type DiffOnMount, type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
-import { ChevronDown, ChevronUp, CircleAlert, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronUp, CircleAlert, FileText, RefreshCw } from "lucide-react";
 import "@/lib/monaco";
 import type { WorkspaceFileEditorProps } from "./WorkspaceFileBrowser";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import type { WorkspacePathTarget } from "@/lib/workspacePaths";
 import type { WorkspaceGitDiff } from "@/api/types";
 import { MarkdownRenderer } from "./MarkdownRenderer";
-import { isMarkdownFilePath, monacoLanguageForPath } from "./workspaceFileLanguages";
+import { isMarkdownFilePath, isPdfFilePath, monacoLanguageForPath } from "./workspaceFileLanguages";
 
 type WorkspaceEditorNode = HTMLDivElement & {
   __agentxSetEditorValue?: (value: string) => void;
@@ -31,6 +31,7 @@ export function WorkspaceFileEditor({
   const editorTheme = theme === "dark" ? "vs-dark" : "light";
   const language = useMemo(() => monacoLanguageForPath(controller.filePath), [controller.filePath]);
   const isMarkdownFile = isMarkdownFilePath(controller.trimmedPath);
+  const isPdfFile = isPdfFilePath(controller.trimmedPath);
   const viewMode = isMarkdownFile ? controller.fileViewMode : "edit";
   const editorModelPath = useMemo(() => {
     const path = controller.trimmedPath || "untitled";
@@ -163,7 +164,9 @@ export function WorkspaceFileEditor({
           onRetry={() => void controller.loadFile(controller.trimmedPath)}
         />
       )}
-      {viewMode === "preview" ? (
+      {isPdfFile ? (
+        <WorkspacePdfPreview controller={controller} />
+      ) : viewMode === "preview" ? (
         <MarkdownPreview
           controller={controller}
           onOpenWorkspacePath={handleOpenPreviewPath}
@@ -181,6 +184,100 @@ export function WorkspaceFileEditor({
         </div>
       ) : (
         editorElement
+      )}
+    </div>
+  );
+}
+
+function WorkspacePdfPreview({
+  controller,
+}: {
+  controller: WorkspaceFileEditorProps["controller"];
+}) {
+  const [objectURL, setObjectURL] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
+  const path = controller.trimmedPath;
+  const canFetchFileBlob = controller.canFetchFileBlob;
+  const fetchFileBlob = controller.fetchFileBlob;
+
+  useEffect(() => {
+    let cancelled = false;
+    let nextURL: string | null = null;
+    setObjectURL(null);
+    setError(null);
+    if (!path) return;
+    if (!canFetchFileBlob) {
+      setError("PDF preview is not available");
+      return;
+    }
+    setLoading(true);
+    fetchFileBlob(path)
+      .then((blob) => {
+        if (cancelled) return;
+        nextURL = URL.createObjectURL(blob);
+        setObjectURL(nextURL);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "PDF preview failed");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+      if (nextURL) {
+        URL.revokeObjectURL(nextURL);
+      }
+    };
+  }, [canFetchFileBlob, fetchFileBlob, path, retryKey]);
+
+  return (
+    <div
+      className="relative flex h-full min-h-0 w-full bg-muted/20"
+      data-testid="workspace-file-pdf-preview"
+      role="region"
+      aria-label="PDF preview"
+    >
+      {loading && (
+        <div className="absolute right-3 top-3 z-10 rounded border border-border bg-background/95 px-2 py-1 text-xs text-muted-foreground shadow-sm">
+          Loading PDF...
+        </div>
+      )}
+      {error && !loading ? (
+        <div className="flex h-full min-h-[18rem] w-full items-center justify-center p-6" role="alert">
+          <div className="max-w-md rounded-md border border-destructive/30 bg-background p-4 text-center shadow-sm">
+            <CircleAlert className="mx-auto mb-3 h-8 w-8 text-destructive" />
+            <h2 className="text-sm font-semibold text-destructive">PDF preview failed</h2>
+            <p className="mt-2 text-xs text-muted-foreground">{error}</p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="mt-4 gap-1.5"
+              onClick={() => setRetryKey((current) => current + 1)}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Retry
+            </Button>
+          </div>
+        </div>
+      ) : objectURL ? (
+        <iframe
+          src={objectURL}
+          title={`PDF preview for ${path}`}
+          className="h-full min-h-[18rem] w-full border-0 bg-background"
+          data-testid="workspace-file-pdf-frame"
+        />
+      ) : (
+        <div className="flex h-full min-h-[18rem] w-full items-center justify-center text-muted-foreground">
+          <FileText className="h-8 w-8" />
+        </div>
       )}
     </div>
   );

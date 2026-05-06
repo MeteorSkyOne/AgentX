@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isMarkdownFilePath, monacoLanguageForPath } from "./workspaceFileLanguages";
+import { isMarkdownFilePath, isPdfFilePath, monacoLanguageForPath } from "./workspaceFileLanguages";
 
 describe("monacoLanguageForPath", () => {
   it.each([
@@ -39,5 +39,13 @@ describe("isMarkdownFilePath", () => {
     expect(isMarkdownFilePath("docs/page.mdx")).toBe(true);
     expect(isMarkdownFilePath("README.MARKDOWN")).toBe(true);
     expect(isMarkdownFilePath("docs/readme.txt")).toBe(false);
+  });
+});
+
+describe("isPdfFilePath", () => {
+  it("matches PDF file extensions case-insensitively", () => {
+    expect(isPdfFilePath("docs/manual.pdf")).toBe(true);
+    expect(isPdfFilePath("docs/Manual.PDF")).toBe(true);
+    expect(isPdfFilePath("docs/pdf-notes.md")).toBe(false);
   });
 });
