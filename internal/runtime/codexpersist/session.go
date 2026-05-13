@@ -165,6 +165,19 @@ func (s *persistentSession) runTurn(ctx context.Context, input runtime.Input) {
 		s.mu.Unlock()
 	}
 
+	if objective, isClear, ok := parseGoalPrompt(input.Prompt); ok {
+		if isClear {
+			s.handleGoalClear(ctx)
+		} else {
+			s.handleGoalSet(ctx, input, objective)
+		}
+		return
+	}
+
+	s.startTurnAndProcess(ctx, input)
+}
+
+func (s *persistentSession) startTurnAndProcess(ctx context.Context, input runtime.Input) {
 	userInput := buildUserInput(input)
 	turnParams := map[string]any{
 		"threadId": s.threadID,
@@ -186,6 +199,50 @@ func (s *persistentSession) runTurn(ctx context.Context, input runtime.Input) {
 	_ = result
 
 	s.processNotifications(ctx)
+}
+
+func (s *persistentSession) handleGoalSet(ctx context.Context, input runtime.Input, objective string) {
+	_, err := s.rpc.Call(ctx, "thread/goal/set", map[string]any{
+		"threadId":  s.threadID,
+		"objective": objective,
+	})
+	if err != nil {
+		s.emit(runtime.Event{Type: runtime.EventFailed, Error: fmt.Sprintf("thread/goal/set failed: %v", err)})
+		return
+	}
+	goalInput := runtime.Input{
+		Prompt:      objective,
+		Context:     input.Context,
+		Attachments: input.Attachments,
+	}
+	s.startTurnAndProcess(ctx, goalInput)
+}
+
+func (s *persistentSession) handleGoalClear(ctx context.Context) {
+	_, err := s.rpc.Call(ctx, "thread/goal/clear", map[string]any{
+		"threadId": s.threadID,
+	})
+	if err != nil {
+		s.emit(runtime.Event{Type: runtime.EventFailed, Error: fmt.Sprintf("thread/goal/clear failed: %v", err)})
+		return
+	}
+	s.emit(runtime.Event{Type: runtime.EventCompleted, Text: "Goal cleared."})
+}
+
+func parseGoalPrompt(prompt string) (objective string, isClear bool, ok bool) {
+	prompt = strings.TrimSpace(prompt)
+	lower := strings.ToLower(prompt)
+	if !strings.HasPrefix(lower, "/goal ") && lower != "/goal" {
+		return "", false, false
+	}
+	args := strings.TrimSpace(prompt[len("/goal"):])
+	if strings.EqualFold(args, "clear") {
+		return "", true, true
+	}
+	if args == "" {
+		return "", false, false
+	}
+	return args, false, true
 }
 
 type threadStartResult struct {
@@ -421,6 +478,9 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 
 	case "thread/tokenUsage/updated":
 		// token usage updates are captured in turn/completed
+
+	case "thread/goal/updated", "thread/goal/cleared":
+		// goal lifecycle notifications — feedback is provided by the turn events
 
 	case "error":
 		errMsg, _ := params["message"].(string)

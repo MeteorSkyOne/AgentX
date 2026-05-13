@@ -50,6 +50,7 @@ var builtinSlashCommands = map[string]struct{}{
 	"review":  {},
 	"stop":    {},
 	"discuss": {},
+	"goal":    {},
 }
 
 func builtinSlashCommandNames() []string {
@@ -134,6 +135,8 @@ func (a *App) dispatchSlashCommand(ctx context.Context, req SendMessageRequest, 
 		return a.handleListSkillsCommand(ctx, req, target)
 	case "compact":
 		return a.handleCompactCommand(ctx, req, target, command.Args)
+	case "goal":
+		return a.handleGoalCommand(ctx, req, target, command.Args)
 	case "model":
 		return a.handleModelCommand(ctx, req, target, command.Args)
 	case "effort":
@@ -377,6 +380,18 @@ func (a *App) handleCompactCommand(ctx context.Context, req SendMessageRequest, 
 		return a.store.Sessions().SetAgentSessionContextStartedAt(runCtx, target.Agent.ID, req.ConversationType, req.ConversationID, time.Now().UTC())
 	}
 	return a.createCommandRun(ctx, req, target, prompt, "", onCompleted)
+}
+
+func (a *App) handleGoalCommand(ctx context.Context, req SendMessageRequest, target ConversationAgentContext, args string) (domain.Message, error) {
+	if target.Agent.Kind == domain.AgentKindFake {
+		return a.createSystemMessage(ctx, req, fmt.Sprintf("/goal is not supported for @%s.", target.Agent.Handle))
+	}
+	args = strings.TrimSpace(args)
+	if args == "" {
+		return domain.Message{}, commandInputError("/goal requires a goal description")
+	}
+	prompt := "/goal " + args
+	return a.createCommandRun(ctx, req, target, prompt, "", nil)
 }
 
 func (a *App) handleModelCommand(ctx context.Context, req SendMessageRequest, target ConversationAgentContext, model string) (domain.Message, error) {
