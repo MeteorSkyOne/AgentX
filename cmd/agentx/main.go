@@ -120,6 +120,12 @@ func main() {
 		D2CacheTTL:            time.Duration(cfg.D2CacheTTLMinutes) * time.Minute,
 		D2CacheMaxEntries:     cfg.D2CacheMaxEntries,
 		ScheduledShellEnabled: cfg.ScheduledShellEnabled,
+		Terminal: app.TerminalOptions{
+			Shell:                   cfg.TerminalShell,
+			IdleTimeout:             time.Duration(cfg.TerminalIdleMinutes) * time.Minute,
+			MaxSessionsPerWorkspace: cfg.TerminalMaxSessions,
+			ReplayBytes:             int64(cfg.TerminalReplayBytes),
+		},
 		ProviderLimits: app.ProviderLimitOptions{
 			CodexCommand:  cfg.CodexCommand,
 			ClaudeCommand: cfg.ClaudeCommand,
@@ -131,6 +137,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer a.StopScheduledTasks()
+	a.StartTerminalManager(ctx)
+	defer a.StopTerminalManager()
 	if err := printSetupTokenIfNeeded(ctx, os.Stdout, st.Users(), cfg.AdminToken); err != nil {
 		slog.Error("check setup status", "error", err)
 		os.Exit(1)

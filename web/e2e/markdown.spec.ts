@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { setLightTheme, signIn } from "./helpers";
+import { preparePage, setLightTheme, signIn } from "./helpers";
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
+  await preparePage(page);
   await page.evaluate(() => localStorage.clear());
 });
 

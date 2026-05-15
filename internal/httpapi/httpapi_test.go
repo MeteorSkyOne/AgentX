@@ -2018,6 +2018,7 @@ func newTestEnvWithOptions(t *testing.T, opts app.Options) testEnv {
 		opts.DataDir = t.TempDir()
 	}
 	a := app.New(st, bus, opts)
+	t.Cleanup(a.StopTerminalManager)
 	ts := httptest.NewServer(NewRouter(a, bus))
 	t.Cleanup(ts.Close)
 	return testEnv{server: ts, store: st, app: a, bus: bus}

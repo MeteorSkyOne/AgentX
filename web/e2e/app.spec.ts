@@ -12,6 +12,7 @@ import {
   expectMonacoEditorText,
   firstEnabledAgent,
   firstProject,
+  preparePage,
   request,
   readWorkspaceFile,
   setMonacoEditorValue,
@@ -31,13 +32,13 @@ function longPEM(label: "CERTIFICATE" | "PRIVATE KEY", lines: number) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
+  await preparePage(page);
   await page.evaluate(() => localStorage.clear());
 });
 
 test("validates login, restores the session, and logs back in", async ({ page }) => {
   await page.evaluate(() => localStorage.setItem("agentx.session_token", "invalid-token"));
-  await page.goto("/");
+  await preparePage(page);
   await expect(page.getByLabel("Username")).toBeVisible();
 
   if (await page.getByLabel("Setup token").isVisible().catch(() => false)) {
@@ -123,6 +124,84 @@ test("sends messages from the composer and receives agent output", async ({ page
   await expect(messages.getByText("line one line two", { exact: true })).toBeVisible();
   await expect(messages.getByText("Echo: line one line two", { exact: true })).toBeVisible();
   await expect(composer).toHaveValue("");
+});
+
+test("opens a workspace terminal from the toolbar and replays server history", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await signIn(page);
+
+  await page.getByRole("button", { name: "Terminal" }).click();
+  const dock = page.getByTestId("terminal-dock");
+  await expect(dock).toBeVisible();
+  await expect(page.getByTestId("terminal-pane")).toBeVisible();
+
+  const initialDockBox = await dock.boundingBox();
+  const resizeHandle = page.getByRole("separator", { name: "Resize terminal" });
+  const resizeHandleBox = await resizeHandle.boundingBox();
+  expect(initialDockBox).not.toBeNull();
+  expect(resizeHandleBox).not.toBeNull();
+  await page.mouse.move(
+    resizeHandleBox!.x + resizeHandleBox!.width / 2,
+    resizeHandleBox!.y + resizeHandleBox!.height / 2
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    resizeHandleBox!.x + resizeHandleBox!.width / 2,
+    resizeHandleBox!.y - 80,
+    { steps: 6 }
+  );
+  await page.mouse.up();
+  await expect.poll(async () => (await dock.boundingBox())?.height ?? 0).toBeGreaterThan(initialDockBox!.height + 40);
+
+  const marker = `agentx_terminal_e2e_${Date.now()}`;
+  await page.getByTestId("terminal-pane").click();
+  await page.keyboard.insertText(`printf '${marker}\\n'`);
+  await page.keyboard.press("Enter");
+  await expect(dock.locator(".xterm-rows")).toContainText(marker, { timeout: 10_000 });
+
+  const clipboardMarker = `agentx_terminal_clipboard_${Date.now()}`;
+  const clipboardPayload = Buffer.from(clipboardMarker, "utf8").toString("base64");
+  const clipboardDone = `agentx_terminal_clipboard_done_${Date.now()}`;
+  await page.keyboard.insertText(`printf '\\033]52;c;${clipboardPayload}\\007'; printf '${clipboardDone}\\n'`);
+  await page.keyboard.press("Enter");
+  await expect(dock.locator(".xterm-rows")).toContainText(clipboardDone, { timeout: 10_000 });
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(clipboardMarker);
+
+  const renamedTab = dock.getByRole("button", { name: "Terminal build shell" });
+  const firstTerminalTab = dock.getByRole("button", { name: /^Terminal / }).first();
+  await firstTerminalTab.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Rename terminal" }).click();
+  const renameDialog = page.getByRole("dialog", { name: "Rename terminal" });
+  await renameDialog.getByLabel("Name").fill("build shell");
+  await renameDialog.getByRole("button", { name: "Save" }).click();
+  await expect(renamedTab).toBeVisible();
+
+  const splitDropzone = dock.getByTestId("terminal-split-dropzone");
+  const tabBox = await renamedTab.boundingBox();
+  const dropzoneBox = await splitDropzone.boundingBox();
+  expect(tabBox).not.toBeNull();
+  expect(dropzoneBox).not.toBeNull();
+  await page.mouse.move(tabBox!.x + tabBox!.width / 2, tabBox!.y + tabBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(dropzoneBox!.x + dropzoneBox!.width * 0.75, dropzoneBox!.y + dropzoneBox!.height / 2, {
+    steps: 8,
+  });
+  await page.mouse.up();
+  await expect(dock.getByTestId("terminal-pane-group")).toHaveCount(2);
+  const splitColsOK = `agentx_terminal_split_cols_ok_${Date.now()}`;
+  await dock.getByTestId("terminal-pane").last().click();
+  await page.keyboard.insertText(`cols=$(stty size | awk '{print $2}'); [ "$cols" -lt 120 ] && printf '${splitColsOK}\\n' || printf 'split_cols_too_wide_%s\\n' "$cols"`);
+  await page.keyboard.press("Enter");
+  await expect(dock.locator(".xterm-rows").last()).toContainText(splitColsOK, { timeout: 10_000 });
+
+  await page.getByRole("button", { name: "Hide terminal" }).click();
+  await page.getByRole("button", { name: "Terminal" }).click();
+  await expect(page.getByTestId("terminal-dock").locator(".xterm-rows")).toContainText(marker, {
+    timeout: 10_000,
+  });
+  await renamedTab.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Close terminal" }).click();
+  await expect(renamedTab).toHaveCount(0);
 });
 
 test("autocompletes skills for a targeted agent", async ({ page }, testInfo) => {

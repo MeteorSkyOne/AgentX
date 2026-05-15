@@ -42,9 +42,11 @@ func scanOrganization(scanner interface {
 }) (domain.Organization, error) {
 	var org domain.Organization
 	var createdAt string
-	if err := scanner.Scan(&org.ID, &org.Name, &createdAt); err != nil {
+	var role string
+	if err := scanner.Scan(&org.ID, &org.Name, &role, &createdAt); err != nil {
 		return domain.Organization{}, err
 	}
+	org.Role = domain.Role(role)
 	var err error
 	org.CreatedAt, err = parseTime(createdAt)
 	if err != nil {

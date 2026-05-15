@@ -47,6 +47,10 @@ type Config struct {
 	D2CacheTTLMinutes           int
 	D2CacheMaxEntries           int
 	ScheduledShellEnabled       bool
+	TerminalShell               string
+	TerminalIdleMinutes         int
+	TerminalMaxSessions         int
+	TerminalReplayBytes         int
 }
 
 type ServerSettings struct {
@@ -111,6 +115,10 @@ func FromEnv() Config {
 		D2CacheTTLMinutes:           getenvInt("AGENTX_D2_CACHE_TTL_MINUTES", 1440),
 		D2CacheMaxEntries:           getenvInt("AGENTX_D2_CACHE_MAX_ENTRIES", 256),
 		ScheduledShellEnabled:       getenvBool("AGENTX_SCHEDULED_SHELL_ENABLED", false),
+		TerminalShell:               getenv("AGENTX_TERMINAL_SHELL", ""),
+		TerminalIdleMinutes:         getenvInt("AGENTX_TERMINAL_IDLE_MINUTES", 30),
+		TerminalMaxSessions:         getenvInt("AGENTX_TERMINAL_MAX_SESSIONS_PER_WORKSPACE", 8),
+		TerminalReplayBytes:         getenvInt("AGENTX_TERMINAL_REPLAY_BYTES", 8*1024*1024),
 	}
 }
 

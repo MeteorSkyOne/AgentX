@@ -35,6 +35,7 @@ type Options struct {
 	D2CacheTTL            time.Duration
 	D2CacheMaxEntries     int
 	ScheduledShellEnabled bool
+	Terminal              TerminalOptions
 }
 
 type pendingQuestionKey struct {
@@ -83,6 +84,7 @@ type App struct {
 	providerLimits *providerLimitService
 	d2Renderer     *d2Renderer
 	scheduledTasks *scheduledTaskScheduler
+	terminals      *terminalManager
 
 	pendingQuestionsMu sync.Mutex
 	pendingQuestions   map[pendingQuestionKey]*pendingQuestion
@@ -109,6 +111,7 @@ func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
 			CacheTTL:        opts.D2CacheTTL,
 			CacheMaxEntries: opts.D2CacheMaxEntries,
 		}),
+		terminals:        newTerminalManager(opts.Terminal),
 		pendingQuestions: make(map[pendingQuestionKey]*pendingQuestion),
 		activeRuns:       make(map[activeRunKey]map[string]*activeAgentRun),
 		scheduledRuns:    make(map[string]struct{}),

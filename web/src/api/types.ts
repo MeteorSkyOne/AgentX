@@ -77,6 +77,7 @@ export interface User {
 export interface Organization {
   id: string;
   name: string;
+  role?: "owner" | "admin" | "member";
   created_at: string;
 }
 
@@ -325,6 +326,34 @@ export interface Workspace {
   created_by: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface TerminalSessionSummary {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  title: string;
+  shell: string;
+  status: "running" | "exited";
+  cols: number;
+  rows: number;
+  exit_code?: number;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+  last_active_at: string;
+  exited_at?: string;
+}
+
+export interface TerminalFrame {
+  type: "ready" | "output" | "exit" | "error" | "history_truncated";
+  terminal_id?: string;
+  session?: TerminalSessionSummary;
+  seq?: number;
+  data?: string;
+  exit_code?: number;
+  error?: string;
+  truncated?: boolean;
 }
 
 export type WorkspaceGitScope = "working_tree" | "branch";

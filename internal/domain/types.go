@@ -60,6 +60,7 @@ type User struct {
 type Organization struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
+	Role      Role      `json:"role,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 

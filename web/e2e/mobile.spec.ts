@@ -3,6 +3,7 @@ import {
   expectMonacoEditorPosition,
   expectMonacoEditorText,
   firstProject,
+  preparePage,
   readWorkspaceFile,
   seedDenseNavigation,
   setLightTheme,
@@ -56,7 +57,7 @@ async function expectNoHorizontalOverflow(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
+  await preparePage(page);
   await page.evaluate(() => localStorage.clear());
 });
 

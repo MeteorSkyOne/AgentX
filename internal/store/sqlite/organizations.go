@@ -29,7 +29,7 @@ func (r organizationRepo) Any(ctx context.Context) (bool, error) {
 
 func (r organizationRepo) ListForUser(ctx context.Context, userID string) ([]domain.Organization, error) {
 	rows, err := r.q.QueryContext(ctx, `
-SELECT organizations.id, organizations.name, organizations.created_at
+SELECT organizations.id, organizations.name, memberships.role, organizations.created_at
 FROM organizations
 JOIN memberships ON memberships.org_id = organizations.id
 WHERE memberships.user_id = ?

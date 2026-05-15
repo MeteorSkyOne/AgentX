@@ -3,6 +3,7 @@ import { expect, test, type Locator, type Page, type TestInfo } from "@playwrigh
 import {
   createChannelViaAPI,
   firstProject,
+  preparePage,
   request,
   signIn,
   writeWorkspaceFile,
@@ -24,7 +25,7 @@ test.beforeAll(() => {
 });
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
+  await preparePage(page);
   await page.evaluate(() => localStorage.clear());
 });
 

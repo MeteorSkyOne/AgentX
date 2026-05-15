@@ -23,6 +23,7 @@ import type {
   ScheduledTaskRun,
   ServerSettings,
   ServerSettingsUpdatePayload,
+  TerminalSessionSummary,
   Thread,
   User,
   UserPreferences,
@@ -234,6 +235,46 @@ export function deleteProject(projectID: string): Promise<void> {
 
 export function workspace(workspaceID: string): Promise<Workspace> {
   return request<Workspace>(`/api/workspaces/${encodeURIComponent(workspaceID)}`);
+}
+
+export function workspaceTerminals(workspaceID: string): Promise<TerminalSessionSummary[]> {
+  return request<TerminalSessionSummary[]>(
+    `/api/workspaces/${encodeURIComponent(workspaceID)}/terminals`
+  );
+}
+
+export function deleteWorkspaceTerminal(workspaceID: string, terminalID: string): Promise<void> {
+  return request<void>(
+    `/api/workspaces/${encodeURIComponent(workspaceID)}/terminals/${encodeURIComponent(terminalID)}`,
+    { method: "DELETE" }
+  );
+}
+
+export function renameWorkspaceTerminal(
+  workspaceID: string,
+  terminalID: string,
+  title: string
+): Promise<TerminalSessionSummary> {
+  return request<TerminalSessionSummary>(
+    `/api/workspaces/${encodeURIComponent(workspaceID)}/terminals/${encodeURIComponent(terminalID)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ title })
+    }
+  );
+}
+
+export function workspaceTerminalWebSocketURL(workspaceID: string): string {
+  const token = getToken();
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const url = new URL(
+    `/api/workspaces/${encodeURIComponent(workspaceID)}/terminal/ws`,
+    `${protocol}//${window.location.host}`
+  );
+  if (token) {
+    url.searchParams.set("token", token);
+  }
+  return url.toString();
 }
 
 export function projectChannels(projectID: string): Promise<Channel[]> {

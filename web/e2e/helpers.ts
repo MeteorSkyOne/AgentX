@@ -41,8 +41,15 @@ export const e2eSetupToken = "e2e-token";
 export const e2eUsername = "e2e_admin";
 export const e2ePassword = "e2e-password-1234";
 
+export async function preparePage(page: Page) {
+  await page.route("https://cdn.jsdelivr.net/**", (route) =>
+    route.fulfill({ status: 200, contentType: "text/css", body: "" })
+  );
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+}
+
 export async function signIn(page: Page, displayName = "E2E User") {
-  await page.goto("/");
+  await preparePage(page);
   await expect(page.getByLabel("Username")).toBeVisible();
 
   if (await page.getByLabel("Setup token").isVisible().catch(() => false)) {

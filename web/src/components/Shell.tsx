@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Activity,
   ArrowLeft,
@@ -21,6 +30,7 @@ import {
   Send,
   Server as ServerIcon,
   Settings,
+  SquareTerminal,
   Sun,
   Trash2,
   Upload,
@@ -98,6 +108,19 @@ import {
   setProjectAvatar,
 } from "./shell/utils";
 
+const TerminalDock = lazy(() => import("./TerminalDock").then((module) => ({ default: module.TerminalDock })));
+
+function TerminalFallback() {
+  return (
+    <section className="flex h-full min-h-0 flex-1 flex-col bg-background" aria-label="Terminal">
+      <div className="h-11 shrink-0 border-b border-border bg-sidebar" />
+      <div className="flex min-h-0 flex-1 items-center justify-center bg-[#111315] text-sm text-muted-foreground">
+        Loading terminal...
+      </div>
+    </section>
+  );
+}
+
 export function Shell({
   user,
   organization,
@@ -169,6 +192,8 @@ export function Shell({
   const [focusedAgentID, setFocusedAgentID] = useState("");
   const [membersPanelOpen, setMembersPanelOpen] = useState(false);
   const [projectFilesOpen, setProjectFilesOpen] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalHeightPct, setTerminalHeightPct] = useState(38);
   const [projectFileTreeCollapsed, setProjectFileTreeCollapsed] = useState(false);
   const [mainView, setMainView] = useState<"chat" | "metrics" | "tasks">("chat");
   const [mobileProjectFilesView, setMobileProjectFilesView] = useState<"tree" | "editor">("tree");
@@ -181,6 +206,7 @@ export function Shell({
       ? window.matchMedia("(max-width: 767px)").matches
       : false
   );
+  const terminalResizeContainerRef = useRef<HTMLDivElement | null>(null);
   const [projectName, setProjectName] = useState("");
   const [projectWorkspacePath, setProjectWorkspacePath] = useState("");
   const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
@@ -270,6 +296,7 @@ export function Shell({
     (serverTLSEnabled && serverPortsConflict) ||
     (serverTLSEnabled && (!serverTLSCertAvailable || !serverTLSKeyAvailable));
   const activeThread = conversationContext?.thread;
+  const terminalAllowed = organization?.role === "owner" || organization?.role === "admin";
   const projectFilesController = useWorkspaceFileBrowser({
     workspaceID: projectWorkspace?.id,
     workspacePath: projectWorkspace?.path,
@@ -327,6 +354,34 @@ export function Shell({
     projectFilesLoadedWorkspaceIDRef.current = projectWorkspace.id;
     void projectFilesController.loadTree({ quiet: true });
   }, [projectFilesOpen, projectWorkspace?.id, projectFilesController.loadTree]);
+
+  useEffect(() => {
+    if (!terminalAllowed || !projectWorkspace?.id) {
+      setTerminalOpen(false);
+    }
+  }, [projectWorkspace?.id, terminalAllowed]);
+
+  const startTerminalResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const container = terminalResizeContainerRef.current;
+    if (!container) return;
+    event.preventDefault();
+    const rect = container.getBoundingClientRect();
+    if (rect.height <= 0) return;
+    const updateHeight = (clientY: number) => {
+      const next = ((rect.bottom - clientY) / rect.height) * 100;
+      setTerminalHeightPct(Math.min(70, Math.max(22, next)));
+    };
+    updateHeight(event.clientY);
+    const handlePointerMove = (moveEvent: PointerEvent) => updateHeight(moveEvent.clientY);
+    const handlePointerUp = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+  }, []);
 
   useEffect(() => {
     setAgentPanelOpen(false);
@@ -841,6 +896,7 @@ export function Shell({
         : undefined;
   const showMobileProjectFilesButton = !(projectFilesOpen && mobileProjectFilesView === "editor");
   const showMobileEditorHeaderControls = projectFilesOpen && mobileProjectFilesView === "editor";
+  const mobileTerminalOpen = terminalOpen && !projectFilesOpen;
 
   return (
     <div className="flex h-dvh w-screen overflow-hidden select-none" data-testid="agentx-shell">
@@ -859,7 +915,19 @@ export function Shell({
               <ArrowLeft className="h-5 w-5" />
             </Button>
           ) : null}
-          {!projectFilesOpen ? (
+          {mobileTerminalOpen ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-11 w-11"
+              title="Back to chat"
+              aria-label="Back to chat"
+              onClick={() => setTerminalOpen(false)}
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+          ) : null}
+          {!projectFilesOpen && !mobileTerminalOpen ? (
             <Button
               variant="ghost"
               size="icon"
@@ -871,7 +939,7 @@ export function Shell({
               <Menu className="h-5 w-5" />
             </Button>
           ) : null}
-          {!projectFilesOpen && selectedChannel?.type === "thread" && activeThread ? (
+          {!projectFilesOpen && !mobileTerminalOpen && selectedChannel?.type === "thread" && activeThread ? (
             <Button
               variant="ghost"
               size="icon"
@@ -884,9 +952,11 @@ export function Shell({
             </Button>
           ) : null}
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-sm font-semibold">{projectFilesOpen ? "Project files" : headerTitle}</h1>
+            <h1 className="truncate text-sm font-semibold">
+              {projectFilesOpen ? "Project files" : mobileTerminalOpen ? "Terminal" : headerTitle}
+            </h1>
             <p className="truncate text-xs text-muted-foreground">
-              {projectFilesOpen ? projectWorkspace?.path ?? "No workspace" : headerSubtitle}
+              {projectFilesOpen || mobileTerminalOpen ? projectWorkspace?.path ?? "No workspace" : headerSubtitle}
             </p>
           </div>
           {showMobileEditorHeaderControls ? (
@@ -919,7 +989,7 @@ export function Shell({
                 )}
               </Button>
             </>
-          ) : showMobileProjectFilesButton ? (
+          ) : showMobileProjectFilesButton && !mobileTerminalOpen ? (
             <>
               <Button
                 variant="ghost"
@@ -945,9 +1015,23 @@ export function Shell({
               >
                 <FolderOpen className="h-5 w-5" />
               </Button>
+              {terminalAllowed ? (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn("h-11 w-11", terminalOpen && "bg-accent")}
+                  title="Terminal"
+                  aria-label="Terminal"
+                  aria-pressed={terminalOpen}
+                  disabled={!projectWorkspace?.id}
+                  onClick={() => setTerminalOpen(true)}
+                >
+                  <SquareTerminal className="h-5 w-5" />
+                </Button>
+              ) : null}
             </>
           ) : null}
-          {!projectFilesOpen ? (
+          {!projectFilesOpen && !mobileTerminalOpen ? (
             <>
               <Button
                 variant="ghost"
@@ -973,7 +1057,7 @@ export function Shell({
           ) : null}
         </div>
 
-        {!projectFilesOpen && activeThread && (
+        {!projectFilesOpen && !mobileTerminalOpen && activeThread && (
           <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
             {activeConversation && (
               <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
@@ -1012,7 +1096,16 @@ export function Shell({
         )}
 
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          {mainView === "metrics" ? (
+          {mobileTerminalOpen ? (
+            <Suspense fallback={<TerminalFallback />}>
+              <TerminalDock
+                workspace={projectWorkspace}
+                theme={theme}
+                className="min-h-0 flex-1"
+                onClose={() => setTerminalOpen(false)}
+              />
+            </Suspense>
+          ) : mainView === "metrics" ? (
             <MetricsPanel
               project={project}
               selectedChannel={selectedChannel}
@@ -1656,6 +1749,20 @@ export function Shell({
                 >
                   <FolderOpen className="h-4 w-4" />
                 </Button>
+                {terminalAllowed ? (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn("h-8 w-8", terminalOpen && "bg-accent")}
+                    title="Terminal"
+                    aria-label="Terminal"
+                    aria-pressed={terminalOpen}
+                    disabled={!projectWorkspace?.id}
+                    onClick={() => setTerminalOpen((open) => !open)}
+                  >
+                    <SquareTerminal className="h-4 w-4" />
+                  </Button>
+                ) : null}
                 <Button
                   variant="ghost"
                   size="icon"
@@ -1682,49 +1789,77 @@ export function Shell({
               </div>
             </div>
 
-            {mainView === "metrics" ? (
-              <MetricsPanel
-                project={project}
-                selectedChannel={selectedChannel}
-                activeConversation={activeConversation}
-              />
-            ) : mainView === "tasks" ? (
-              <TasksPanel
-                project={project}
-                projectWorkspace={projectWorkspace}
-                channels={channels}
-                threads={threads}
-                activeConversation={activeConversation}
-                agents={activeAgents}
-              />
-            ) : (
-            <ConversationPanel
-              selectedChannel={selectedChannel}
-              activeThread={activeThread}
-              threads={threads}
-              messages={messages}
-              messagesLoading={messagesLoading}
-              olderMessagesLoading={olderMessagesLoading}
-              hasOlderMessages={hasOlderMessages}
-              streaming={streaming}
-              pendingQuestion={pendingQuestion}
-              boundAgents={boundAgents}
-              preferences={preferences}
-              theme={theme}
-              composerConversation={composerConversation}
-              onSelectThread={onSelectThread}
-              onCreateThread={onCreateThread}
-              onUpdateThread={onUpdateThread}
-              onDeleteThread={onDeleteThread}
-              onUpdateMessage={onUpdateMessage}
-              onDeleteMessage={onDeleteMessage}
-              onLoadOlderMessages={onLoadOlderMessages}
-              onRespondToQuestion={onRespondToQuestion}
-              onMessageSent={onMessageSent}
-              workspacePath={projectWorkspace?.path}
-              onOpenWorkspacePath={openWorkspacePath}
-            />
-            )}
+            <div ref={terminalResizeContainerRef} className="flex min-h-0 flex-1 flex-col">
+              <div className="flex min-h-0 flex-1 flex-col">
+                {mainView === "metrics" ? (
+                  <MetricsPanel
+                    project={project}
+                    selectedChannel={selectedChannel}
+                    activeConversation={activeConversation}
+                  />
+                ) : mainView === "tasks" ? (
+                  <TasksPanel
+                    project={project}
+                    projectWorkspace={projectWorkspace}
+                    channels={channels}
+                    threads={threads}
+                    activeConversation={activeConversation}
+                    agents={activeAgents}
+                  />
+                ) : (
+                  <ConversationPanel
+                    selectedChannel={selectedChannel}
+                    activeThread={activeThread}
+                    threads={threads}
+                    messages={messages}
+                    messagesLoading={messagesLoading}
+                    olderMessagesLoading={olderMessagesLoading}
+                    hasOlderMessages={hasOlderMessages}
+                    streaming={streaming}
+                    pendingQuestion={pendingQuestion}
+                    boundAgents={boundAgents}
+                    preferences={preferences}
+                    theme={theme}
+                    composerConversation={composerConversation}
+                    onSelectThread={onSelectThread}
+                    onCreateThread={onCreateThread}
+                    onUpdateThread={onUpdateThread}
+                    onDeleteThread={onDeleteThread}
+                    onUpdateMessage={onUpdateMessage}
+                    onDeleteMessage={onDeleteMessage}
+                    onLoadOlderMessages={onLoadOlderMessages}
+                    onRespondToQuestion={onRespondToQuestion}
+                    onMessageSent={onMessageSent}
+                    workspacePath={projectWorkspace?.path}
+                    onOpenWorkspacePath={openWorkspacePath}
+                  />
+                )}
+              </div>
+              {terminalOpen && terminalAllowed && projectWorkspace?.id ? (
+                <div
+                  className="relative min-h-56 shrink-0 border-t border-border"
+                  style={{ height: `${terminalHeightPct}%` }}
+                >
+                  <div
+                    className="absolute inset-x-0 -top-1 z-10 flex h-2 cursor-row-resize items-start justify-center"
+                    onPointerDown={startTerminalResize}
+                    role="separator"
+                    aria-orientation="horizontal"
+                    aria-label="Resize terminal"
+                  >
+                    <span className="mt-0.5 h-1 w-12 rounded-full bg-border" />
+                  </div>
+                  <Suspense fallback={<TerminalFallback />}>
+                    <TerminalDock
+                      workspace={projectWorkspace}
+                      theme={theme}
+                      className="h-full"
+                      onClose={() => setTerminalOpen(false)}
+                    />
+                  </Suspense>
+                </div>
+              ) : null}
+            </div>
           </div>
         </ResizablePanel>
 

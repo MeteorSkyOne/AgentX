@@ -2,18 +2,18 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
-import { firstProject, seedDenseNavigation, setLightTheme, setMonacoEditorValue, signIn, writeWorkspaceFile } from "./helpers";
+import { firstProject, preparePage, seedDenseNavigation, setLightTheme, setMonacoEditorValue, signIn, writeWorkspaceFile } from "./helpers";
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 
 test.skip(!process.env.AGENTX_CAPTURE_SCREENSHOTS, "Optional diagnostic screenshots are disabled by default.");
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
+  await preparePage(page);
   await page.evaluate(() => localStorage.clear());
 });
 
 test("captures diagnostic screenshots for AI review", async ({ page }, testInfo) => {
-  await page.goto("/");
+  await preparePage(page);
   await capture(page, testInfo, "01-login");
 
   await signIn(page, "Screenshot User");

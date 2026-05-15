@@ -31,6 +31,7 @@ func NewRouter(a *app.App, bus *eventbus.Bus) http.Handler {
 		r.Post("/auth/login", s.handleLogin)
 		r.Post("/auth/logout", s.handleLogout)
 		r.Get("/ws", s.handleWebSocket)
+		r.Get("/workspaces/{workspaceID}/terminal/ws", s.handleWorkspaceTerminalWebSocket)
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.authMiddleware)
@@ -83,6 +84,9 @@ func NewRouter(a *app.App, bus *eventbus.Bus) http.Handler {
 			r.Delete("/workspaces/{workspaceID}/entries", s.handleDeleteWorkspaceEntry)
 			r.Get("/workspaces/{workspaceID}/git/status", s.handleWorkspaceGitStatus)
 			r.Get("/workspaces/{workspaceID}/git/diff", s.handleWorkspaceGitDiff)
+			r.Get("/workspaces/{workspaceID}/terminals", s.handleWorkspaceTerminals)
+			r.Patch("/workspaces/{workspaceID}/terminals/{terminalID}", s.handleRenameWorkspaceTerminal)
+			r.Delete("/workspaces/{workspaceID}/terminals/{terminalID}", s.handleDeleteWorkspaceTerminal)
 			r.Get("/conversations/{type}/{id}/messages", s.handleListMessages)
 			r.Get("/conversations/{type}/{id}/context", s.handleConversationContext)
 			r.Get("/conversations/{type}/{id}/skills", s.handleConversationSkills)
