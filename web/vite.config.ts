@@ -34,6 +34,7 @@ const cdnImports: Record<string, string> = {
   "react-resizable-panels": "https://esm.sh/react-resizable-panels@2.1.9?bundle&external=react,react-dom",
   "react-syntax-highlighter/dist/esm/prism-light": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/prism-light?bundle&external=react",
   "react-syntax-highlighter/dist/esm/styles/prism/one-dark": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/styles/prism/one-dark?bundle",
+  "react-syntax-highlighter/dist/esm/styles/prism/one-light": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/styles/prism/one-light?bundle",
   "react-syntax-highlighter/dist/esm/languages/prism/typescript": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/typescript?bundle",
   "react-syntax-highlighter/dist/esm/languages/prism/tsx": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/tsx?bundle",
   "react-syntax-highlighter/dist/esm/languages/prism/javascript": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/javascript?bundle",
@@ -49,10 +50,28 @@ const cdnImports: Record<string, string> = {
   "react-syntax-highlighter/dist/esm/languages/prism/rust": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/rust?bundle",
   "react-syntax-highlighter/dist/esm/languages/prism/markdown": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/markdown?bundle",
   "react-syntax-highlighter/dist/esm/languages/prism/diff": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/diff?bundle",
+  "react-syntax-highlighter/dist/esm/languages/prism/c": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/c?bundle",
+  "react-syntax-highlighter/dist/esm/languages/prism/cpp": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/cpp?bundle",
+  "react-syntax-highlighter/dist/esm/languages/prism/csharp": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/csharp?bundle",
+  "react-syntax-highlighter/dist/esm/languages/prism/docker": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/docker?bundle",
+  "react-syntax-highlighter/dist/esm/languages/prism/graphql": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/graphql?bundle",
+  "react-syntax-highlighter/dist/esm/languages/prism/hcl": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/hcl?bundle",
+  "react-syntax-highlighter/dist/esm/languages/prism/ini": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/ini?bundle",
+  "react-syntax-highlighter/dist/esm/languages/prism/java": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/java?bundle",
+  "react-syntax-highlighter/dist/esm/languages/prism/kotlin": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/kotlin?bundle",
+  "react-syntax-highlighter/dist/esm/languages/prism/lua": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/lua?bundle",
+  "react-syntax-highlighter/dist/esm/languages/prism/makefile": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/makefile?bundle",
+  "react-syntax-highlighter/dist/esm/languages/prism/php": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/php?bundle",
+  "react-syntax-highlighter/dist/esm/languages/prism/powershell": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/powershell?bundle",
+  "react-syntax-highlighter/dist/esm/languages/prism/ruby": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/ruby?bundle",
+  "react-syntax-highlighter/dist/esm/languages/prism/swift": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/swift?bundle",
+  "react-syntax-highlighter/dist/esm/languages/prism/toml": "https://esm.sh/react-syntax-highlighter@16.1.1/dist/esm/languages/prism/toml?bundle",
   "rehype-katex": "https://esm.sh/rehype-katex@7.0.1?bundle",
   "remark-gfm": "https://esm.sh/remark-gfm@4.0.1?bundle",
   "remark-math": "https://esm.sh/remark-math@6.0.0?bundle",
-  "tailwind-merge": "https://esm.sh/tailwind-merge@3.5.0?bundle"
+  "tailwind-merge": "https://esm.sh/tailwind-merge@3.5.0?bundle",
+  "@xterm/xterm": "https://esm.sh/@xterm/xterm@6.0.0?bundle",
+  "@xterm/addon-fit": "https://esm.sh/@xterm/addon-fit@0.11.0?bundle&external=@xterm/xterm"
 };
 
 const cdnImportPrefixes: Record<string, string> = {
