@@ -356,6 +356,7 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 							ConversationID:   userMessage.ConversationID,
 							Payload:          payload,
 						})
+						a.notifyAgentInputRequest(context.WithoutCancel(ctx), agent.Name, userMessage.OrganizationID, userMessage.ConversationType, userMessage.ConversationID, payload)
 					}
 				case agentruntime.EventFailed:
 					a.removePendingQuestions(userMessage.ConversationType, userMessage.ConversationID)

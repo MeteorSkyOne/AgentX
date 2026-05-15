@@ -848,8 +848,95 @@ func TestAgentMessageWebhookPostsSignedPayload(t *testing.T) {
 	if payload.Event != AgentMessageCreatedWebhookEvent || payload.Delivery != got.header.Get("X-AgentX-Delivery") || payload.Title != "Fake Agent" {
 		t.Fatalf("payload event/delivery = %#v", payload)
 	}
-	if payload.Message.Body != "signed reply" || payload.Message.SenderType != domain.SenderBot {
+	if payload.Message == nil || payload.Message.Body != "signed reply" || payload.Message.SenderType != domain.SenderBot {
 		t.Fatalf("payload message = %#v", payload.Message)
+	}
+}
+
+func TestAgentInputRequestSendsWebhook(t *testing.T) {
+	ctx := context.Background()
+	requests := make(chan webhookRequest, 1)
+	webhookServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		requests <- webhookRequest{header: r.Header.Clone(), requestURI: r.RequestURI, body: body}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer webhookServer.Close()
+
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	bus := eventbus.New()
+	app := New(st, bus, Options{
+		AdminToken:     "secret",
+		DataDir:        t.TempDir(),
+		WebhookTimeout: time.Second,
+		Runtimes: map[string]agentruntime.Runtime{
+			domain.AgentKindFake: scriptedRuntime{events: []agentruntime.Event{{
+				Type: agentruntime.EventInputRequest,
+				InputRequest: &agentruntime.InputRequest{
+					QuestionID: "question-1",
+					Question:   "continue with deployment?",
+					Options: []agentruntime.InputRequestOption{
+						{Label: "yes", Description: "continue"},
+					},
+				},
+			}}},
+		},
+	})
+	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.UpdateNotificationSettings(ctx, bootstrap.Organization.ID, NotificationSettingsUpdateRequest{
+		WebhookEnabled: true,
+		WebhookURL:     webhookServer.URL + "/${title}/${body}",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "needs input",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var got webhookRequest
+	select {
+	case got = <-requests:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for input request webhook")
+	}
+	if got.header.Get("X-AgentX-Event") != AgentInputRequestWebhookEvent {
+		t.Fatalf("X-AgentX-Event = %q", got.header.Get("X-AgentX-Event"))
+	}
+	if !strings.Contains(got.requestURI, "/Fake%20Agent/continue%20with%20deployment%3F") {
+		t.Fatalf("requestURI = %q, want encoded title/question placeholders", got.requestURI)
+	}
+
+	var payload AgentMessageWebhookPayload
+	if err := json.Unmarshal(got.body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Event != AgentInputRequestWebhookEvent || payload.Title != "Fake Agent" {
+		t.Fatalf("payload event/title = %#v", payload)
+	}
+	if payload.InputRequest == nil || payload.InputRequest.QuestionID != "question-1" || payload.InputRequest.Question != "continue with deployment?" {
+		t.Fatalf("payload input request = %#v", payload.InputRequest)
+	}
+	if payload.Message != nil {
+		t.Fatalf("input request webhook should not include message: %#v", payload.Message)
 	}
 }
 
@@ -877,7 +964,7 @@ func TestWebhookPayloadCompactsLargeAgentMessage(t *testing.T) {
 		Event:          AgentMessageCreatedWebhookEvent,
 		Title:          "Codex",
 		OrganizationID: "org_test",
-		Message: domain.Message{
+		Message: &domain.Message{
 			ID:               "msg_large",
 			OrganizationID:   "org_test",
 			ConversationType: domain.ConversationChannel,
@@ -919,6 +1006,9 @@ func TestWebhookPayloadCompactsLargeAgentMessage(t *testing.T) {
 	var delivered AgentMessageWebhookPayload
 	if err := json.Unmarshal(got.body, &delivered); err != nil {
 		t.Fatal(err)
+	}
+	if delivered.Message == nil {
+		t.Fatal("delivered message is nil")
 	}
 	if len([]rune(delivered.Message.Body)) != webhookMessageBodyLimit || !strings.HasSuffix(delivered.Message.Body, "...") {
 		t.Fatalf("delivered body was not truncated to limit: %d", len([]rune(delivered.Message.Body)))
@@ -990,7 +1080,7 @@ func TestRenderWebhookURLSubstitutesAndTruncatesPlaceholders(t *testing.T) {
 	longBody := strings.Repeat("x", webhookURLBodyLimit+10)
 	got, err := renderWebhookURL("https://example.com/${title}/${body}", AgentMessageWebhookPayload{
 		Title: "Agent One",
-		Message: domain.Message{
+		Message: &domain.Message{
 			Body: longBody,
 		},
 	})
@@ -1012,7 +1102,7 @@ func TestRenderWebhookURLSubstitutesAndTruncatesPlaceholders(t *testing.T) {
 func TestRenderWebhookURLSubstitutesEncodedPlaceholders(t *testing.T) {
 	got, err := renderWebhookURL("https://example.com/$%7Btitle%7D/$%7Bbody%7D", AgentMessageWebhookPayload{
 		Title: "Agent One",
-		Message: domain.Message{
+		Message: &domain.Message{
 			Body: "reply text",
 		},
 	})

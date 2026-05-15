@@ -82,7 +82,7 @@ import {
 import type { AgentXEvent } from "./ws/events";
 import { useConversationSocket } from "./ws/useConversationSocket";
 import { applyTheme, getInitialTheme, storeTheme, type ThemeMode } from "./theme";
-import { showAgentMessageNotification } from "./notifications/browser";
+import { showAgentInputRequestNotification, showAgentMessageNotification } from "./notifications/browser";
 import type { PendingQuestion } from "./components/shell/types";
 
 interface ActiveConversation {
@@ -109,6 +109,17 @@ function conversationKey(conversation?: ActiveConversation): string {
 
 function isSystemCommandMessage(message: Message): boolean {
   return message.sender_type === "system" && message.metadata?.command === true;
+}
+
+function agentNameForID(
+  agentID: string,
+  conversationAgents?: ConversationAgentContext[],
+  allAgents?: Agent[]
+): string | undefined {
+  return (
+    conversationAgents?.find((item) => item.agent.id === agentID)?.agent.name ??
+    allAgents?.find((agent) => agent.id === agentID)?.name
+  );
 }
 
 export default function App() {
@@ -452,6 +463,10 @@ export default function App() {
           }));
           break;
         case "AgentInputRequest":
+          showAgentInputRequestNotification(
+            event.payload,
+            agentNameForID(event.payload.agent_id, conversationContextQuery.data?.agents, agentsQuery.data)
+          );
           setPendingQuestion({
             runID: event.payload.run_id,
             agentID: event.payload.agent_id,
@@ -467,6 +482,7 @@ export default function App() {
       activeConversation,
       conversationContextQuery.data,
       channelAgentsQuery.data,
+      agentsQuery.data,
       invalidateAgentConfigQueries
     ]
   );

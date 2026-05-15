@@ -3,7 +3,9 @@ import type { Message } from "../api/types";
 import {
   pageIsInactive,
   requestBrowserNotificationPermission,
+  shouldShowAgentInputRequestNotification,
   shouldShowBrowserNotification,
+  showAgentInputRequestNotification,
   showAgentMessageNotification
 } from "./browser";
 
@@ -53,6 +55,26 @@ describe("browser notifications", () => {
         window: { focus }
       })
     ).toBe(true);
+
+    notifications[0].onclick?.(new Event("click"));
+    expect(focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows input request notifications when the page is inactive", () => {
+    const notifications: MockNotification[] = [];
+    const focus = vi.fn();
+    const Notification = notificationClass("granted", undefined, notifications);
+    const runtime = {
+      Notification,
+      document: { hidden: true, hasFocus: () => false },
+      window: { focus }
+    };
+
+    expect(shouldShowAgentInputRequestNotification(runtime)).toBe(true);
+    expect(showAgentInputRequestNotification(inputRequest(), "Codex", runtime)).toBe(true);
+    expect(notifications[0].title).toBe("Codex needs input");
+    expect(notifications[0].options?.body).toBe("Proceed?");
+    expect(notifications[0].options?.tag).toBe("agentx:input:question-1");
 
     notifications[0].onclick?.(new Event("click"));
     expect(focus).toHaveBeenCalledTimes(1);
@@ -123,5 +145,14 @@ function teamMessage(phase: "leader" | "discussion" | "summary"): Message {
         turn: 1
       }
     }
+  };
+}
+
+function inputRequest() {
+  return {
+    run_id: "run_1",
+    agent_id: "agt_1",
+    question_id: "question-1",
+    question: "Proceed?"
   };
 }

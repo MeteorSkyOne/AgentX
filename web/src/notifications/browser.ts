@@ -1,4 +1,5 @@
 import type { Message } from "../api/types";
+import type { AgentInputRequestEvent } from "../ws/events";
 
 export type BrowserNotificationPermission = NotificationPermission | "unsupported";
 
@@ -59,6 +60,33 @@ export function showAgentMessageNotification(
   const notification = new api("Agent reply", {
     body: notificationBody(message.body),
     tag: `agentx:${message.id}`
+  });
+  notification.onclick = () => {
+    const win = runtime.window ?? globalWindow();
+    win?.focus();
+  };
+  return true;
+}
+
+export function shouldShowAgentInputRequestNotification(
+  runtime: NotificationRuntime = {}
+): boolean {
+  return browserNotificationPermission(runtime) === "granted" && pageIsInactive(runtime);
+}
+
+export function showAgentInputRequestNotification(
+  inputRequest: AgentInputRequestEvent["payload"],
+  agentName?: string,
+  runtime: NotificationRuntime = {}
+): boolean {
+  const api = notificationAPI(runtime);
+  if (!api || !shouldShowAgentInputRequestNotification(runtime)) {
+    return false;
+  }
+  const title = agentName?.trim() ? `${agentName.trim()} needs input` : "Agent needs input";
+  const notification = new api(title, {
+    body: notificationBody(inputRequest.question || "The agent is waiting for your response"),
+    tag: `agentx:input:${inputRequest.question_id}`
   });
   notification.onclick = () => {
     const win = runtime.window ?? globalWindow();

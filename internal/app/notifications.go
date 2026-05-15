@@ -22,7 +22,10 @@ import (
 	"github.com/meteorsky/agentx/internal/id"
 )
 
-const AgentMessageCreatedWebhookEvent = "agent.message.created"
+const (
+	AgentMessageCreatedWebhookEvent = "agent.message.created"
+	AgentInputRequestWebhookEvent   = "agent.input.request"
+)
 
 const defaultWebhookTimeout = 5 * time.Second
 const webhookURLBodyLimit = 50
@@ -40,15 +43,16 @@ type NotificationSettingsUpdateRequest struct {
 }
 
 type AgentMessageWebhookPayload struct {
-	Event            string                  `json:"event"`
-	Delivery         string                  `json:"delivery"`
-	Title            string                  `json:"title,omitempty"`
-	OrganizationID   string                  `json:"organization_id"`
-	ConversationType domain.ConversationType `json:"conversation_type,omitempty"`
-	ConversationID   string                  `json:"conversation_id,omitempty"`
-	Message          domain.Message          `json:"message"`
-	Test             bool                    `json:"test,omitempty"`
-	CreatedAt        time.Time               `json:"created_at"`
+	Event            string                           `json:"event"`
+	Delivery         string                           `json:"delivery"`
+	Title            string                           `json:"title,omitempty"`
+	OrganizationID   string                           `json:"organization_id"`
+	ConversationType domain.ConversationType          `json:"conversation_type,omitempty"`
+	ConversationID   string                           `json:"conversation_id,omitempty"`
+	Message          *domain.Message                  `json:"message,omitempty"`
+	InputRequest     *domain.AgentInputRequestPayload `json:"input_request,omitempty"`
+	Test             bool                             `json:"test,omitempty"`
+	CreatedAt        time.Time                        `json:"created_at"`
 }
 
 func (a *App) NotificationSettings(ctx context.Context, orgID string) (domain.NotificationSettings, error) {
@@ -123,7 +127,7 @@ func (a *App) TestNotificationSettings(ctx context.Context, orgID string) error 
 		OrganizationID:   orgID,
 		ConversationType: message.ConversationType,
 		ConversationID:   message.ConversationID,
-		Message:          message,
+		Message:          &message,
 		Test:             true,
 		CreatedAt:        now,
 	}
@@ -137,6 +141,14 @@ func (a *App) notifyAgentMessageCreated(ctx context.Context, title string, messa
 	go func() {
 		if err := a.deliverAgentMessageWebhook(ctx, title, message); err != nil {
 			log.Printf("agentx webhook delivery failed org=%s message=%s: %v", message.OrganizationID, message.ID, err)
+		}
+	}()
+}
+
+func (a *App) notifyAgentInputRequest(ctx context.Context, title string, orgID string, conversationType domain.ConversationType, conversationID string, input domain.AgentInputRequestPayload) {
+	go func() {
+		if err := a.deliverAgentInputRequestWebhook(ctx, title, orgID, conversationType, conversationID, input); err != nil {
+			log.Printf("agentx webhook delivery failed org=%s input_request=%s: %v", orgID, input.QuestionID, err)
 		}
 	}()
 }
@@ -175,7 +187,30 @@ func (a *App) deliverAgentMessageWebhook(ctx context.Context, title string, mess
 		OrganizationID:   message.OrganizationID,
 		ConversationType: message.ConversationType,
 		ConversationID:   message.ConversationID,
-		Message:          message,
+		Message:          &message,
+		CreatedAt:        time.Now().UTC(),
+	}
+	return a.postWebhook(ctx, settings, payload)
+}
+
+func (a *App) deliverAgentInputRequestWebhook(ctx context.Context, title string, orgID string, conversationType domain.ConversationType, conversationID string, input domain.AgentInputRequestPayload) error {
+	settings, err := a.store.NotificationSettings().ByOrganization(ctx, orgID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if !settings.WebhookEnabled || strings.TrimSpace(settings.WebhookURL) == "" {
+		return nil
+	}
+	payload := AgentMessageWebhookPayload{
+		Event:            AgentInputRequestWebhookEvent,
+		Title:            strings.TrimSpace(title),
+		OrganizationID:   orgID,
+		ConversationType: conversationType,
+		ConversationID:   conversationID,
+		InputRequest:     &input,
 		CreatedAt:        time.Now().UTC(),
 	}
 	return a.postWebhook(ctx, settings, payload)
@@ -198,9 +233,11 @@ func (a *App) postWebhook(ctx context.Context, settings domain.NotificationSetti
 	}
 	if len(body) > webhookPayloadBodyLimit {
 		payload = compactWebhookPayload(payload, webhookMinimalBodyLimit)
-		payload.Message.Metadata = nil
-		payload.Message.ReplyTo = nil
-		payload.Message.Attachments = nil
+		if payload.Message != nil {
+			payload.Message.Metadata = nil
+			payload.Message.ReplyTo = nil
+			payload.Message.Attachments = nil
+		}
 		body, err = json.Marshal(payload)
 		if err != nil {
 			return err
@@ -246,7 +283,15 @@ func (a *App) postWebhook(ctx context.Context, settings domain.NotificationSetti
 }
 
 func compactWebhookPayload(payload AgentMessageWebhookPayload, bodyLimit int) AgentMessageWebhookPayload {
-	payload.Message = compactWebhookMessage(payload.Message, bodyLimit)
+	if payload.Message != nil {
+		message := compactWebhookMessage(*payload.Message, bodyLimit)
+		payload.Message = &message
+	}
+	if payload.InputRequest != nil {
+		input := *payload.InputRequest
+		input.Question, _ = truncateWebhookText(input.Question, bodyLimit)
+		payload.InputRequest = &input
+	}
 	return payload
 }
 
@@ -317,7 +362,7 @@ func renderWebhookURL(value string, payload AgentMessageWebhookPayload) (string,
 	if title == "" {
 		title = "Agent"
 	}
-	body := truncateWebhookURLBody(payload.Message.Body)
+	body := truncateWebhookURLBody(webhookPayloadBody(payload))
 	rendered := strings.NewReplacer(
 		"${title}", escapeWebhookURLValue(title),
 		"${body}", escapeWebhookURLValue(body),
@@ -331,6 +376,16 @@ func renderWebhookURL(value string, payload AgentMessageWebhookPayload) (string,
 		"%24%7bbody%7d", escapeWebhookURLValue(body),
 	).Replace(strings.TrimSpace(value))
 	return validateWebhookURL(rendered, true)
+}
+
+func webhookPayloadBody(payload AgentMessageWebhookPayload) string {
+	if payload.InputRequest != nil && strings.TrimSpace(payload.InputRequest.Question) != "" {
+		return payload.InputRequest.Question
+	}
+	if payload.Message != nil {
+		return payload.Message.Body
+	}
+	return ""
 }
 
 func hasWebhookURLPlaceholder(value string) bool {
