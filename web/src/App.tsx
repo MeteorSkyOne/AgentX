@@ -97,6 +97,7 @@ interface StreamingMessage {
   runID: string;
   agentID?: string;
   startedAt?: string;
+  endedAt?: string;
   text: string;
   thinking?: string;
   process?: ProcessItem[];
@@ -495,17 +496,23 @@ export default function App() {
           setPendingQuestion((current) =>
             current?.runID === event.payload.run_id ? null : current
           );
-          setStreamingByRunID((current) => ({
-            ...current,
-            [event.payload.run_id]: {
-              runID: event.payload.run_id,
-              agentID: event.payload.agent_id,
-              startedAt: event.created_at,
-              text: "",
-              team: event.payload.team,
-              error: event.payload.error || "Agent run failed"
-            }
-          }));
+          setStreamingByRunID((current) => {
+            const existing = current[event.payload.run_id];
+            return {
+              ...current,
+              [event.payload.run_id]: {
+                runID: event.payload.run_id,
+                agentID: event.payload.agent_id ?? existing?.agentID,
+                startedAt: existing?.startedAt ?? event.created_at,
+                endedAt: event.created_at,
+                text: existing?.text ?? "",
+                thinking: existing?.thinking,
+                process: existing?.process,
+                team: event.payload.team ?? existing?.team,
+                error: event.payload.error || "Agent run failed"
+              }
+            };
+          });
           break;
         case "AgentInputRequest":
           showAgentInputRequestNotification(

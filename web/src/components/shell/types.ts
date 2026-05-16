@@ -36,6 +36,8 @@ export interface ActiveConversation {
 export interface StreamingMessage {
   runID: string;
   agentID?: string;
+  startedAt?: string;
+  endedAt?: string;
   text: string;
   thinking?: string;
   process?: ProcessItem[];

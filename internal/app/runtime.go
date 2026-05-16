@@ -861,6 +861,8 @@ func messageMetricsSummary(metric domain.AgentRunMetric) domain.MessageMetricsSu
 	return domain.MessageMetricsSummary{
 		RunID:        metric.RunID,
 		Provider:     metric.Provider,
+		StartedAt:    &metric.StartedAt,
+		CompletedAt:  metric.CompletedAt,
 		TTFTMS:       metric.TTFTMS,
 		TPS:          metric.TPS,
 		DurationMS:   metric.DurationMS,

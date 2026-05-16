@@ -305,15 +305,17 @@ type MetricsUsage struct {
 }
 
 type MessageMetricsSummary struct {
-	RunID        string   `json:"run_id"`
-	Provider     string   `json:"provider"`
-	TTFTMS       *int64   `json:"ttft_ms"`
-	TPS          *float64 `json:"tps"`
-	DurationMS   *int64   `json:"duration_ms"`
-	InputTokens  *int64   `json:"input_tokens"`
-	OutputTokens *int64   `json:"output_tokens"`
-	TotalTokens  *int64   `json:"total_tokens"`
-	CacheHitRate *float64 `json:"cache_hit_rate"`
+	RunID        string     `json:"run_id"`
+	Provider     string     `json:"provider"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+	TTFTMS       *int64     `json:"ttft_ms"`
+	TPS          *float64   `json:"tps"`
+	DurationMS   *int64     `json:"duration_ms"`
+	InputTokens  *int64     `json:"input_tokens"`
+	OutputTokens *int64     `json:"output_tokens"`
+	TotalTokens  *int64     `json:"total_tokens"`
+	CacheHitRate *float64   `json:"cache_hit_rate"`
 }
 
 type AgentRunMetric struct {

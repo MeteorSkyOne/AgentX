@@ -646,6 +646,11 @@ func TestAgentRunStreamsAndPersistsProcessMetadata(t *testing.T) {
 	if metricsMeta["provider"] != domain.AgentKindFake || metricsMeta["input_tokens"] != float64(42) || metricsMeta["output_tokens"] != float64(7) {
 		t.Fatalf("metrics metadata = %#v", metricsMeta)
 	}
+	startedAt, startedOK := metricsMeta["started_at"].(string)
+	completedAt, completedOK := metricsMeta["completed_at"].(string)
+	if !startedOK || startedAt == "" || !completedOK || completedAt == "" || metricsMeta["duration_ms"] == nil {
+		t.Fatalf("metrics metadata missing timing fields = %#v", metricsMeta)
+	}
 	var rows []domain.AgentRunMetric
 	requireEventuallyApp(t, time.Second, func() bool {
 		var err error

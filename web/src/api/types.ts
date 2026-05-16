@@ -31,6 +31,8 @@ export interface MessageProcessItemDetail {
 export interface MessageMetricsSummary {
   run_id: string;
   provider: string;
+  started_at?: string;
+  completed_at?: string | null;
   ttft_ms?: number | null;
   tps?: number | null;
   duration_ms?: number | null;

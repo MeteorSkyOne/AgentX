@@ -48,7 +48,7 @@ import type { ThemeMode } from "@/theme";
 import type { WorkspacePathTarget } from "@/lib/workspacePaths";
 import type { WorkspaceFileBrowserController } from "./WorkspaceFileBrowser";
 import { AgentAvatar, agentKindColor } from "./AgentAvatar";
-import { messageMetricsParts } from "./messageMetrics";
+import { messageMetricsParts, messageWorkingLabel, workingDurationBetween } from "./messageMetrics";
 import type { PendingQuestion } from "./shell/types";
 import type { MentionLabels } from "./MarkdownRenderer";
 
@@ -67,6 +67,8 @@ const MENTION_TEXT_RE = /@([A-Za-z0-9][A-Za-z0-9_-]*)/g;
 interface StreamingMessage {
   runID: string;
   agentID?: string;
+  startedAt?: string;
+  endedAt?: string;
   text: string;
   thinking?: string;
   process?: ProcessItem[];
@@ -544,6 +546,8 @@ function ConversationMessageItem({
   const initial = label.charAt(0).toUpperCase();
   const process = isBot ? processFromMetadata(message.metadata) : [];
   const metricsParts = isBot ? messageMetricsParts(message.metadata?.metrics, preferences) : [];
+  const workingLabel = isBot ? messageWorkingLabel(message.metadata?.metrics) : null;
+  const footerMetricsParts = workingLabel ? [workingLabel, ...metricsParts] : metricsParts;
   const hideAvatar = preferences.hide_avatars;
 
   useEffect(() => {
@@ -738,9 +742,9 @@ function ConversationMessageItem({
               </div>
             )}
             <MessageAttachments attachments={message.attachments ?? []} theme={theme} />
-            {metricsParts.length > 0 && (
+            {footerMetricsParts.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-                {metricsParts.map((part, index) => (
+                {footerMetricsParts.map((part, index) => (
                   <span key={part} className="flex items-center gap-1.5">
                     {index > 0 && <span className="text-muted-foreground/60">·</span>}
                     <span>{part}</span>
@@ -1376,6 +1380,7 @@ function StreamingItem({
   const isError = Boolean(item.error);
   const label = isError ? "System" : agentName ?? "Agent";
   const process = processFromStreaming(item);
+  const workingLabel = useStreamingWorkingLabel(item.startedAt, item.endedAt);
 
   return (
     <div className={cn("group flex min-w-0 max-w-full gap-3 rounded-md px-1 py-1 md:gap-4 md:px-2", isError && "opacity-70")}>
@@ -1420,6 +1425,11 @@ function StreamingItem({
             onOpenWorkspacePath={onOpenWorkspacePath}
           />
         </div>
+        {workingLabel && (
+          <div className="text-[11px] font-medium text-muted-foreground">
+            {workingLabel}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2047,9 +2057,38 @@ function QuestionPrompt({
   );
 }
 
+function useStreamingWorkingLabel(startedAt?: string, endedAt?: string): string | null {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    setNow(new Date());
+  }, [startedAt, endedAt]);
+
+  useEffect(() => {
+    if (!startedAt || endedAt) {
+      return;
+    }
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, [startedAt, endedAt]);
+
+  return workingDurationBetween(startedAt, endedAt, now);
+}
+
 function formatTime(value: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
+  return formatMessageTimestamp(value);
+}
+
+export function formatMessageTimestamp(value: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) {
+    return value;
+  }
+  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${padTimePart(
+    date.getHours()
+  )}:${padTimePart(date.getMinutes())}`;
+}
+
+function padTimePart(value: number): string {
+  return String(value).padStart(2, "0");
 }

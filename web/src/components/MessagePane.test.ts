@@ -54,6 +54,7 @@ vi.mock("./MarkdownRenderer", async () => {
 import {
   MessagePane,
   createReadOnlyAttachmentEditorController,
+  formatMessageTimestamp,
   imageAttachmentPreviewDialogLabel,
   isTextAttachmentPreviewSupported,
   nextImagePreviewPan,
@@ -79,6 +80,7 @@ beforeAll(() => {
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
   for (const { root, container } of mountedRoots.splice(0)) {
     act(() => root.unmount());
     container.remove();
@@ -164,6 +166,69 @@ describe("MessagePane workspace links", () => {
     click(button);
 
     expect(opened).toEqual([{ path: "web/src/App.tsx", label: "web/src/App.tsx" }]);
+  });
+});
+
+describe("MessagePane message timing", () => {
+  it("formats message timestamps as year/month/day hour:minute", () => {
+    const local = new Date(2026, 3, 20, 20, 47);
+    expect(formatMessageTimestamp(local.toISOString())).toBe("2026/4/20 20:47");
+  });
+
+  it("shows completed agent working duration below the message body only for bot messages", async () => {
+    const { container } = await renderMessagePane({
+      messages: [
+        message({
+          id: "msg-user",
+          sender_type: "user",
+          sender_id: "user-1",
+          created_at: new Date(2026, 3, 20, 20, 47).toISOString(),
+        }),
+        message({
+          id: "msg-bot",
+          sender_type: "bot",
+          sender_id: "bot-1",
+          body: "done",
+          metadata: {
+            metrics: {
+              run_id: "run-1",
+              provider: "codex",
+              duration_ms: 3723000,
+            },
+          },
+        }),
+      ],
+      streaming: [],
+      onOpenWorkspacePath: () => undefined,
+    });
+
+    expect(container.textContent).toContain("2026/4/20 20:47");
+    expect(container.textContent).toContain("Working 1h 2m 3s");
+    expect((container.textContent?.match(/Working/g) ?? []).length).toBe(1);
+    const body = markdownButtons(container).find((button) => button.textContent === "done");
+    expect(body?.parentElement?.nextElementSibling?.textContent).toContain("Working 1h 2m 3s");
+  });
+
+  it("shows streaming working duration below the streaming message body", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-20T20:47:01.200Z"));
+
+    const { container } = await renderMessagePane({
+      messages: [],
+      streaming: [
+        {
+          runID: "run-1",
+          agentID: "agent-1",
+          startedAt: "2026-04-20T20:47:00Z",
+          text: "streaming body",
+        },
+      ],
+      onOpenWorkspacePath: () => undefined,
+    });
+
+    const body = markdownButtons(container)[0];
+    expect(body.textContent).toBe("streaming body");
+    expect(body.parentElement?.nextElementSibling?.textContent).toBe("Working 1.2s");
   });
 });
 
@@ -410,6 +475,8 @@ async function renderMessagePane({
   streaming: Array<{
     runID: string;
     agentID?: string;
+    startedAt?: string;
+    endedAt?: string;
     text: string;
     error?: string;
     process?: ProcessItem[];
