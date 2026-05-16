@@ -97,6 +97,13 @@ type DisplayProcessItem = ProcessItem & {
   result?: ProcessItem;
 };
 
+type DisplayProcessToolFragment = {
+  type: "tool_fragment";
+  items: DisplayProcessItem[];
+};
+
+type DisplayProcessEntry = DisplayProcessItem | DisplayProcessToolFragment;
+
 type MessageRenderItem =
   | { type: "message"; message: Message }
   | { type: "team"; sessionID: string; messages: Message[] };
@@ -1428,7 +1435,7 @@ function ProcessBlock({
   messageID?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const displayItems = mergeToolProcessItems(items);
+  const displayItems = groupProcessFragments(mergeToolProcessItems(items));
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground py-1">
@@ -1440,12 +1447,19 @@ function ProcessBlock({
       <CollapsibleContent>
         <div className="space-y-2 border-l border-border/60 pl-3 py-1">
           {displayItems.map((item, index) => (
-            <ProcessRow key={processItemKey(item, index)} item={item} messageID={messageID} />
+            <ProcessEntryRow key={processEntryKey(item, index)} item={item} messageID={messageID} />
           ))}
         </div>
       </CollapsibleContent>
     </Collapsible>
   );
+}
+
+function ProcessEntryRow({ item, messageID }: { item: DisplayProcessEntry; messageID?: string }) {
+  if (item.type === "tool_fragment") {
+    return <ToolFragmentRow item={item} messageID={messageID} />;
+  }
+  return <ProcessRow item={item} messageID={messageID} />;
 }
 
 function ProcessRow({ item, messageID }: { item: DisplayProcessItem; messageID?: string }) {
@@ -1466,6 +1480,35 @@ function ProcessRow({ item, messageID }: { item: DisplayProcessItem; messageID?:
   }
 
   return <ToolProcessRow item={item} messageID={messageID} />;
+}
+
+function ToolFragmentRow({ item, messageID }: { item: DisplayProcessToolFragment; messageID?: string }) {
+  const [open, setOpen] = useState(false);
+  const label = item.items.length === 1 ? "1 tool" : `${item.items.length} tools`;
+  const names = toolFragmentNames(item.items);
+
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className="rounded-md border border-border/60 bg-muted/15 p-2.5 text-xs"
+    >
+      <CollapsibleTrigger className="flex w-full min-w-0 items-center gap-2 text-left text-muted-foreground hover:text-foreground">
+        {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-500/10 text-blue-400">
+          <Wrench className="h-3.5 w-3.5" />
+        </span>
+        <span className="font-medium text-foreground">Tools</span>
+        <span className="rounded bg-muted px-1.5 py-0.5 text-[11px]">{label}</span>
+        {names && <span className="min-w-0 truncate text-[11px]">{names}</span>}
+      </CollapsibleTrigger>
+      <CollapsibleContent className="space-y-2 pt-2">
+        {item.items.map((tool, index) => (
+          <ToolProcessRow key={processItemKey(tool, index)} item={tool} messageID={messageID} />
+        ))}
+      </CollapsibleContent>
+    </Collapsible>
+  );
 }
 
 function ToolProcessRow({ item, messageID }: { item: DisplayProcessItem; messageID?: string }) {
@@ -1760,6 +1803,31 @@ function mergeToolProcessItems(items: ProcessItem[]): DisplayProcessItem[] {
   return merged;
 }
 
+function groupProcessFragments(items: DisplayProcessItem[]): DisplayProcessEntry[] {
+  const grouped: DisplayProcessEntry[] = [];
+  let tools: DisplayProcessItem[] = [];
+
+  function flushTools() {
+    if (tools.length === 0) {
+      return;
+    }
+    grouped.push({ type: "tool_fragment", items: tools });
+    tools = [];
+  }
+
+  for (const item of items) {
+    if (item.type === "thinking") {
+      flushTools();
+      grouped.push(item);
+      continue;
+    }
+    tools.push(item);
+  }
+
+  flushTools();
+  return grouped;
+}
+
 function findPreviousOpenToolCallIndex(items: DisplayProcessItem[], result: ProcessItem): number | undefined {
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const candidate = items[index];
@@ -1805,6 +1873,27 @@ function processItemKey(item: DisplayProcessItem, index: number): string {
     return `${item.type}-${item.process_index}`;
   }
   return `${item.type}-${index}`;
+}
+
+function processEntryKey(item: DisplayProcessEntry, index: number): string {
+  if (item.type === "tool_fragment") {
+    const first = item.items[0];
+    return `tool-fragment-${first ? processItemKey(first, index) : index}`;
+  }
+  return processItemKey(item, index);
+}
+
+function toolFragmentNames(items: DisplayProcessItem[]): string {
+  const names = Array.from(
+    new Set(items.map((item) => item.tool_name).filter((name): name is string => Boolean(name)))
+  );
+  if (names.length === 0) {
+    return "";
+  }
+  if (names.length <= 3) {
+    return names.join(", ");
+  }
+  return `${names.slice(0, 3).join(", ")} +${names.length - 3}`;
 }
 
 function processFromMetadata(metadata: Message["metadata"]): ProcessItem[] {

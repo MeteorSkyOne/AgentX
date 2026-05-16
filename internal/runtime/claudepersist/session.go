@@ -200,6 +200,8 @@ func (s *persistentSession) readEvents(ctx context.Context) {
 	}()
 
 	var textBuf strings.Builder
+	var pendingTextBuf strings.Builder
+	var stageTextBuf strings.Builder
 	for {
 		select {
 		case <-ctx.Done():
@@ -218,7 +220,7 @@ func (s *persistentSession) readEvents(ctx context.Context) {
 				}
 				return
 			}
-			terminal, inputReq := s.handleLine(line, &textBuf)
+			terminal, inputReq := s.handleLine(line, &textBuf, &pendingTextBuf, &stageTextBuf)
 			if inputReq != nil {
 				if s.waitForInputResponse(ctx, inputReq) {
 					return
@@ -232,7 +234,7 @@ func (s *persistentSession) readEvents(ctx context.Context) {
 	}
 }
 
-func (s *persistentSession) handleLine(line []byte, textBuf *strings.Builder) (bool, *runtime.InputRequest) {
+func (s *persistentSession) handleLine(line []byte, textBuf *strings.Builder, pendingTextBuf *strings.Builder, stageTextBuf *strings.Builder) (bool, *runtime.InputRequest) {
 	var payload map[string]any
 	if err := json.Unmarshal(line, &payload); err != nil {
 		text := strings.TrimSpace(string(line))
@@ -260,6 +262,10 @@ func (s *persistentSession) handleLine(line []byte, textBuf *strings.Builder) (b
 		}
 		if text != "" {
 			textBuf.WriteString(text)
+			appendStageText(pendingTextBuf, text)
+		}
+		if thinking != "" || len(process) > 0 {
+			promotePendingStageText(pendingTextBuf, stageTextBuf)
 		}
 		s.emit(runtime.Event{Type: runtime.EventDelta, Text: text, Thinking: thinking, Process: process})
 		return false, nil
@@ -274,7 +280,12 @@ func (s *persistentSession) handleLine(line []byte, textBuf *strings.Builder) (b
 		if text == "" {
 			text = textBuf.String()
 		}
-		s.emit(runtime.Event{Type: runtime.EventCompleted, Text: text, Usage: claude.ClaudeUsage(payload)})
+		evt := runtime.Event{Type: runtime.EventCompleted, Text: text, Usage: claude.ClaudeUsage(payload)}
+		if stage := stageThinkingForResult(text, pendingTextBuf, stageTextBuf); stage != "" {
+			evt.Thinking = stage
+			evt.Process = []runtime.ProcessItem{{Type: "thinking", Text: stage}}
+		}
+		s.emit(evt)
 		return true, nil
 
 	case "control_request":
@@ -286,6 +297,43 @@ func (s *persistentSession) handleLine(line []byte, textBuf *strings.Builder) (b
 	default:
 		return false, nil
 	}
+}
+
+func appendStageText(buf *strings.Builder, text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	if buf.Len() > 0 {
+		buf.WriteByte('\n')
+	}
+	buf.WriteString(text)
+}
+
+func stageThinkingForResult(result string, pendingTextBuf *strings.Builder, stageTextBuf *strings.Builder) string {
+	if strings.TrimSpace(result) != "" && strings.TrimSpace(pendingTextBuf.String()) != "" && !sameNormalizedText(pendingTextBuf.String(), result) {
+		promotePendingStageText(pendingTextBuf, stageTextBuf)
+	}
+	stage := strings.TrimSpace(stageTextBuf.String())
+	if stage == "" {
+		return ""
+	}
+	if strings.TrimSpace(result) == "" {
+		return ""
+	}
+	return stage
+}
+
+func promotePendingStageText(pendingTextBuf *strings.Builder, stageTextBuf *strings.Builder) {
+	text := strings.TrimSpace(pendingTextBuf.String())
+	if text == "" {
+		return
+	}
+	appendStageText(stageTextBuf, text)
+	pendingTextBuf.Reset()
+}
+
+func sameNormalizedText(left string, right string) bool {
+	return strings.Join(strings.Fields(left), " ") == strings.Join(strings.Fields(right), " ")
 }
 
 func (s *persistentSession) waitForInputResponse(ctx context.Context, inputReq *runtime.InputRequest) bool {

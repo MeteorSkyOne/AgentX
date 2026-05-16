@@ -291,8 +291,10 @@ func (h *lineHandler) handleItem(item map[string]any) ([]runtime.Event, error) {
 	case "agent_message":
 		text := codexMessageText(item)
 		if text != "" {
+			events := h.flushPendingAsThinking()
 			h.appendText(text)
-			return []runtime.Event{{Type: runtime.EventDelta, Text: text}}, nil
+			events = append(events, runtime.Event{Type: runtime.EventDelta, Text: text})
+			return events, nil
 		}
 	case "message":
 		if role := stringValue(item, "role"); role != "" && role != "assistant" {
@@ -300,8 +302,10 @@ func (h *lineHandler) handleItem(item map[string]any) ([]runtime.Event, error) {
 		}
 		text := codexMessageText(item)
 		if text != "" {
+			events := h.flushPendingAsThinking()
 			h.appendText(text)
-			return []runtime.Event{{Type: runtime.EventDelta, Text: text}}, nil
+			events = append(events, runtime.Event{Type: runtime.EventDelta, Text: text})
+			return events, nil
 		}
 	case "reasoning":
 		text := reasoningSummaryText(item)
@@ -314,7 +318,9 @@ func (h *lineHandler) handleItem(item map[string]any) ([]runtime.Event, error) {
 		}
 	default:
 		if process := codexToolProcessItems(item); len(process) > 0 {
-			return []runtime.Event{{Type: runtime.EventDelta, Process: process}}, nil
+			events := h.flushPendingAsThinking()
+			events = append(events, runtime.Event{Type: runtime.EventDelta, Process: process})
+			return events, nil
 		}
 	}
 	return nil, nil
@@ -325,8 +331,7 @@ func (h *lineHandler) handleEventMessage(item map[string]any) ([]runtime.Event, 
 	case "agent_message", "agent_message_delta":
 		text := firstText(item, "message", "text", "delta")
 		if text != "" {
-			h.appendText(text)
-			return []runtime.Event{{Type: runtime.EventDelta, Text: text}}, nil
+			h.appendPending(text)
 		}
 	case "agent_reasoning", "agent_reasoning_delta":
 		text := firstText(item, "text", "message", "delta")

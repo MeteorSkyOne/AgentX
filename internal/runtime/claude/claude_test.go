@@ -358,6 +358,65 @@ func TestCompletedResultDoesNotIncludeThinking(t *testing.T) {
 	}
 }
 
+func TestCompletedResultKeepsOverwrittenAssistantTextAsProcess(t *testing.T) {
+	handler := newLineHandler("fallback")
+
+	handler.HandleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"I will inspect the files first."}]}}`))
+	events, err := handler.HandleLine([]byte(`{"type":"result","subtype":"success","is_error":false,"result":"Final answer.","session_id":"s1"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != runtime.EventCompleted {
+		t.Fatalf("events = %#v", events)
+	}
+	if events[0].Text != "Final answer." {
+		t.Fatalf("completed text = %q, want final answer", events[0].Text)
+	}
+	if events[0].Thinking != "I will inspect the files first." {
+		t.Fatalf("thinking = %q, want overwritten assistant text", events[0].Thinking)
+	}
+	if len(events[0].Process) != 1 || events[0].Process[0].Type != "thinking" || events[0].Process[0].Text != "I will inspect the files first." {
+		t.Fatalf("process = %#v", events[0].Process)
+	}
+}
+
+func TestCompletedResultDoesNotDuplicateFinalAssistantTextAsProcess(t *testing.T) {
+	handler := newLineHandler("fallback")
+
+	handler.HandleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"Final answer."}]}}`))
+	events, err := handler.HandleLine([]byte(`{"type":"result","subtype":"success","is_error":false,"result":"Final answer.","session_id":"s1"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != runtime.EventCompleted {
+		t.Fatalf("events = %#v", events)
+	}
+	if events[0].Thinking != "" || len(events[0].Process) != 0 {
+		t.Fatalf("completed event should not include process for final text: %#v", events[0])
+	}
+}
+
+func TestCompletedResultOnlyPromotesAssistantTextBeforeTool(t *testing.T) {
+	handler := newLineHandler("fallback")
+
+	handler.HandleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"I will inspect first."}]}}`))
+	handler.HandleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"README.md"}}]}}`))
+	handler.HandleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"Final answer."}]}}`))
+	events, err := handler.HandleLine([]byte(`{"type":"result","subtype":"success","is_error":false,"result":"Final answer.","session_id":"s1"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != runtime.EventCompleted {
+		t.Fatalf("events = %#v", events)
+	}
+	if events[0].Thinking != "I will inspect first." {
+		t.Fatalf("thinking = %q, want only the stage summary", events[0].Thinking)
+	}
+	if len(events[0].Process) != 1 || events[0].Process[0].Text != "I will inspect first." {
+		t.Fatalf("process = %#v", events[0].Process)
+	}
+}
+
 func TestErrorResultIncludesRawPayload(t *testing.T) {
 	handler := newLineHandler("fallback")
 

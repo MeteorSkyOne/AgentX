@@ -426,6 +426,73 @@ func TestLineHandlerParsesCurrentCodexResponseItems(t *testing.T) {
 	}
 }
 
+func TestLineHandlerTreatsEventAgentMessageBeforeToolAsThinking(t *testing.T) {
+	handler := newLineHandler("fallback")
+
+	events, err := handler.HandleLine([]byte(`{"type":"event_msg","payload":{"type":"agent_message","message":"I will inspect the files."}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("agent message events = %#v, want pending", events)
+	}
+
+	events, err = handler.HandleLine([]byte(`{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"ls\"}","call_id":"call_1"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events = %#v, want thinking and tool call", events)
+	}
+	if events[0].Thinking != "I will inspect the files." || len(events[0].Process) != 1 || events[0].Process[0].Type != "thinking" {
+		t.Fatalf("thinking event = %#v", events[0])
+	}
+	if len(events[1].Process) != 1 || events[1].Process[0].Type != "tool_call" {
+		t.Fatalf("tool event = %#v", events[1])
+	}
+}
+
+func TestLineHandlerFlushesPendingEventAgentMessageAsFinalText(t *testing.T) {
+	handler := newLineHandler("fallback")
+
+	events, err := handler.HandleLine([]byte(`{"type":"event_msg","payload":{"type":"agent_message_delta","delta":"final answer"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("agent message events = %#v, want pending", events)
+	}
+
+	events, err = handler.HandleLine([]byte(`{"type":"turn.completed"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != runtime.EventCompleted || events[0].Text != "final answer" {
+		t.Fatalf("completed events = %#v", events)
+	}
+}
+
+func TestLineHandlerTreatsPendingEventAgentMessageBeforeFinalMessageAsThinking(t *testing.T) {
+	handler := newLineHandler("fallback")
+
+	if events, err := handler.HandleLine([]byte(`{"type":"event_msg","payload":{"type":"agent_message","message":"I will summarize first."}}`)); err != nil || len(events) != 0 {
+		t.Fatalf("agent message events = %#v err=%v, want pending", events, err)
+	}
+	events, err := handler.HandleLine([]byte(`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Final answer."}]}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events = %#v, want thinking and final text", events)
+	}
+	if events[0].Thinking != "I will summarize first." || len(events[0].Process) != 1 {
+		t.Fatalf("thinking event = %#v", events[0])
+	}
+	if events[1].Text != "Final answer." {
+		t.Fatalf("final text event = %#v", events[1])
+	}
+}
+
 func TestReasoningNotIncludedInCompletedText(t *testing.T) {
 	handler := newLineHandler("fallback")
 

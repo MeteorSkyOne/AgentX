@@ -232,3 +232,34 @@ func TestEmitAfterCloseEventStreamDoesNotPanic(t *testing.T) {
 		sess.emit(runtime.Event{Type: runtime.EventFailed, Error: "late event"})
 	}
 }
+
+func TestHandleLineKeepsOverwrittenAssistantTextAsProcess(t *testing.T) {
+	sess := &persistentSession{events: make(chan runtime.Event, 4)}
+	var textBuf strings.Builder
+	var pendingTextBuf strings.Builder
+	var stageTextBuf strings.Builder
+
+	terminal, inputReq := sess.handleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"I will inspect the files first."}]}}`), &textBuf, &pendingTextBuf, &stageTextBuf)
+	if terminal || inputReq != nil {
+		t.Fatalf("assistant terminal=%v inputReq=%#v", terminal, inputReq)
+	}
+	evt := <-sess.events
+	if evt.Type != runtime.EventDelta || evt.Text != "I will inspect the files first." {
+		t.Fatalf("delta = %#v", evt)
+	}
+
+	terminal, inputReq = sess.handleLine([]byte(`{"type":"result","result":"Final answer.","subtype":"success","session_id":"s1"}`), &textBuf, &pendingTextBuf, &stageTextBuf)
+	if !terminal || inputReq != nil {
+		t.Fatalf("result terminal=%v inputReq=%#v", terminal, inputReq)
+	}
+	evt = <-sess.events
+	if evt.Type != runtime.EventCompleted || evt.Text != "Final answer." {
+		t.Fatalf("completed = %#v", evt)
+	}
+	if evt.Thinking != "I will inspect the files first." {
+		t.Fatalf("thinking = %q, want overwritten assistant text", evt.Thinking)
+	}
+	if len(evt.Process) != 1 || evt.Process[0].Type != "thinking" || evt.Process[0].Text != "I will inspect the files first." {
+		t.Fatalf("process = %#v", evt.Process)
+	}
+}

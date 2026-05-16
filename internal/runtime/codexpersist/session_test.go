@@ -354,6 +354,72 @@ func TestPlanDeltaIsEmittedAsText(t *testing.T) {
 	}
 }
 
+func TestAgentMessageDeltaBeforeToolIsEmittedAsThinking(t *testing.T) {
+	s := &persistentSession{events: make(chan runtime.Event, 4)}
+	state := newNotificationState()
+
+	s.handleNotification(jsonRPCMessage{
+		Method: "item/agentMessage/delta",
+		Params: map[string]any{
+			"delta": "I will inspect the files.",
+		},
+	}, state)
+	select {
+	case evt := <-s.events:
+		t.Fatalf("unexpected event before tool: %#v", evt)
+	default:
+	}
+
+	s.handleNotification(jsonRPCMessage{
+		Method: "item/started",
+		Params: map[string]any{
+			"item": map[string]any{
+				"type":    "commandExecution",
+				"id":      "cmd_1",
+				"command": "ls -la",
+			},
+		},
+	}, state)
+
+	evt := <-s.events
+	if evt.Type != runtime.EventDelta || evt.Thinking != "I will inspect the files." {
+		t.Fatalf("thinking event = %#v", evt)
+	}
+	if len(evt.Process) != 1 || evt.Process[0].Type != "thinking" || evt.Process[0].Text != "I will inspect the files." {
+		t.Fatalf("thinking process = %#v", evt.Process)
+	}
+	evt = <-s.events
+	if evt.Type != runtime.EventDelta || len(evt.Process) != 1 || evt.Process[0].Type != "tool_call" {
+		t.Fatalf("tool event = %#v", evt)
+	}
+}
+
+func TestAgentMessageDeltaWithoutToolBecomesFinalText(t *testing.T) {
+	s := &persistentSession{events: make(chan runtime.Event, 4)}
+	state := newNotificationState()
+
+	s.handleNotification(jsonRPCMessage{
+		Method: "item/agentMessage/delta",
+		Params: map[string]any{
+			"delta": "final answer",
+		},
+	}, state)
+	terminal := s.handleNotification(jsonRPCMessage{
+		Method: "turn/completed",
+		Params: map[string]any{
+			"turn": map[string]any{"status": "completed"},
+		},
+	}, state)
+
+	if !terminal {
+		t.Fatalf("turn/completed should be terminal")
+	}
+	evt := <-s.events
+	if evt.Type != runtime.EventCompleted || evt.Text != "final answer" {
+		t.Fatalf("completed event = %#v", evt)
+	}
+}
+
 func TestCompletedPlanUsesAuthoritativeTextWithoutDuplicatingDelta(t *testing.T) {
 	s := &persistentSession{events: make(chan runtime.Event, 4)}
 	state := newNotificationState()

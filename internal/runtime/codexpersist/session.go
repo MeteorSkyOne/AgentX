@@ -463,6 +463,7 @@ func (s *persistentSession) clearActiveTurn() {
 
 type notificationState struct {
 	text              strings.Builder
+	pendingAgentText  strings.Builder
 	streamedPlanItems map[string]bool
 	completedPlanText string
 }
@@ -477,10 +478,33 @@ func (st *notificationState) writeText(text string) {
 	}
 }
 
+func (st *notificationState) writePendingAgentText(text string) {
+	if text != "" {
+		st.pendingAgentText.WriteString(text)
+	}
+}
+
+func (st *notificationState) flushPendingAgentTextAsThinking() runtime.Event {
+	text := st.pendingAgentText.String()
+	st.pendingAgentText.Reset()
+	return runtime.Event{Type: runtime.EventDelta, Thinking: text, Process: []runtime.ProcessItem{{
+		Type: "thinking",
+		Text: text,
+	}}}
+}
+
+func (st *notificationState) flushPendingAgentTextAsText() string {
+	text := st.pendingAgentText.String()
+	st.pendingAgentText.Reset()
+	st.writeText(text)
+	return text
+}
+
 func (st *notificationState) textString() string {
 	if st.completedPlanText != "" {
 		return st.completedPlanText
 	}
+	st.flushPendingAgentTextAsText()
 	return st.text.String()
 }
 
@@ -524,8 +548,7 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 	case "item/agentMessage/delta":
 		delta, _ := params["delta"].(string)
 		if delta != "" {
-			state.writeText(delta)
-			s.emit(runtime.Event{Type: runtime.EventDelta, Text: delta})
+			state.writePendingAgentText(delta)
 		}
 
 	case "item/plan/delta":
@@ -547,11 +570,17 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 	case "item/started":
 		item, _ := params["item"].(map[string]any)
 		if pi := itemToProcessItem(item, "started"); pi != nil {
+			if state.pendingAgentText.Len() > 0 {
+				s.emit(state.flushPendingAgentTextAsThinking())
+			}
 			s.emit(runtime.Event{Type: runtime.EventDelta, Process: []runtime.ProcessItem{*pi}})
 		}
 
 	case "item/completed":
 		item, _ := params["item"].(map[string]any)
+		if text := completedAgentMessageText(item); text != "" && state.pendingAgentText.Len() == 0 {
+			state.writePendingAgentText(text)
+		}
 		if text, streamed := completedPlanText(item, state); text != "" {
 			if streamed {
 				state.completedPlanText = text
@@ -561,6 +590,9 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 			}
 		}
 		if pi := itemToProcessItem(item, "completed"); pi != nil {
+			if state.pendingAgentText.Len() > 0 {
+				s.emit(state.flushPendingAgentTextAsThinking())
+			}
 			s.emit(runtime.Event{Type: runtime.EventDelta, Process: []runtime.ProcessItem{*pi}})
 		}
 
@@ -865,6 +897,44 @@ func itemToProcessItem(item map[string]any, status string) *runtime.ProcessItem 
 		return &runtime.ProcessItem{Type: "thinking", Text: text, Raw: item}
 	}
 	return nil
+}
+
+func completedAgentMessageText(item map[string]any) string {
+	if item == nil {
+		return ""
+	}
+	itemType := normalizeItemType(stringVal(item, "type"))
+	if itemType != "agentmessage" && itemType != "agent_message" && itemType != "message" {
+		return ""
+	}
+	for _, key := range []string{"text", "message"} {
+		if text := stringVal(item, key); text != "" {
+			return text
+		}
+	}
+	if content, ok := item["content"].([]any); ok {
+		var out strings.Builder
+		for _, raw := range content {
+			part, _ := raw.(map[string]any)
+			if part == nil {
+				continue
+			}
+			partType := normalizeItemType(stringVal(part, "type"))
+			if partType != "output_text" && partType != "text" {
+				continue
+			}
+			text := stringVal(part, "text")
+			if text == "" {
+				continue
+			}
+			if out.Len() > 0 {
+				out.WriteByte('\n')
+			}
+			out.WriteString(text)
+		}
+		return out.String()
+	}
+	return ""
 }
 
 func completedPlanText(item map[string]any, state *notificationState) (string, bool) {

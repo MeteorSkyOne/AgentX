@@ -220,15 +220,16 @@ describe("MessagePane process details", () => {
     expect(fetchProcess).not.toHaveBeenCalled();
 
     click(buttonWithText(container, "Process"));
-    await clickAsync(buttonWithText(container, "Tool"));
+    click(buttonWithText(container, "Tools"));
+    await clickAsync(toolRowButton(container));
 
     expect(fetchProcess).toHaveBeenCalledTimes(1);
     expect(fetchProcess).toHaveBeenCalledWith("msg-bot", 0);
     expect(container.textContent).toContain("pnpm test");
     expect(container.textContent).toContain("tests passed");
 
-    click(buttonWithText(container, "Tool"));
-    await clickAsync(buttonWithText(container, "Tool"));
+    click(toolRowButton(container));
+    await clickAsync(toolRowButton(container));
     expect(fetchProcess).toHaveBeenCalledTimes(1);
   });
 
@@ -259,11 +260,64 @@ describe("MessagePane process details", () => {
       onOpenWorkspacePath: () => undefined,
     });
 
-    click(buttonWithText(container, "Tool"));
+    click(buttonWithText(container, "Tools"));
+    click(toolRowButton(container));
 
     expect(fetchProcess).not.toHaveBeenCalled();
     expect(container.textContent).toContain("go test ./...");
     expect(container.textContent).toContain("ok");
+  });
+
+  it("groups tools between thinking rows into collapsible fragments", async () => {
+    const { container } = await renderMessagePane({
+      messages: [],
+      streaming: [
+        {
+          runID: "run-1",
+          agentID: "agent-1",
+          text: "working",
+          process: [
+            {
+              type: "thinking",
+              text: "I will inspect files.",
+            },
+            {
+              type: "tool_call",
+              tool_name: "Bash",
+              tool_call_id: "call_1",
+              input: { command: "ls" },
+            },
+            {
+              type: "tool_result",
+              tool_call_id: "call_1",
+              output: "README.md",
+            },
+            {
+              type: "tool_call",
+              tool_name: "Read",
+              tool_call_id: "call_2",
+              input: { path: "README.md" },
+            },
+            {
+              type: "thinking",
+              text: "Now I will answer.",
+            },
+          ],
+        },
+      ],
+      onOpenWorkspacePath: () => undefined,
+    });
+
+    expect(container.textContent).toContain("I will inspect files.");
+    expect(container.textContent).toContain("Tools");
+    expect(container.textContent).toContain("2 tools");
+    expect(container.textContent).toContain("Now I will answer.");
+    expect(container.textContent).not.toContain("README.md");
+
+    click(buttonWithText(container, "Tools"));
+    click(toolRowButton(container));
+
+    expect(container.textContent).toContain("README.md");
   });
 });
 
@@ -419,6 +473,15 @@ function buttonWithText(container: HTMLElement, text: string): HTMLButtonElement
   const button = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((item) =>
     item.textContent?.includes(text)
   );
+  expect(button).toBeTruthy();
+  return button!;
+}
+
+function toolRowButton(container: HTMLElement): HTMLButtonElement {
+  const button = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((item) => {
+    const text = item.textContent ?? "";
+    return text.includes("Tool") && !text.includes("Tools");
+  });
   expect(button).toBeTruthy();
   return button!;
 }

@@ -331,9 +331,11 @@ func usablePreviousSessionID(id string) string {
 }
 
 type lineHandler struct {
-	mu        sync.Mutex
-	sessionID string
-	finalText strings.Builder
+	mu          sync.Mutex
+	sessionID   string
+	finalText   strings.Builder
+	pendingText strings.Builder
+	stageText   strings.Builder
 }
 
 func newLineHandler(fallbackID string) *lineHandler {
@@ -363,6 +365,10 @@ func (h *lineHandler) HandleLine(line []byte) ([]runtime.Event, error) {
 		}
 		if text != "" {
 			h.appendText(text)
+			h.appendPendingText(text)
+		}
+		if thinking != "" || len(process) > 0 {
+			h.promotePendingTextToStage()
 		}
 		return []runtime.Event{{Type: runtime.EventDelta, Text: text, Thinking: thinking, Process: process}}, nil
 	case "result":
@@ -374,7 +380,12 @@ func (h *lineHandler) HandleLine(line []byte) ([]runtime.Event, error) {
 		if text == "" {
 			text = h.text()
 		}
-		return []runtime.Event{{Type: runtime.EventCompleted, Text: text, Usage: claudeUsage(payload)}}, nil
+		evt := runtime.Event{Type: runtime.EventCompleted, Text: text, Usage: claudeUsage(payload)}
+		if stage := h.stageThinkingForResult(text); stage != "" {
+			evt.Thinking = stage
+			evt.Process = []runtime.ProcessItem{{Type: "thinking", Text: stage}}
+		}
+		return []runtime.Event{evt}, nil
 	default:
 		return nil, nil
 	}
@@ -413,10 +424,62 @@ func (h *lineHandler) appendText(text string) {
 	h.finalText.WriteString(text)
 }
 
+func (h *lineHandler) appendPendingText(text string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	appendLine(&h.pendingText, text)
+}
+
+func (h *lineHandler) promotePendingTextToStage() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.promotePendingTextToStageLocked()
+}
+
 func (h *lineHandler) text() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.finalText.String()
+}
+
+func (h *lineHandler) stageThinkingForResult(result string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if strings.TrimSpace(result) != "" && strings.TrimSpace(h.pendingText.String()) != "" && !sameNormalizedText(h.pendingText.String(), result) {
+		h.promotePendingTextToStageLocked()
+	}
+	stage := strings.TrimSpace(h.stageText.String())
+	if strings.TrimSpace(stage) == "" {
+		return ""
+	}
+	if strings.TrimSpace(result) == "" {
+		return ""
+	}
+	return stage
+}
+
+func (h *lineHandler) promotePendingTextToStageLocked() {
+	text := strings.TrimSpace(h.pendingText.String())
+	if text == "" {
+		return
+	}
+	appendLine(&h.stageText, text)
+	h.pendingText.Reset()
+}
+
+func appendLine(b *strings.Builder, text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteByte('\n')
+	}
+	b.WriteString(text)
+}
+
+func sameNormalizedText(left string, right string) bool {
+	return strings.Join(strings.Fields(left), " ") == strings.Join(strings.Fields(right), " ")
 }
 
 func assistantText(payload map[string]any) string {
