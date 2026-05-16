@@ -43,6 +43,10 @@ type persistentSession struct {
 func newPersistentSession(proc *procpool.ManagedProcess, rpc *rpcClient, key string, rt *Runtime, req runtime.StartSessionRequest) *persistentSession {
 	fallbackID := "codex:" + key
 	threadID := usablePreviousSessionID(req.PreviousSessionID)
+	sessionID := fallbackID
+	if threadID != "" {
+		sessionID = threadID
+	}
 	return &persistentSession{
 		process:      proc,
 		rpc:          rpc,
@@ -51,7 +55,7 @@ func newPersistentSession(proc *procpool.ManagedProcess, rpc *rpcClient, key str
 		req:          req,
 		events:       make(chan runtime.Event, 64),
 		threadID:     threadID,
-		sessionID:    fallbackID,
+		sessionID:    sessionID,
 		alive:        true,
 		done:         make(chan struct{}),
 		pendingInput: make(chan inputAnswer, 1),
@@ -193,7 +197,7 @@ func (s *persistentSession) startTurnAndProcess(ctx context.Context, input runti
 
 	result, err := s.rpc.Call(ctx, "turn/start", turnParams)
 	if err != nil {
-		s.emit(runtime.Event{Type: runtime.EventFailed, Error: fmt.Sprintf("turn/start failed: %v", err)})
+		s.emit(rpcFailureEvent("turn/start failed", err))
 		return
 	}
 	_ = result
@@ -207,7 +211,7 @@ func (s *persistentSession) handleGoalSet(ctx context.Context, input runtime.Inp
 		"objective": objective,
 	})
 	if err != nil {
-		s.emit(runtime.Event{Type: runtime.EventFailed, Error: fmt.Sprintf("thread/goal/set failed: %v", err)})
+		s.emit(rpcFailureEvent("thread/goal/set failed", err))
 		return
 	}
 	goalInput := runtime.Input{
@@ -223,7 +227,7 @@ func (s *persistentSession) handleGoalClear(ctx context.Context) {
 		"threadId": s.threadID,
 	})
 	if err != nil {
-		s.emit(runtime.Event{Type: runtime.EventFailed, Error: fmt.Sprintf("thread/goal/clear failed: %v", err)})
+		s.emit(rpcFailureEvent("thread/goal/clear failed", err))
 		return
 	}
 	s.emit(runtime.Event{Type: runtime.EventCompleted, Text: "Goal cleared."})
@@ -487,7 +491,7 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 		if errMsg == "" {
 			errMsg = "codex app-server error"
 		}
-		s.emit(runtime.Event{Type: runtime.EventFailed, Error: errMsg})
+		s.emit(runtime.Event{Type: runtime.EventFailed, Error: errMsg, StaleSession: isStaleThreadErrorMessage(errMsg)})
 		return true
 
 	case "thread/closed":
@@ -663,6 +667,30 @@ func usablePreviousSessionID(id string) string {
 		return ""
 	}
 	return id
+}
+
+func rpcFailureEvent(prefix string, err error) runtime.Event {
+	return runtime.Event{
+		Type:         runtime.EventFailed,
+		Error:        fmt.Sprintf("%s: %v", prefix, err),
+		StaleSession: isStaleThreadError(err),
+	}
+}
+
+func isStaleThreadError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var rpcErr *jsonRPCError
+	if errors.As(err, &rpcErr) {
+		return isStaleThreadErrorMessage(rpcErr.Message)
+	}
+	return isStaleThreadErrorMessage(err.Error())
+}
+
+func isStaleThreadErrorMessage(text string) bool {
+	text = strings.ToLower(text)
+	return strings.Contains(text, "thread not found") || strings.Contains(text, "no thread found")
 }
 
 func notificationParams(msg jsonRPCMessage) map[string]any {

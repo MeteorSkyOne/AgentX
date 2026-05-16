@@ -50,6 +50,63 @@ func TestAddTurnOverridesUsesPlanMode(t *testing.T) {
 	}
 }
 
+func TestNewPersistentSessionUsesPreviousThreadAsCurrentSessionID(t *testing.T) {
+	s := newPersistentSession(nil, nil, "agent:channel", nil, runtime.StartSessionRequest{
+		PreviousSessionID: "thread_previous",
+	})
+
+	if got := s.CurrentSessionID(); got != "thread_previous" {
+		t.Fatalf("session id = %q, want previous thread id", got)
+	}
+}
+
+func TestNewPersistentSessionIgnoresCodexFallbackSessionID(t *testing.T) {
+	s := newPersistentSession(nil, nil, "agent:channel", nil, runtime.StartSessionRequest{
+		PreviousSessionID: "codex:agent:channel",
+	})
+
+	if s.threadID != "" {
+		t.Fatalf("thread id = %q, want empty for fallback session id", s.threadID)
+	}
+	if got := s.CurrentSessionID(); got != "codex:agent:channel" {
+		t.Fatalf("session id = %q, want fallback id", got)
+	}
+}
+
+func TestRPCFailureEventMarksThreadNotFoundAsStale(t *testing.T) {
+	evt := rpcFailureEvent("turn/start failed", &jsonRPCError{
+		Code:    -32600,
+		Message: "thread not found: 019e2f84-98a0-77b0-9c52-277e5cd5bc4e",
+	})
+
+	if evt.Type != runtime.EventFailed {
+		t.Fatalf("event type = %v, want failed", evt.Type)
+	}
+	if !evt.StaleSession {
+		t.Fatalf("stale session = false, want true for %q", evt.Error)
+	}
+}
+
+func TestNotificationErrorMarksThreadNotFoundAsStale(t *testing.T) {
+	s := &persistentSession{events: make(chan runtime.Event, 1)}
+	state := newNotificationState()
+
+	terminal := s.handleNotification(jsonRPCMessage{
+		Method: "error",
+		Params: map[string]any{
+			"message": "thread not found: 019e2f84-98a0-77b0-9c52-277e5cd5bc4e",
+		},
+	}, state)
+
+	if !terminal {
+		t.Fatalf("notification should be terminal")
+	}
+	evt := <-s.events
+	if !evt.StaleSession {
+		t.Fatalf("stale session = false, want true for %q", evt.Error)
+	}
+}
+
 func TestBuildUserInputTreatsOnlyImageKindAsLocalImage(t *testing.T) {
 	items := buildUserInput(runtime.Input{
 		Prompt: "inspect this file",
