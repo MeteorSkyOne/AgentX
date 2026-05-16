@@ -52,7 +52,8 @@ func (r *Runtime) StartSession(ctx context.Context, req runtime.StartSessionRequ
 	rpc := getRPCClient(proc)
 	if isNew {
 		if err := r.initializeServer(ctx, proc, rpc); err != nil {
-			r.pool.Kill(key)
+			r.pool.Detach(proc)
+			proc.Kill()
 			return nil, err
 		}
 	}

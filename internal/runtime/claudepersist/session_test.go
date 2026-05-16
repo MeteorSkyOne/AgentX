@@ -2,7 +2,9 @@ package claudepersist
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -42,7 +44,9 @@ func TestPersistentSessionSendAndReceive(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	sess.waitForSystemEvent(ctx)
+	if err := sess.waitForSystemEvent(ctx); err != nil {
+		t.Fatal(err)
+	}
 
 	if id := sess.CurrentSessionID(); id != "test-session-123" {
 		t.Fatalf("expected session ID 'test-session-123', got %q", id)
@@ -106,7 +110,9 @@ func TestPersistentSessionProcessDeath(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	sess.waitForSystemEvent(ctx)
+	if err := sess.waitForSystemEvent(ctx); err != nil {
+		t.Fatal(err)
+	}
 
 	<-proc.Done()
 
@@ -121,6 +127,97 @@ func TestPersistentSessionProcessDeath(t *testing.T) {
 
 	if lastEvt.Type != runtime.EventFailed {
 		t.Fatalf("expected EventFailed on dead process, got %v", lastEvt.Type)
+	}
+	if lastEvt.Error == procpool.ErrProcessDead.Error() {
+		t.Fatalf("expected process exit detail, got %q", lastEvt.Error)
+	}
+	if lastEvt.Error != "persistent process exited" {
+		t.Fatalf("failed error = %q, want persistent process exited", lastEvt.Error)
+	}
+}
+
+func TestStartSessionReturnsStderrWhenProcessDiesDuringInitialization(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "claude")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+echo "unknown option: --bad-flag" >&2
+exit 2
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := New(Options{Command: script, IdleTimeout: time.Hour})
+	defer rt.Shutdown(context.Background())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := rt.StartSession(ctx, runtime.StartSessionRequest{
+		AgentID:    "agent1",
+		SessionKey: "agent1:thread:1",
+		Workspace:  dir,
+	})
+	if err == nil {
+		t.Fatal("expected StartSession error")
+	}
+	if !strings.Contains(err.Error(), "unknown option: --bad-flag") {
+		t.Fatalf("StartSession error = %q, want stderr detail", err.Error())
+	}
+}
+
+func TestInitiateStopDetachesProcessBeforeKill(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "claude")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+echo '{"type":"system","session_id":"test-session"}'
+while IFS= read -r line; do
+  while IFS= read -r next; do
+    :
+  done
+done
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := New(Options{Command: script, IdleTimeout: time.Hour})
+	defer rt.Shutdown(context.Background())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req := runtime.StartSessionRequest{
+		AgentID:    "agent1",
+		SessionKey: "agent1:thread:1",
+		Workspace:  dir,
+	}
+	firstSession, err := rt.StartSession(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := firstSession.(*persistentSession)
+	if err := first.Send(ctx, runtime.Input{Prompt: "hold"}); err != nil {
+		t.Fatal(err)
+	}
+
+	first.InitiateStop()
+	if got, ok := rt.pool.Get(req.SessionKey); ok && got == first.process {
+		t.Fatalf("stopped process remained in pool: %#v", got)
+	}
+
+	nextSession, err := rt.StartSession(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := nextSession.(*persistentSession)
+	if next.process == first.process {
+		t.Fatal("expected new session to start a replacement process")
+	}
+
+	if err := first.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := next.Stop(ctx); err != nil {
+		t.Fatal(err)
 	}
 }
 

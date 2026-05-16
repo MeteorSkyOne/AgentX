@@ -203,11 +203,19 @@ func (a *App) stopActiveAgentRuns(ctx context.Context, key activeRunKey) int {
 		delete(runs, runID)
 	}
 	delete(a.activeRuns, key)
+	for _, run := range stopping {
+		run.cancel(errAgentRunStopped)
+		if run.session == nil {
+			continue
+		}
+		if initiator, ok := run.session.(agentruntime.StopInitiator); ok {
+			initiator.InitiateStop()
+		}
+	}
 	a.activeRunsMu.Unlock()
 
 	a.removePendingQuestions(key.conversationType, key.conversationID)
 	for _, run := range stopping {
-		run.cancel(errAgentRunStopped)
 		if run.session == nil {
 			continue
 		}

@@ -170,6 +170,10 @@ type Stopper interface {
 	Stop(ctx context.Context) error
 }
 
+type StopInitiator interface {
+	InitiateStop()
+}
+
 type Shutdowner interface {
 	Shutdown(ctx context.Context) error
 }

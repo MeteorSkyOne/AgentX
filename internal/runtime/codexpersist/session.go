@@ -127,12 +127,7 @@ func (s *persistentSession) Close(ctx context.Context) error {
 }
 
 func (s *persistentSession) Stop(ctx context.Context) error {
-	s.mu.Lock()
-	s.alive = false
-	s.turnHeld = false
-	s.mu.Unlock()
-
-	s.closeEventStream()
+	s.InitiateStop()
 
 	done := make(chan struct{})
 	go func() {
@@ -145,6 +140,20 @@ func (s *persistentSession) Stop(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (s *persistentSession) InitiateStop() {
+	s.mu.Lock()
+	s.alive = false
+	turnHeld := s.turnHeld
+	s.turnHeld = false
+	s.mu.Unlock()
+
+	if turnHeld {
+		s.process.ReleaseTurn()
+	}
+	s.rt.pool.Detach(s.process)
+	s.closeEventStream()
 }
 
 func (s *persistentSession) runTurn(ctx context.Context, input runtime.Input) {

@@ -192,6 +192,41 @@ func TestExitedProcessDoesNotRemoveReplacement(t *testing.T) {
 	}
 }
 
+func TestDetachRemovesOnlyMatchingProcess(t *testing.T) {
+	pool := New(Options{IdleTimeout: 1 * time.Hour})
+	defer pool.Shutdown(context.Background())
+
+	proc, _, err := pool.GetOrCreate("key1", echoStartFunc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer proc.Kill()
+
+	if !pool.Detach(proc) {
+		t.Fatal("expected detach to remove process")
+	}
+	if _, ok := pool.Get("key1"); ok {
+		t.Fatal("expected detached process to be absent from pool")
+	}
+
+	replacement, _, err := pool.GetOrCreate("key1", echoStartFunc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replacement == proc {
+		t.Fatal("expected detached process not to be reused")
+	}
+
+	stale := &ManagedProcess{Key: "key1"}
+	if pool.Detach(stale) {
+		t.Fatal("expected detach of stale process to report false")
+	}
+	got, ok := pool.Get("key1")
+	if !ok || got != replacement {
+		t.Fatal("expected replacement to remain in pool")
+	}
+}
+
 func TestWriteAfterProcessDeathReturnsErrProcessDead(t *testing.T) {
 	pool := New(Options{IdleTimeout: 1 * time.Hour})
 	defer pool.Shutdown(context.Background())

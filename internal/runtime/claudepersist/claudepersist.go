@@ -54,7 +54,11 @@ func (r *Runtime) StartSession(ctx context.Context, req runtime.StartSessionRequ
 
 	sess := newPersistentSession(proc, key, r)
 	if isNew {
-		sess.waitForSystemEvent(ctx)
+		if err := sess.waitForSystemEvent(ctx); err != nil {
+			r.pool.Detach(proc)
+			proc.Kill()
+			return nil, err
+		}
 	}
 	return sess, nil
 }

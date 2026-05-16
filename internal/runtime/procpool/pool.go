@@ -79,12 +79,21 @@ func (p *ProcessPool) Get(key string) (*ManagedProcess, bool) {
 	return mp, ok
 }
 
-func (p *ProcessPool) remove(mp *ManagedProcess) {
+func (p *ProcessPool) Detach(mp *ManagedProcess) bool {
+	if mp == nil {
+		return false
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if current, ok := p.processes[mp.Key]; ok && current == mp {
 		delete(p.processes, mp.Key)
+		return true
 	}
+	return false
+}
+
+func (p *ProcessPool) remove(mp *ManagedProcess) {
+	p.Detach(mp)
 }
 
 func (p *ProcessPool) Kill(key string) {

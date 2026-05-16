@@ -52,13 +52,14 @@ func newPersistentSession(proc *procpool.ManagedProcess, key string, rt *Runtime
 	}
 }
 
-func (s *persistentSession) waitForSystemEvent(ctx context.Context) {
-	timeout := time.After(10 * time.Second)
+func (s *persistentSession) waitForSystemEvent(ctx context.Context) error {
+	timeout := time.NewTimer(10 * time.Second)
+	defer timeout.Stop()
 	for {
 		select {
 		case line, ok := <-s.process.StdoutLines():
 			if !ok {
-				return
+				return s.processExitError("persistent process exited before initialization")
 			}
 			var payload map[string]any
 			if err := json.Unmarshal(line, &payload); err != nil {
@@ -70,12 +71,14 @@ func (s *persistentSession) waitForSystemEvent(ctx context.Context) {
 					s.sessionID = id
 					s.mu.Unlock()
 				}
-				return
+				return nil
 			}
-		case <-timeout:
-			return
+		case <-timeout.C:
+			return nil
 		case <-ctx.Done():
-			return
+			return ctx.Err()
+		case <-s.process.Done():
+			return s.processExitError("persistent process exited before initialization")
 		}
 	}
 }
@@ -94,7 +97,7 @@ func (s *persistentSession) Send(ctx context.Context, input runtime.Input) error
 	s.mu.Unlock()
 
 	if err := s.process.AcquireTurn(ctx); err != nil {
-		s.emitFailed(err.Error())
+		s.emitError(err)
 		return nil
 	}
 	s.mu.Lock()
@@ -110,7 +113,7 @@ func (s *persistentSession) Send(ctx context.Context, input runtime.Input) error
 
 	if err := s.process.WriteJSON(msg); err != nil {
 		s.releaseTurn()
-		s.emitFailed(err.Error())
+		s.emitError(err)
 		return nil
 	}
 
@@ -158,12 +161,7 @@ func (s *persistentSession) Close(ctx context.Context) error {
 }
 
 func (s *persistentSession) Stop(ctx context.Context) error {
-	s.mu.Lock()
-	s.alive = false
-	s.turnHeld = false
-	s.mu.Unlock()
-
-	s.closeEventStream()
+	s.InitiateStop()
 
 	done := make(chan struct{})
 	go func() {
@@ -176,6 +174,20 @@ func (s *persistentSession) Stop(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (s *persistentSession) InitiateStop() {
+	s.mu.Lock()
+	s.alive = false
+	turnHeld := s.turnHeld
+	s.turnHeld = false
+	s.mu.Unlock()
+
+	if turnHeld {
+		s.process.ReleaseTurn()
+	}
+	s.rt.pool.Detach(s.process)
+	s.closeEventStream()
 }
 
 func (s *persistentSession) readEvents(ctx context.Context) {
@@ -194,11 +206,7 @@ func (s *persistentSession) readEvents(ctx context.Context) {
 			s.emit(runtime.Event{Type: runtime.EventFailed, Error: ctx.Err().Error()})
 			return
 		case <-s.process.Done():
-			stderr := s.process.Stderr()
-			errText := "persistent process exited"
-			if stderr != "" {
-				errText = stderr
-			}
+			errText := s.processExitText("persistent process exited")
 			s.emit(runtime.Event{Type: runtime.EventFailed, Error: errText, StaleSession: claude.IsStaleSessionError(errText)})
 			return
 		case line, ok := <-s.process.StdoutLines():
@@ -291,11 +299,7 @@ func (s *persistentSession) waitForInputResponse(ctx context.Context, inputReq *
 		s.emit(runtime.Event{Type: runtime.EventFailed, Error: ctx.Err().Error()})
 		return true
 	case <-s.process.Done():
-		stderr := s.process.Stderr()
-		errText := "persistent process exited"
-		if stderr != "" {
-			errText = stderr
-		}
+		errText := s.processExitText("persistent process exited")
 		s.emit(runtime.Event{Type: runtime.EventFailed, Error: errText})
 		return true
 	case answer := <-s.pendingInput:
@@ -355,6 +359,29 @@ func (s *persistentSession) emitFailed(errText string) {
 	s.alive = false
 	s.mu.Unlock()
 	s.closeEventStream()
+}
+
+func (s *persistentSession) emitError(err error) {
+	errText := err.Error()
+	if errors.Is(err, procpool.ErrProcessDead) {
+		errText = s.processExitText("persistent process exited")
+	}
+	s.emit(runtime.Event{Type: runtime.EventFailed, Error: errText, StaleSession: claude.IsStaleSessionError(errText)})
+	s.mu.Lock()
+	s.alive = false
+	s.mu.Unlock()
+	s.closeEventStream()
+}
+
+func (s *persistentSession) processExitError(fallback string) error {
+	return errors.New(s.processExitText(fallback))
+}
+
+func (s *persistentSession) processExitText(fallback string) string {
+	if stderr := strings.TrimSpace(s.process.Stderr()); stderr != "" {
+		return stderr
+	}
+	return fallback
 }
 
 func (s *persistentSession) closeEventStream() {

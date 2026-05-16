@@ -2156,6 +2156,63 @@ func TestSlashStopReturnsBeforeRuntimeCloseCompletes(t *testing.T) {
 	close(blocking.releaseClose)
 }
 
+func TestSlashStopInitiatesStopBeforeReturning(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+	blocking := newBlockingStopRuntime()
+	app.opts.Runtimes[domain.AgentKindFake] = blocking
+	defer close(blocking.releaseStop)
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "keep running",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blocking.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for blocking runtime start")
+	}
+
+	type stopResult struct {
+		message domain.Message
+		err     error
+	}
+	done := make(chan stopResult, 1)
+	go func() {
+		message, err := app.SendMessage(ctx, SendMessageRequest{
+			UserID:           bootstrap.User.ID,
+			OrganizationID:   bootstrap.Organization.ID,
+			ConversationType: domain.ConversationChannel,
+			ConversationID:   bootstrap.Channel.ID,
+			Body:             "/stop",
+		})
+		done <- stopResult{message: message, err: err}
+	}()
+
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		if result.message.Metadata["command_name"] != "stop" {
+			t.Fatalf("/stop message = %#v", result.message)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("/stop blocked waiting for runtime Stop")
+	}
+
+	select {
+	case <-blocking.initiated:
+	default:
+		t.Fatal("/stop returned before initiating runtime stop")
+	}
+}
+
 func TestActiveRunReplayEventsIncludeStreamingAndPendingQuestion(t *testing.T) {
 	ctx := context.Background()
 	app, bus, bootstrap := newConversationTestApp(t, ctx)
@@ -3396,6 +3453,107 @@ func (s *blockingCloseSession) Close(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+type blockingStopRuntime struct {
+	started     chan struct{}
+	initiated   chan struct{}
+	stopStarted chan struct{}
+	releaseStop chan struct{}
+}
+
+func newBlockingStopRuntime() *blockingStopRuntime {
+	return &blockingStopRuntime{
+		started:     make(chan struct{}),
+		initiated:   make(chan struct{}),
+		stopStarted: make(chan struct{}),
+		releaseStop: make(chan struct{}),
+	}
+}
+
+func (r *blockingStopRuntime) StartSession(ctx context.Context, req agentruntime.StartSessionRequest) (agentruntime.Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return &blockingStopSession{
+		id:          "blocking-stop:" + req.SessionKey,
+		events:      make(chan agentruntime.Event),
+		started:     r.started,
+		initiated:   r.initiated,
+		stopStarted: r.stopStarted,
+		releaseStop: r.releaseStop,
+	}, nil
+}
+
+type blockingStopSession struct {
+	id          string
+	events      chan agentruntime.Event
+	started     chan struct{}
+	initiated   chan struct{}
+	stopStarted chan struct{}
+	releaseStop chan struct{}
+	startedOnce sync.Once
+	initOnce    sync.Once
+	stopOnce    sync.Once
+	closeOnce   sync.Once
+}
+
+func (s *blockingStopSession) Send(ctx context.Context, input agentruntime.Input) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.startedOnce.Do(func() {
+		close(s.started)
+	})
+	return nil
+}
+
+func (s *blockingStopSession) Events() <-chan agentruntime.Event {
+	return s.events
+}
+
+func (s *blockingStopSession) CurrentSessionID() string {
+	return s.id
+}
+
+func (s *blockingStopSession) Alive() bool {
+	return true
+}
+
+func (s *blockingStopSession) RespondToInputRequest(questionID string, answer string) error {
+	return nil
+}
+
+func (s *blockingStopSession) Close(ctx context.Context) error {
+	s.closeEvents()
+	return nil
+}
+
+func (s *blockingStopSession) InitiateStop() {
+	s.initOnce.Do(func() {
+		close(s.initiated)
+	})
+}
+
+func (s *blockingStopSession) Stop(ctx context.Context) error {
+	s.stopOnce.Do(func() {
+		close(s.stopStarted)
+		select {
+		case <-s.releaseStop:
+		case <-ctx.Done():
+		}
+		s.closeEvents()
+	})
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *blockingStopSession) closeEvents() {
+	s.closeOnce.Do(func() {
+		close(s.events)
+	})
 }
 
 type capturedInput struct {
