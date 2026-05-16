@@ -1837,7 +1837,7 @@ export function Shell({
               </div>
               {terminalOpen && terminalAllowed && projectWorkspace?.id ? (
                 <div
-                  className="relative min-h-56 shrink-0 border-t border-border"
+                  className="relative min-h-56 shrink-0 overflow-hidden border-t border-border"
                   style={{ height: `${terminalHeightPct}%` }}
                 >
                   <div
