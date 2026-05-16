@@ -266,9 +266,7 @@ func (s *persistentSession) startThread(ctx context.Context) (threadStartResult,
 	if model := strings.TrimSpace(s.req.Model); model != "" {
 		params["model"] = model
 	}
-	if s.req.YoloMode {
-		params["approvalPolicy"] = "never"
-	}
+	s.addThreadOverrides(params)
 
 	result, err := s.rpc.Call(ctx, "thread/start", params)
 	if err != nil {
@@ -291,7 +289,10 @@ func (s *persistentSession) addTurnOverrides(turnParams map[string]any) {
 	if strings.EqualFold(strings.TrimSpace(s.req.PermissionMode), "plan") {
 		mode = "plan"
 	}
-	turnParams["permissionProfile"] = codexPermissionProfile(mode, s.req.YoloMode)
+	if s.req.YoloMode {
+		turnParams["approvalPolicy"] = "never"
+	}
+	turnParams["sandboxPolicy"] = codexSandboxPolicy(mode, s.req.YoloMode)
 
 	effort := strings.TrimSpace(s.req.Effort)
 	if mode == "plan" && effort == "" {
@@ -313,55 +314,22 @@ func (s *persistentSession) addTurnOverrides(turnParams map[string]any) {
 	}
 }
 
-func codexPermissionProfile(mode string, yolo bool) map[string]any {
+func (s *persistentSession) addThreadOverrides(params map[string]any) {
+	if !s.req.YoloMode {
+		return
+	}
+	params["approvalPolicy"] = "never"
+	params["sandbox"] = "danger-full-access"
+}
+
+func codexSandboxPolicy(mode string, yolo bool) map[string]any {
 	if mode == "plan" {
-		return managedPermissionProfile([]map[string]any{
-			fileSystemEntry(specialFileSystemPath("root", nil), "read"),
-		}, false)
+		return map[string]any{"type": "readOnly"}
 	}
 	if yolo {
-		return map[string]any{"type": "disabled"}
+		return map[string]any{"type": "dangerFullAccess"}
 	}
-	return managedPermissionProfile([]map[string]any{
-		fileSystemEntry(specialFileSystemPath("root", nil), "read"),
-		fileSystemEntry(specialFileSystemPath("project_roots", map[string]any{"subpath": nil}), "write"),
-		fileSystemEntry(specialFileSystemPath("slash_tmp", nil), "write"),
-		fileSystemEntry(specialFileSystemPath("tmpdir", nil), "write"),
-		fileSystemEntry(specialFileSystemPath("project_roots", map[string]any{"subpath": ".git"}), "read"),
-		fileSystemEntry(specialFileSystemPath("project_roots", map[string]any{"subpath": ".agents"}), "read"),
-		fileSystemEntry(specialFileSystemPath("project_roots", map[string]any{"subpath": ".codex"}), "read"),
-	}, false)
-}
-
-func managedPermissionProfile(entries []map[string]any, networkEnabled bool) map[string]any {
-	return map[string]any{
-		"type": "managed",
-		"fileSystem": map[string]any{
-			"type":    "restricted",
-			"entries": entries,
-		},
-		"network": map[string]any{
-			"enabled": networkEnabled,
-		},
-	}
-}
-
-func fileSystemEntry(path map[string]any, access string) map[string]any {
-	return map[string]any{
-		"path":   path,
-		"access": access,
-	}
-}
-
-func specialFileSystemPath(kind string, fields map[string]any) map[string]any {
-	value := map[string]any{"kind": kind}
-	for key, val := range fields {
-		value[key] = val
-	}
-	return map[string]any{
-		"type":  "special",
-		"value": value,
-	}
+	return map[string]any{"type": "workspaceWrite"}
 }
 
 func (s *persistentSession) turnModel() string {

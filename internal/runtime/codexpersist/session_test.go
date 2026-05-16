@@ -37,17 +37,11 @@ func TestAddTurnOverridesUsesPlanMode(t *testing.T) {
 		t.Fatalf("developer_instructions = %v, want nil", got)
 	}
 
-	profile := permissionProfileFromParams(t, params)
-	if got := profile["type"]; got != "managed" {
-		t.Fatalf("permission profile type = %v, want managed", got)
+	policy := sandboxPolicyFromParams(t, params)
+	if got := policy["type"]; got != "readOnly" {
+		t.Fatalf("sandbox policy type = %v, want readOnly", got)
 	}
-	entries := fileSystemEntriesFromProfile(t, profile)
-	if len(entries) != 1 {
-		t.Fatalf("read-only entries = %d, want 1", len(entries))
-	}
-	if got := entries[0]["access"]; got != "read" {
-		t.Fatalf("plan access = %v, want read", got)
-	}
+	assertNoPermissionProfile(t, params)
 }
 
 func TestNewPersistentSessionUsesPreviousThreadAsCurrentSessionID(t *testing.T) {
@@ -184,17 +178,11 @@ func TestAddTurnOverridesUsesDefaultModeForNormalTurns(t *testing.T) {
 		t.Fatalf("reasoning_effort = %v, want low", got)
 	}
 
-	profile := permissionProfileFromParams(t, params)
-	if got := profile["type"]; got != "managed" {
-		t.Fatalf("permission profile type = %v, want managed", got)
+	policy := sandboxPolicyFromParams(t, params)
+	if got := policy["type"]; got != "workspaceWrite" {
+		t.Fatalf("sandbox policy type = %v, want workspaceWrite", got)
 	}
-	entries := fileSystemEntriesFromProfile(t, profile)
-	if !hasSpecialEntry(entries, "project_roots", "write") {
-		t.Fatalf("workspace-write profile missing project_roots write entry: %#v", entries)
-	}
-	if !hasSpecialEntry(entries, "root", "read") {
-		t.Fatalf("workspace-write profile missing root read entry: %#v", entries)
-	}
+	assertNoPermissionProfile(t, params)
 }
 
 func TestAddTurnOverridesDisablesSandboxForYoloNormalTurns(t *testing.T) {
@@ -207,10 +195,33 @@ func TestAddTurnOverridesDisablesSandboxForYoloNormalTurns(t *testing.T) {
 	params := map[string]any{}
 	s.addTurnOverrides(params)
 
-	profile := permissionProfileFromParams(t, params)
-	if got := profile["type"]; got != "disabled" {
-		t.Fatalf("permission profile type = %v, want disabled", got)
+	if got := params["approvalPolicy"]; got != "never" {
+		t.Fatalf("approvalPolicy = %v, want never", got)
 	}
+	policy := sandboxPolicyFromParams(t, params)
+	if got := policy["type"]; got != "dangerFullAccess" {
+		t.Fatalf("sandbox policy type = %v, want dangerFullAccess", got)
+	}
+	assertNoPermissionProfile(t, params)
+}
+
+func TestAddThreadOverridesUsesDangerFullAccessForYolo(t *testing.T) {
+	s := &persistentSession{
+		req: runtime.StartSessionRequest{
+			YoloMode: true,
+		},
+	}
+
+	params := map[string]any{}
+	s.addThreadOverrides(params)
+
+	if got := params["approvalPolicy"]; got != "never" {
+		t.Fatalf("approvalPolicy = %v, want never", got)
+	}
+	if got := params["sandbox"]; got != "danger-full-access" {
+		t.Fatalf("sandbox = %v, want danger-full-access", got)
+	}
+	assertNoPermissionProfile(t, params)
 }
 
 func TestPlanDeltaIsEmittedAsText(t *testing.T) {
@@ -418,38 +429,18 @@ func settingsFromMode(t *testing.T, mode map[string]any) map[string]any {
 	return settings
 }
 
-func permissionProfileFromParams(t *testing.T, params map[string]any) map[string]any {
+func sandboxPolicyFromParams(t *testing.T, params map[string]any) map[string]any {
 	t.Helper()
-	profile, ok := params["permissionProfile"].(map[string]any)
+	policy, ok := params["sandboxPolicy"].(map[string]any)
 	if !ok {
-		t.Fatalf("permissionProfile = %#v, want map", params["permissionProfile"])
+		t.Fatalf("sandboxPolicy = %#v, want map", params["sandboxPolicy"])
 	}
-	return profile
+	return policy
 }
 
-func fileSystemEntriesFromProfile(t *testing.T, profile map[string]any) []map[string]any {
+func assertNoPermissionProfile(t *testing.T, params map[string]any) {
 	t.Helper()
-	fileSystem, ok := profile["fileSystem"].(map[string]any)
-	if !ok {
-		t.Fatalf("fileSystem = %#v, want map", profile["fileSystem"])
+	if _, ok := params["permissionProfile"]; ok {
+		t.Fatalf("permissionProfile should not be sent to turn/start: %#v", params["permissionProfile"])
 	}
-	rawEntries, ok := fileSystem["entries"].([]map[string]any)
-	if !ok {
-		t.Fatalf("entries = %#v, want []map[string]any", fileSystem["entries"])
-	}
-	return rawEntries
-}
-
-func hasSpecialEntry(entries []map[string]any, kind string, access string) bool {
-	for _, entry := range entries {
-		if entry["access"] != access {
-			continue
-		}
-		path, _ := entry["path"].(map[string]any)
-		value, _ := path["value"].(map[string]any)
-		if value["kind"] == kind {
-			return true
-		}
-	}
-	return false
 }
