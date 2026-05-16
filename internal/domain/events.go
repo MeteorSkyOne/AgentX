@@ -15,8 +15,11 @@ const (
 	EventAgentRunStarted            EventType = "AgentRunStarted"
 	EventAgentOutputDelta           EventType = "AgentOutputDelta"
 	EventAgentRunCompleted          EventType = "AgentRunCompleted"
+	EventAgentRunCanceled           EventType = "AgentRunCanceled"
 	EventAgentRunFailed             EventType = "AgentRunFailed"
 	EventAgentInputRequest          EventType = "AgentInputRequest"
+	EventAgentPromptQueued          EventType = "AgentPromptQueued"
+	EventAgentPromptQueueRemoved    EventType = "AgentPromptQueueRemoved"
 )
 
 type Event struct {
@@ -88,6 +91,20 @@ type AgentInputRequestPayload struct {
 type AgentInputRequestOption struct {
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
+}
+
+type AgentPromptQueuedPayload struct {
+	QueueID   string    `json:"queue_id"`
+	MessageID string    `json:"message_id"`
+	AgentID   string    `json:"agent_id"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"created_at"`
+	CanSteer  bool      `json:"can_steer"`
+}
+
+type AgentPromptQueueRemovedPayload struct {
+	QueueID string `json:"queue_id"`
+	Status  string `json:"status"`
 }
 
 type TeamMetadata struct {

@@ -1,6 +1,8 @@
 package codexpersist
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/meteorsky/agentx/internal/runtime"
@@ -101,6 +103,91 @@ func TestNotificationErrorMarksThreadNotFoundAsStale(t *testing.T) {
 	}
 }
 
+func TestTurnCompletedInterruptedEmitsCanceled(t *testing.T) {
+	s := &persistentSession{events: make(chan runtime.Event, 1)}
+	state := newNotificationState()
+	state.writeText("partial answer")
+
+	terminal := s.handleNotification(jsonRPCMessage{
+		Method: "turn/completed",
+		Params: map[string]any{
+			"turn": map[string]any{
+				"status": "interrupted",
+			},
+		},
+	}, state)
+
+	if !terminal {
+		t.Fatalf("interrupted turn should be terminal")
+	}
+	evt := <-s.events
+	if evt.Type != runtime.EventCanceled {
+		t.Fatalf("event type = %v, want canceled", evt.Type)
+	}
+	if evt.Text != "partial answer" {
+		t.Fatalf("event text = %q, want partial answer", evt.Text)
+	}
+}
+
+func TestTurnStartResultSetsActiveTurnID(t *testing.T) {
+	s := &persistentSession{}
+
+	s.setActiveTurnID(turnIDFromResult(map[string]any{
+		"turn": map[string]any{
+			"id": "turn_123",
+		},
+	}))
+
+	if s.activeTurnID != "turn_123" {
+		t.Fatalf("active turn id = %q, want turn_123", s.activeTurnID)
+	}
+}
+
+func TestSteerSendsTurnSteerWithActiveThreadAndTurn(t *testing.T) {
+	rpc := &recordingSessionRPC{}
+	s := &persistentSession{
+		rpc:          rpc,
+		alive:        true,
+		threadID:     "thread_123",
+		activeTurnID: "turn_456",
+	}
+
+	if err := s.Steer(context.Background(), runtime.Input{Prompt: "use this too"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if rpc.method != "turn/steer" {
+		t.Fatalf("method = %q, want turn/steer", rpc.method)
+	}
+	params, ok := rpc.params.(map[string]any)
+	if !ok {
+		t.Fatalf("params = %#v, want map", rpc.params)
+	}
+	if got := params["threadId"]; got != "thread_123" {
+		t.Fatalf("threadId = %#v, want thread_123", got)
+	}
+	if got := params["expectedTurnId"]; got != "turn_456" {
+		t.Fatalf("expectedTurnId = %#v, want turn_456", got)
+	}
+	input, ok := params["input"].([]map[string]any)
+	if !ok || len(input) != 1 || input[0]["text"] != "use this too" {
+		t.Fatalf("input = %#v, want text input", params["input"])
+	}
+}
+
+func TestSteerReturnsErrorWithoutActiveTurn(t *testing.T) {
+	s := &persistentSession{
+		rpc:      &recordingSessionRPC{},
+		alive:    true,
+		threadID: "thread_123",
+	}
+
+	err := s.Steer(context.Background(), runtime.Input{Prompt: "late"})
+	if err == nil || !errors.Is(err, errNoActiveTurn) {
+		t.Fatalf("Steer error = %v, want no active turn", err)
+	}
+}
+
 func TestBuildUserInputTreatsOnlyImageKindAsLocalImage(t *testing.T) {
 	items := buildUserInput(runtime.Input{
 		Prompt: "inspect this file",
@@ -119,6 +206,25 @@ func TestBuildUserInputTreatsOnlyImageKindAsLocalImage(t *testing.T) {
 	if got := items[0]["type"]; got != "text" {
 		t.Fatalf("first item type = %#v, want text", got)
 	}
+}
+
+type recordingSessionRPC struct {
+	method string
+	params any
+}
+
+func (r *recordingSessionRPC) Call(ctx context.Context, method string, params any) (map[string]any, error) {
+	r.method = method
+	r.params = params
+	return map[string]any{}, nil
+}
+
+func (r *recordingSessionRPC) Notifications() <-chan jsonRPCMessage {
+	return make(chan jsonRPCMessage)
+}
+
+func (r *recordingSessionRPC) RespondToRequest(id any, result any) error {
+	return nil
 }
 
 func TestEmitAfterCloseEventStreamDoesNotPanic(t *testing.T) {

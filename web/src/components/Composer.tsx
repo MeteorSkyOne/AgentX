@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent } from "react";
 import { skipToken, useQuery } from "@tanstack/react-query";
-import { AlertCircle, BookOpen, FileText, Image as ImageIcon, Paperclip, Reply, Send, Terminal, X } from "lucide-react";
+import { AlertCircle, ArrowUp, BookOpen, FileText, Image as ImageIcon, Paperclip, Reply, Send, Terminal, X } from "lucide-react";
 import { conversationSkills, sendMessage } from "../api/client";
 import type { Agent, ConversationAgentSkills, ConversationSkill, ConversationType, Message } from "../api/types";
+import type { QueuedPrompt } from "./shell/types";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -24,18 +25,22 @@ interface ComposerProps {
     label: string;
   };
   typingAgents?: TypingAgent[];
+  queuedPrompts?: QueuedPrompt[];
   mentionAgents?: Pick<Agent, "id" | "name" | "handle" | "kind" | "bot_user_id">[];
   replyToMessage?: Message | null;
   onCancelReplyTo?: () => void;
+  onSteerQueuedPrompt?: (queueID: string) => Promise<void>;
   onSent: (message: Message) => void;
 }
 
 export function Composer({
   conversation,
   typingAgents,
+  queuedPrompts = [],
   mentionAgents = [],
   replyToMessage,
   onCancelReplyTo,
+  onSteerQueuedPrompt,
   onSent
 }: ComposerProps) {
   const [body, setBody] = useState("");
@@ -43,6 +48,7 @@ export function Composer({
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [steeringQueueIDs, setSteeringQueueIDs] = useState<Set<string>>(() => new Set());
   const [caret, setCaret] = useState(0);
   const [commandIndex, setCommandIndex] = useState(0);
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -337,6 +343,21 @@ export function Composer({
         : `${typingAgents.map((a) => a.name).join(", ")} are typing`
       : null;
 
+  async function handleSteerQueuedPrompt(queueID: string) {
+    if (!onSteerQueuedPrompt) return;
+    setSteeringQueueIDs((current) => new Set(current).add(queueID));
+    try {
+      await onSteerQueuedPrompt(queueID);
+    } catch (err) {
+      setSteeringQueueIDs((current) => {
+        const next = new Set(current);
+        next.delete(queueID);
+        return next;
+      });
+      setError(err instanceof Error ? err.message : "Steer failed");
+    }
+  }
+
   return (
     <div
       className="shrink-0 border-t border-border bg-background/95 px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-4"
@@ -344,14 +365,54 @@ export function Composer({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {typingLabel && (
-        <div className="flex items-center gap-2 px-1 py-1.5 text-xs text-muted-foreground">
-          <span className="flex gap-0.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:0ms]" />
-            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:150ms]" />
-            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:300ms]" />
-          </span>
-          <span>{typingLabel}</span>
+      {(typingLabel || queuedPrompts.length > 0) && (
+        <div className="space-y-1 px-1 pb-2 text-xs text-muted-foreground">
+          {typingLabel && (
+            <div className="flex items-center gap-2 py-1">
+              <span className="flex gap-0.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:0ms]" />
+                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:150ms]" />
+                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:300ms]" />
+              </span>
+              <span>{typingLabel}</span>
+            </div>
+          )}
+          {queuedPrompts.length > 0 && (
+            <div className="space-y-1">
+              <div className="font-medium text-foreground">Message queue</div>
+              <div className="flex flex-col gap-1">
+                {queuedPrompts.map((item) => {
+                  const agent = mentionAgents.find((candidate) => candidate.id === item.agentID);
+                  const steering = steeringQueueIDs.has(item.queueID);
+                  return (
+                    <div
+                      key={item.queueID}
+                      className="flex min-h-8 items-center gap-2 rounded-md border border-border bg-muted/35 px-2 py-1"
+                    >
+                      <span className="shrink-0 font-medium text-foreground">
+                        {agent?.name ?? "Agent"}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">{messagePreview(item.body)}</span>
+                      {item.canSteer && onSteerQueuedPrompt ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 shrink-0"
+                          title="Steer into current turn"
+                          aria-label="Steer into current turn"
+                          disabled={steering}
+                          onClick={() => void handleSteerQueuedPrompt(item.queueID)}
+                        >
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        </Button>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
       <form onSubmit={handleSubmit}>
@@ -588,6 +649,7 @@ const slashCommands: SlashCommandDefinition[] = [
   { kind: "command", name: "push", description: "Push the current branch" },
   { kind: "command", name: "review", description: "Review workspace changes" },
   { kind: "command", name: "stop", description: "Stop active agent runs" },
+  { kind: "command", name: "cancel", description: "Cancel active agent streams" },
   { kind: "command", name: "discuss", description: "Start a multi-agent discussion" }
 ];
 

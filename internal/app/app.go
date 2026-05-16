@@ -55,6 +55,12 @@ type activeRunKey struct {
 	agentID          string
 }
 
+type messageQueueKey struct {
+	conversationType domain.ConversationType
+	conversationID   string
+	agentID          string
+}
+
 type activeAgentRun struct {
 	mu               sync.Mutex
 	runID            string
@@ -68,8 +74,14 @@ type activeAgentRun struct {
 	process          []domain.ProcessItem
 	team             *domain.TeamMetadata
 	pendingQuestion  *domain.AgentInputRequestPayload
+	cancelRequested  bool
 	cancel           context.CancelCauseFunc
 	session          agentruntime.Session
+}
+
+type cancelAgentRunResult struct {
+	requested   int
+	unsupported int
 }
 
 type ActiveRunReplay struct {
@@ -90,6 +102,9 @@ type App struct {
 	pendingQuestions   map[pendingQuestionKey]*pendingQuestion
 	activeRunsMu       sync.Mutex
 	activeRuns         map[activeRunKey]map[string]*activeAgentRun
+	messageQueueMu     sync.Mutex
+	messageQueue       map[messageQueueKey][]*queuedAgentPrompt
+	messageQueueByID   map[string]*queuedAgentPrompt
 	scheduledRunsMu    sync.Mutex
 	scheduledRuns      map[string]struct{}
 }
@@ -114,6 +129,8 @@ func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
 		terminals:        newTerminalManager(opts.Terminal),
 		pendingQuestions: make(map[pendingQuestionKey]*pendingQuestion),
 		activeRuns:       make(map[activeRunKey]map[string]*activeAgentRun),
+		messageQueue:     make(map[messageQueueKey][]*queuedAgentPrompt),
+		messageQueueByID: make(map[string]*queuedAgentPrompt),
 		scheduledRuns:    make(map[string]struct{}),
 	}
 }
@@ -169,11 +186,22 @@ func (a *App) registerActiveAgentRun(key activeRunKey, run *activeAgentRun) {
 	runs[run.runID] = run
 }
 
-func (a *App) setActiveAgentRunSession(key activeRunKey, runID string, session agentruntime.Session) {
+func (a *App) setActiveAgentRunSession(ctx context.Context, key activeRunKey, runID string, session agentruntime.Session) {
+	var interrupt agentruntime.Session
 	a.activeRunsMu.Lock()
-	defer a.activeRunsMu.Unlock()
 	if run := a.activeRuns[key][runID]; run != nil {
+		run.mu.Lock()
 		run.session = session
+		if run.cancelRequested {
+			if _, ok := session.(agentruntime.Interrupter); ok {
+				interrupt = session
+			}
+		}
+		run.mu.Unlock()
+	}
+	a.activeRunsMu.Unlock()
+	if interrupt != nil {
+		go interruptAgentRunSession(context.WithoutCancel(ctx), interrupt)
 	}
 }
 
@@ -224,6 +252,54 @@ func (a *App) stopActiveAgentRuns(ctx context.Context, key activeRunKey) int {
 	return len(stopping)
 }
 
+func (a *App) cancelActiveAgentRuns(ctx context.Context, key activeRunKey) cancelAgentRunResult {
+	a.activeRunsMu.Lock()
+	runs := a.activeRuns[key]
+	if len(runs) == 0 {
+		a.activeRunsMu.Unlock()
+		return cancelAgentRunResult{}
+	}
+	canceling := make([]agentruntime.Session, 0, len(runs))
+	var result cancelAgentRunResult
+	for _, run := range runs {
+		run.mu.Lock()
+		session := run.session
+		if run.cancelRequested {
+			result.requested++
+			run.mu.Unlock()
+			continue
+		}
+		if session == nil {
+			run.cancelRequested = true
+			run.pendingQuestion = nil
+			result.requested++
+			run.mu.Unlock()
+			continue
+		}
+		_, ok := session.(agentruntime.Interrupter)
+		if !ok {
+			result.unsupported++
+			run.mu.Unlock()
+			continue
+		}
+		run.cancelRequested = true
+		run.pendingQuestion = nil
+		run.mu.Unlock()
+		canceling = append(canceling, session)
+		result.requested++
+	}
+	a.activeRunsMu.Unlock()
+
+	if len(canceling) == 0 {
+		return result
+	}
+	a.removePendingQuestions(key.conversationType, key.conversationID)
+	for _, session := range canceling {
+		go interruptAgentRunSession(context.WithoutCancel(ctx), session)
+	}
+	return result
+}
+
 func stopAgentRunSession(ctx context.Context, session agentruntime.Session) {
 	closeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -232,6 +308,16 @@ func stopAgentRunSession(ctx context.Context, session agentruntime.Session) {
 		return
 	}
 	_ = session.Close(closeCtx)
+}
+
+func interruptAgentRunSession(ctx context.Context, session agentruntime.Session) {
+	interruptCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	interrupter, ok := session.(agentruntime.Interrupter)
+	if !ok {
+		return
+	}
+	_ = interrupter.Interrupt(interruptCtx)
 }
 
 func (a *App) ActiveRunReplayEvents(organizationID string, conversationType domain.ConversationType, conversationID string) map[string]ActiveRunReplay {

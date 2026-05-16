@@ -51,6 +51,15 @@ export interface PendingQuestion {
   options?: Array<{ label: string; description?: string }>;
 }
 
+export interface QueuedPrompt {
+  queueID: string;
+  messageID: string;
+  agentID: string;
+  body: string;
+  createdAt: string;
+  canSteer: boolean;
+}
+
 export interface ComposerConversation {
   type: ConversationType;
   id: string;
@@ -77,6 +86,7 @@ export interface ShellProps {
   hasOlderMessages: boolean;
   streaming: StreamingMessage[];
   pendingQuestion?: PendingQuestion | null;
+  queuedPrompts: QueuedPrompt[];
   connectionStatus: SocketConnectionStatus;
   notificationSettings?: NotificationSettings;
   notificationSettingsLoading: boolean;
@@ -171,6 +181,7 @@ export interface ShellProps {
   onDeleteMessage: (message: Message) => Promise<void>;
   onLoadOlderMessages: () => boolean;
   onRespondToQuestion?: (questionID: string, answer: string) => Promise<void>;
+  onSteerQueuedPrompt?: (queueID: string) => Promise<void>;
   onMessageSent: (message: Message) => void;
   onToggleTheme: () => void;
   onLogout: () => void;

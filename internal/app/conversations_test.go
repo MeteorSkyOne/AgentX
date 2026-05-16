@@ -2213,6 +2213,450 @@ func TestSlashStopInitiatesStopBeforeReturning(t *testing.T) {
 	}
 }
 
+func TestSlashCancelInterruptsActiveAgentRun(t *testing.T) {
+	ctx := context.Background()
+	app, bus, bootstrap := newConversationTestApp(t, ctx)
+	blocking := newBlockingInterruptRuntime()
+	app.opts.Runtimes[domain.AgentKindFake] = blocking
+
+	events, unsubscribe := bus.Subscribe(ctx, eventbus.Filter{
+		OrganizationID: bootstrap.Organization.ID,
+		ConversationID: bootstrap.Channel.ID,
+	})
+	defer unsubscribe()
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "keep running",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blocking.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for blocking runtime start")
+	}
+
+	message, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/cancel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.SenderType != domain.SenderSystem || message.Body != "Cancel requested for 1 active agent run" || message.Metadata["command_name"] != "cancel" {
+		t.Fatalf("/cancel message = %#v", message)
+	}
+
+	select {
+	case <-blocking.interrupted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for runtime interrupt")
+	}
+
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-events:
+			if evt.Type != domain.EventAgentRunCanceled {
+				continue
+			}
+			payload, ok := evt.Payload.(domain.AgentRunPayload)
+			if !ok {
+				t.Fatalf("canceled payload type = %T, want domain.AgentRunPayload", evt.Payload)
+			}
+			if payload.AgentID != bootstrap.Agent.ID {
+				t.Fatalf("canceled payload = %#v", payload)
+			}
+			return
+		case <-timeout:
+			t.Fatal("timed out waiting for canceled run event")
+		}
+	}
+}
+
+func TestSlashCancelDoesNotCloseUnsupportedRuntime(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+	blocking := newBlockingRuntime()
+	app.opts.Runtimes[domain.AgentKindFake] = blocking
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "keep running",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blocking.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for blocking runtime start")
+	}
+
+	message, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/cancel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.Body != "No cancellable active agent runs (/cancel is only supported by runtimes with soft interrupt)" {
+		t.Fatalf("/cancel message body = %q", message.Body)
+	}
+
+	select {
+	case <-blocking.closed:
+		t.Fatal("/cancel closed an unsupported runtime")
+	default:
+	}
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/stop",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blocking.closed:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for /stop cleanup")
+	}
+}
+
+func TestSlashCancelQueuesBeforeRuntimeSessionStarts(t *testing.T) {
+	ctx := context.Background()
+	app, bus, bootstrap := newConversationTestApp(t, ctx)
+	blocking := newStartBlockingInterruptRuntime()
+	app.opts.Runtimes[domain.AgentKindFake] = blocking
+
+	events, unsubscribe := bus.Subscribe(ctx, eventbus.Filter{
+		OrganizationID: bootstrap.Organization.ID,
+		ConversationID: bootstrap.Channel.ID,
+	})
+	defer unsubscribe()
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "keep running",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blocking.startEntered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for StartSession")
+	}
+
+	message, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/cancel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.Body != "Cancel requested for 1 active agent run" {
+		t.Fatalf("/cancel message body = %q", message.Body)
+	}
+
+	close(blocking.releaseStart)
+	select {
+	case <-blocking.interrupted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for queued runtime interrupt")
+	}
+
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-events:
+			if evt.Type == domain.EventAgentRunCanceled {
+				return
+			}
+		case <-timeout:
+			t.Fatal("timed out waiting for queued canceled run event")
+		}
+	}
+}
+
+func TestSendMessageQueuesPromptWhileAgentRunActive(t *testing.T) {
+	ctx := context.Background()
+	app, bus, bootstrap := newConversationTestApp(t, ctx)
+	rt := newManualQueueRuntime()
+	app.opts.Runtimes[domain.AgentKindFake] = rt
+
+	events, unsubscribe := bus.Subscribe(ctx, eventbus.Filter{
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+	})
+	defer unsubscribe()
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "first",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	firstSession := rt.nextSession(t)
+	_ = firstSession.sentInput(t)
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "second",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	queued := requirePromptQueuedEvent(t, events)
+	if queued.MessageID == "" || queued.AgentID != bootstrap.Agent.ID || queued.Body != "second" || queued.CanSteer {
+		t.Fatalf("queued payload = %#v", queued)
+	}
+	replays := app.PromptQueueReplayEvents(bootstrap.Organization.ID, domain.ConversationChannel, bootstrap.Channel.ID)
+	replay := replays[queued.QueueID]
+	if len(replay.Events) != 1 || replay.Events[0].Type != domain.EventAgentPromptQueued {
+		t.Fatalf("queue replay = %#v, want queued prompt event", replay)
+	}
+	if got := rt.startCount(); got != 1 {
+		t.Fatalf("runtime starts = %d, want 1 before active run completes", got)
+	}
+
+	firstSession.complete("done")
+	removed := requirePromptQueueRemovedEvent(t, events)
+	if removed.QueueID != queued.QueueID || removed.Status != "started" {
+		t.Fatalf("removed payload = %#v, want queue %q started", removed, queued.QueueID)
+	}
+	secondSession := rt.nextSession(t)
+	input := secondSession.sentInput(t)
+	if input.Prompt != "second" {
+		t.Fatalf("queued run prompt = %q, want second", input.Prompt)
+	}
+}
+
+func TestAgentRunFailureClearsQueuedPrompts(t *testing.T) {
+	ctx := context.Background()
+	app, bus, bootstrap := newConversationTestApp(t, ctx)
+	rt := newManualQueueRuntime()
+	app.opts.Runtimes[domain.AgentKindFake] = rt
+
+	events, unsubscribe := bus.Subscribe(ctx, eventbus.Filter{
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+	})
+	defer unsubscribe()
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "first",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	firstSession := rt.nextSession(t)
+	_ = firstSession.sentInput(t)
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "second",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	queued := requirePromptQueuedEvent(t, events)
+	firstSession.fail("boom")
+
+	removed := requirePromptQueueRemovedEvent(t, events)
+	if removed.QueueID != queued.QueueID || removed.Status != "failed" {
+		t.Fatalf("removed payload = %#v, want queue %q failed", removed, queued.QueueID)
+	}
+	if got := rt.startCount(); got != 1 {
+		t.Fatalf("runtime starts = %d, want queued prompt not started after failure", got)
+	}
+}
+
+func TestSlashStopClearsQueuedPrompts(t *testing.T) {
+	ctx := context.Background()
+	app, bus, bootstrap := newConversationTestApp(t, ctx)
+	rt := newManualQueueRuntime()
+	app.opts.Runtimes[domain.AgentKindFake] = rt
+
+	events, unsubscribe := bus.Subscribe(ctx, eventbus.Filter{
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+	})
+	defer unsubscribe()
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "first",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = rt.nextSession(t)
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "second",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	queued := requirePromptQueuedEvent(t, events)
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/stop",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	removed := requirePromptQueueRemovedEvent(t, events)
+	if removed.QueueID != queued.QueueID || removed.Status != "canceled" {
+		t.Fatalf("removed payload = %#v, want queue %q canceled", removed, queued.QueueID)
+	}
+	if got := rt.startCount(); got != 1 {
+		t.Fatalf("runtime starts = %d, want queued prompt not started after /stop", got)
+	}
+}
+
+func TestSteerQueuedPromptUsesActiveCodexSteerer(t *testing.T) {
+	ctx := context.Background()
+	app, bus, bootstrap := newConversationTestApp(t, ctx)
+	kind := domain.AgentKindCodexPersistent
+	if _, err := app.UpdateAgent(ctx, bootstrap.Agent.ID, AgentUpdateRequest{Kind: &kind}); err != nil {
+		t.Fatal(err)
+	}
+	rt := newManualQueueRuntime()
+	app.opts.Runtimes[domain.AgentKindCodexPersistent] = rt
+
+	events, unsubscribe := bus.Subscribe(ctx, eventbus.Filter{
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+	})
+	defer unsubscribe()
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "first",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	firstSession := rt.nextSession(t)
+	_ = firstSession.sentInput(t)
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "second",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	queued := requirePromptQueuedEvent(t, events)
+	if !queued.CanSteer {
+		t.Fatalf("queued payload can_steer = false, want true: %#v", queued)
+	}
+
+	if err := app.SteerQueuedPrompt(ctx, domain.ConversationChannel, bootstrap.Channel.ID, queued.QueueID); err != nil {
+		t.Fatal(err)
+	}
+	steered := firstSession.steeredInput(t)
+	if steered.Prompt != "second" {
+		t.Fatalf("steered prompt = %q, want second", steered.Prompt)
+	}
+	removed := requirePromptQueueRemovedEvent(t, events)
+	if removed.QueueID != queued.QueueID || removed.Status != "steered" {
+		t.Fatalf("removed payload = %#v, want queue %q steered", removed, queued.QueueID)
+	}
+}
+
+func requirePromptQueuedEvent(t *testing.T, events <-chan domain.Event) domain.AgentPromptQueuedPayload {
+	t.Helper()
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-events:
+			if evt.Type != domain.EventAgentPromptQueued {
+				continue
+			}
+			payload, ok := evt.Payload.(domain.AgentPromptQueuedPayload)
+			if !ok {
+				t.Fatalf("queued payload type = %T, want domain.AgentPromptQueuedPayload", evt.Payload)
+			}
+			return payload
+		case <-timeout:
+			t.Fatal("timed out waiting for AgentPromptQueued")
+			return domain.AgentPromptQueuedPayload{}
+		}
+	}
+}
+
+func requirePromptQueueRemovedEvent(t *testing.T, events <-chan domain.Event) domain.AgentPromptQueueRemovedPayload {
+	t.Helper()
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-events:
+			if evt.Type != domain.EventAgentPromptQueueRemoved {
+				continue
+			}
+			payload, ok := evt.Payload.(domain.AgentPromptQueueRemovedPayload)
+			if !ok {
+				t.Fatalf("removed payload type = %T, want domain.AgentPromptQueueRemovedPayload", evt.Payload)
+			}
+			return payload
+		case <-timeout:
+			t.Fatal("timed out waiting for AgentPromptQueueRemoved")
+			return domain.AgentPromptQueueRemovedPayload{}
+		}
+	}
+}
+
 func TestActiveRunReplayEventsIncludeStreamingAndPendingQuestion(t *testing.T) {
 	ctx := context.Background()
 	app, bus, bootstrap := newConversationTestApp(t, ctx)
@@ -3554,6 +3998,243 @@ func (s *blockingStopSession) closeEvents() {
 	s.closeOnce.Do(func() {
 		close(s.events)
 	})
+}
+
+type blockingInterruptRuntime struct {
+	started     chan struct{}
+	interrupted chan struct{}
+	closed      chan struct{}
+}
+
+func newBlockingInterruptRuntime() *blockingInterruptRuntime {
+	return &blockingInterruptRuntime{
+		started:     make(chan struct{}),
+		interrupted: make(chan struct{}),
+		closed:      make(chan struct{}),
+	}
+}
+
+func (r *blockingInterruptRuntime) StartSession(ctx context.Context, req agentruntime.StartSessionRequest) (agentruntime.Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return &blockingInterruptSession{
+		id:          "blocking-interrupt:" + req.SessionKey,
+		events:      make(chan agentruntime.Event, 1),
+		started:     r.started,
+		interrupted: r.interrupted,
+		closed:      r.closed,
+	}, nil
+}
+
+type blockingInterruptSession struct {
+	id            string
+	events        chan agentruntime.Event
+	started       chan struct{}
+	interrupted   chan struct{}
+	closed        chan struct{}
+	startedOnce   sync.Once
+	interruptOnce sync.Once
+	closeOnce     sync.Once
+}
+
+func (s *blockingInterruptSession) Send(ctx context.Context, input agentruntime.Input) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.startedOnce.Do(func() {
+		close(s.started)
+	})
+	return nil
+}
+
+func (s *blockingInterruptSession) Events() <-chan agentruntime.Event {
+	return s.events
+}
+
+func (s *blockingInterruptSession) CurrentSessionID() string {
+	return s.id
+}
+
+func (s *blockingInterruptSession) Alive() bool {
+	return true
+}
+
+func (s *blockingInterruptSession) RespondToInputRequest(questionID string, answer string) error {
+	return nil
+}
+
+func (s *blockingInterruptSession) Close(ctx context.Context) error {
+	s.closeOnce.Do(func() {
+		close(s.closed)
+		close(s.events)
+	})
+	return nil
+}
+
+func (s *blockingInterruptSession) Interrupt(ctx context.Context) error {
+	s.interruptOnce.Do(func() {
+		close(s.interrupted)
+		s.events <- agentruntime.Event{Type: agentruntime.EventCanceled}
+	})
+	return nil
+}
+
+type startBlockingInterruptRuntime struct {
+	startEntered chan struct{}
+	releaseStart chan struct{}
+	interrupted  chan struct{}
+}
+
+func newStartBlockingInterruptRuntime() *startBlockingInterruptRuntime {
+	return &startBlockingInterruptRuntime{
+		startEntered: make(chan struct{}),
+		releaseStart: make(chan struct{}),
+		interrupted:  make(chan struct{}),
+	}
+}
+
+func (r *startBlockingInterruptRuntime) StartSession(ctx context.Context, req agentruntime.StartSessionRequest) (agentruntime.Session, error) {
+	select {
+	case <-r.startEntered:
+	default:
+		close(r.startEntered)
+	}
+	select {
+	case <-r.releaseStart:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return &blockingInterruptSession{
+		id:          "start-blocking-interrupt:" + req.SessionKey,
+		events:      make(chan agentruntime.Event, 1),
+		started:     make(chan struct{}),
+		interrupted: r.interrupted,
+		closed:      make(chan struct{}),
+	}, nil
+}
+
+type manualQueueRuntime struct {
+	mu       sync.Mutex
+	starts   int
+	sessions chan *manualQueueSession
+}
+
+func newManualQueueRuntime() *manualQueueRuntime {
+	return &manualQueueRuntime{
+		sessions: make(chan *manualQueueSession, 8),
+	}
+}
+
+func (r *manualQueueRuntime) StartSession(ctx context.Context, req agentruntime.StartSessionRequest) (agentruntime.Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	r.starts++
+	r.mu.Unlock()
+	session := &manualQueueSession{
+		id:      "manual-queue:" + req.SessionKey,
+		events:  make(chan agentruntime.Event, 4),
+		sent:    make(chan agentruntime.Input, 1),
+		steered: make(chan agentruntime.Input, 1),
+	}
+	r.sessions <- session
+	return session, nil
+}
+
+func (r *manualQueueRuntime) nextSession(t *testing.T) *manualQueueSession {
+	t.Helper()
+	select {
+	case session := <-r.sessions:
+		return session
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for runtime session")
+		return nil
+	}
+}
+
+func (r *manualQueueRuntime) startCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.starts
+}
+
+type manualQueueSession struct {
+	id        string
+	events    chan agentruntime.Event
+	sent      chan agentruntime.Input
+	steered   chan agentruntime.Input
+	closeOnce sync.Once
+}
+
+func (s *manualQueueSession) Send(ctx context.Context, input agentruntime.Input) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.sent <- input
+	return nil
+}
+
+func (s *manualQueueSession) Events() <-chan agentruntime.Event {
+	return s.events
+}
+
+func (s *manualQueueSession) CurrentSessionID() string {
+	return s.id
+}
+
+func (s *manualQueueSession) Alive() bool {
+	return true
+}
+
+func (s *manualQueueSession) RespondToInputRequest(questionID string, answer string) error {
+	return nil
+}
+
+func (s *manualQueueSession) Close(ctx context.Context) error {
+	s.closeOnce.Do(func() {
+		close(s.events)
+	})
+	return nil
+}
+
+func (s *manualQueueSession) Steer(ctx context.Context, input agentruntime.Input) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.steered <- input
+	return nil
+}
+
+func (s *manualQueueSession) complete(text string) {
+	s.events <- agentruntime.Event{Type: agentruntime.EventCompleted, Text: text}
+}
+
+func (s *manualQueueSession) fail(message string) {
+	s.events <- agentruntime.Event{Type: agentruntime.EventFailed, Error: message}
+}
+
+func (s *manualQueueSession) sentInput(t *testing.T) agentruntime.Input {
+	t.Helper()
+	select {
+	case input := <-s.sent:
+		return input
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for session input")
+		return agentruntime.Input{}
+	}
+}
+
+func (s *manualQueueSession) steeredInput(t *testing.T) agentruntime.Input {
+	t.Helper()
+	select {
+	case input := <-s.steered:
+		return input
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for steered input")
+		return agentruntime.Input{}
+	}
 }
 
 type capturedInput struct {

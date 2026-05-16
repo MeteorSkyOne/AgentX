@@ -330,6 +330,7 @@ function shellProps(): ShellProps {
     olderMessagesLoading: false,
     hasOlderMessages: false,
     streaming: [],
+    queuedPrompts: [],
     connectionStatus: "connected",
     notificationSettingsLoading: false,
     serverSettingsLoading: false,

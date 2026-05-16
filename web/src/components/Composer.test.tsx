@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import type { ComponentProps } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -86,6 +87,14 @@ describe("Composer slash command autocomplete", () => {
 
     expect(screen.getByText("/stop")).toBeTruthy();
     expect(screen.queryByText("/skill")).toBeNull();
+  });
+
+  it("shows the static /cancel command", () => {
+    const textarea = renderComposer({ skills: [] });
+
+    setTextareaValue(textarea, "/ca", 3);
+
+    expect(screen.getByText("/cancel")).toBeTruthy();
   });
 
   it("shows dynamic skills after the API data loads", async () => {
@@ -209,12 +218,60 @@ describe("Composer mention autocomplete", () => {
   });
 });
 
+describe("Composer message queue", () => {
+  it("shows queued prompts in the activity strip", () => {
+    renderComposer({
+      skills: [],
+      queuedPrompts: [
+        {
+          queueID: "queue_1",
+          messageID: "msg_1",
+          agentID: "agt_codex",
+          body: "please do this after the current run",
+          createdAt: "2026-05-02T00:00:00Z",
+          canSteer: false
+        }
+      ]
+    });
+
+    expect(screen.getByText("Message queue")).toBeTruthy();
+    expect(screen.getByText("please do this after the current run")).toBeTruthy();
+    expect(screen.queryByLabelText("Steer into current turn")).toBeNull();
+  });
+
+  it("renders a steer button for steerable queued prompts", () => {
+    const onSteerQueuedPrompt = vi.fn().mockResolvedValue(undefined);
+    renderComposer({
+      skills: [],
+      queuedPrompts: [
+        {
+          queueID: "queue_1",
+          messageID: "msg_1",
+          agentID: "agt_codex",
+          body: "steer this",
+          createdAt: "2026-05-02T00:00:00Z",
+          canSteer: true
+        }
+      ],
+      onSteerQueuedPrompt
+    });
+
+    fireEvent.click(screen.getByLabelText("Steer into current turn"));
+
+    expect(onSteerQueuedPrompt).toHaveBeenCalledWith("queue_1");
+  });
+});
+
 function renderComposer({
   skills,
-  mentionAgents = [agent("agt_codex", "Codex", "codex")]
+  mentionAgents = [agent("agt_codex", "Codex", "codex")],
+  queuedPrompts = [],
+  onSteerQueuedPrompt
 }: {
   skills: ConversationAgentSkills[];
   mentionAgents?: Pick<Agent, "id" | "name" | "handle" | "kind" | "bot_user_id">[];
+  queuedPrompts?: ComponentProps<typeof Composer>["queuedPrompts"];
+  onSteerQueuedPrompt?: ComponentProps<typeof Composer>["onSteerQueuedPrompt"];
 }): HTMLTextAreaElement {
   vi.mocked(conversationSkills).mockResolvedValue(skills);
   vi.mocked(sendMessage).mockResolvedValue({
@@ -238,6 +295,8 @@ function renderComposer({
       <Composer
         conversation={{ type: "channel", id: "chn_1", label: "#general" }}
         mentionAgents={mentionAgents}
+        queuedPrompts={queuedPrompts}
+        onSteerQueuedPrompt={onSteerQueuedPrompt}
         onSent={() => undefined}
       />
     </QueryClientProvider>

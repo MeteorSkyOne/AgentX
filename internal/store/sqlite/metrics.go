@@ -198,8 +198,12 @@ SELECT '' AS run_id, org_id,
     ELSE 'mixed'
   END AS model,
   CASE
-    WHEN SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) = 0 THEN 'completed'
-    WHEN SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) = 0 THEN 'failed'
+    WHEN SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) = 0
+      AND SUM(CASE WHEN status = 'canceled' THEN 1 ELSE 0 END) = 0 THEN 'completed'
+    WHEN SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) = 0
+      AND SUM(CASE WHEN status = 'canceled' THEN 1 ELSE 0 END) = 0 THEN 'failed'
+    WHEN SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) = 0
+      AND SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) = 0 THEN 'canceled'
     ELSE 'mixed'
   END AS status,
   MAX(started_at) AS started_at,

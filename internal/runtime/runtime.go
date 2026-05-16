@@ -99,6 +99,7 @@ const (
 	EventDelta        EventType = "delta"
 	EventCompleted    EventType = "completed"
 	EventFailed       EventType = "failed"
+	EventCanceled     EventType = "canceled"
 	EventInputRequest EventType = "input_request"
 )
 
@@ -168,6 +169,14 @@ type Session interface {
 
 type Stopper interface {
 	Stop(ctx context.Context) error
+}
+
+type Interrupter interface {
+	Interrupt(ctx context.Context) error
+}
+
+type Steerer interface {
+	Steer(ctx context.Context, input Input) error
 }
 
 type StopInitiator interface {

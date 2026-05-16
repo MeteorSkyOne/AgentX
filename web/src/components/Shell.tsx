@@ -141,6 +141,7 @@ export function Shell({
   hasOlderMessages,
   streaming,
   pendingQuestion,
+  queuedPrompts,
   connectionStatus,
   notificationSettings,
   notificationSettingsLoading,
@@ -184,6 +185,7 @@ export function Shell({
   onDeleteMessage,
   onLoadOlderMessages,
   onRespondToQuestion,
+  onSteerQueuedPrompt,
   onMessageSent,
   onToggleTheme,
   onLogout
@@ -1131,6 +1133,7 @@ export function Shell({
               hasOlderMessages={hasOlderMessages}
               streaming={streaming}
               pendingQuestion={pendingQuestion}
+              queuedPrompts={queuedPrompts}
               boundAgents={boundAgents}
               preferences={preferences}
               theme={theme}
@@ -1143,6 +1146,7 @@ export function Shell({
               onDeleteMessage={onDeleteMessage}
               onLoadOlderMessages={onLoadOlderMessages}
               onRespondToQuestion={onRespondToQuestion}
+              onSteerQueuedPrompt={onSteerQueuedPrompt}
               onMessageSent={onMessageSent}
               workspacePath={projectWorkspace?.path}
               onOpenWorkspacePath={openWorkspacePath}
@@ -1817,6 +1821,7 @@ export function Shell({
                     hasOlderMessages={hasOlderMessages}
                     streaming={streaming}
                     pendingQuestion={pendingQuestion}
+                    queuedPrompts={queuedPrompts}
                     boundAgents={boundAgents}
                     preferences={preferences}
                     theme={theme}
@@ -1829,6 +1834,7 @@ export function Shell({
                     onDeleteMessage={onDeleteMessage}
                     onLoadOlderMessages={onLoadOlderMessages}
                     onRespondToQuestion={onRespondToQuestion}
+                    onSteerQueuedPrompt={onSteerQueuedPrompt}
                     onMessageSent={onMessageSent}
                     workspacePath={projectWorkspace?.path}
                     onOpenWorkspacePath={openWorkspacePath}

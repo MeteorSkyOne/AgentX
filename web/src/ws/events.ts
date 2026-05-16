@@ -82,6 +82,15 @@ export interface AgentRunCompletedEvent extends BaseEvent {
   };
 }
 
+export interface AgentRunCanceledEvent extends BaseEvent {
+  type: "AgentRunCanceled";
+  payload: {
+    run_id: string;
+    agent_id: string;
+    team?: TeamMetadata;
+  };
+}
+
 export interface AgentRunFailedEvent extends BaseEvent {
   type: "AgentRunFailed";
   payload: {
@@ -104,6 +113,26 @@ export interface AgentInputRequestEvent extends BaseEvent {
   };
 }
 
+export interface AgentPromptQueuedEvent extends BaseEvent {
+  type: "AgentPromptQueued";
+  payload: {
+    queue_id: string;
+    message_id: string;
+    agent_id: string;
+    body: string;
+    created_at: string;
+    can_steer: boolean;
+  };
+}
+
+export interface AgentPromptQueueRemovedEvent extends BaseEvent {
+  type: "AgentPromptQueueRemoved";
+  payload: {
+    queue_id: string;
+    status: "started" | "steered" | "canceled" | "failed";
+  };
+}
+
 export interface SubscribedEvent {
   type: "subscribed";
 }
@@ -118,8 +147,11 @@ export type AgentXEvent =
   | AgentRunStartedEvent
   | AgentOutputDeltaEvent
   | AgentRunCompletedEvent
+  | AgentRunCanceledEvent
   | AgentRunFailedEvent
-  | AgentInputRequestEvent;
+  | AgentInputRequestEvent
+  | AgentPromptQueuedEvent
+  | AgentPromptQueueRemovedEvent;
 
 export type SocketEvent = AgentXEvent | SubscribedEvent | { type?: unknown };
 
@@ -134,7 +166,10 @@ export function isAgentXEvent(event: SocketEvent): event is AgentXEvent {
     event.type === "AgentRunStarted" ||
     event.type === "AgentOutputDelta" ||
     event.type === "AgentRunCompleted" ||
+    event.type === "AgentRunCanceled" ||
     event.type === "AgentRunFailed" ||
-    event.type === "AgentInputRequest"
+    event.type === "AgentInputRequest" ||
+    event.type === "AgentPromptQueued" ||
+    event.type === "AgentPromptQueueRemoved"
   );
 }

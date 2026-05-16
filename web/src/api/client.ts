@@ -754,6 +754,19 @@ export function respondToInputRequest(
   );
 }
 
+export function steerQueuedPrompt(
+  type: ConversationType,
+  id: string,
+  queueID: string
+): Promise<void> {
+  return request<void>(
+    `/api/conversations/${encodeURIComponent(type)}/${encodeURIComponent(id)}/message-queue/${encodeURIComponent(queueID)}/steer`,
+    {
+      method: "POST"
+    }
+  );
+}
+
 export function fetchMessageProcessItem(
   messageID: string,
   index: number

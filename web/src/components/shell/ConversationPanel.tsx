@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Composer } from "../Composer";
 import { MessagePane } from "../MessagePane";
 import type { Channel, ConversationAgentContext, Message, Thread, UserPreferences } from "../../api/types";
-import type { ComposerConversation, PendingQuestion, ShellProps, StreamingMessage } from "./types";
+import type { ComposerConversation, PendingQuestion, QueuedPrompt, ShellProps, StreamingMessage } from "./types";
 import type { ThemeMode } from "../../theme";
 import type { WorkspacePathTarget } from "@/lib/workspacePaths";
 import { ThreadForum } from "./ThreadForum";
@@ -17,6 +17,7 @@ export function ConversationPanel({
   hasOlderMessages,
   streaming,
   pendingQuestion,
+  queuedPrompts,
   boundAgents,
   preferences,
   theme,
@@ -29,6 +30,7 @@ export function ConversationPanel({
   onDeleteMessage,
   onLoadOlderMessages,
   onRespondToQuestion,
+  onSteerQueuedPrompt,
   onMessageSent,
   workspacePath,
   onOpenWorkspacePath,
@@ -42,6 +44,7 @@ export function ConversationPanel({
   hasOlderMessages: boolean;
   streaming: StreamingMessage[];
   pendingQuestion?: PendingQuestion | null;
+  queuedPrompts: QueuedPrompt[];
   boundAgents: ConversationAgentContext[];
   preferences: UserPreferences;
   theme: ThemeMode;
@@ -54,6 +57,7 @@ export function ConversationPanel({
   onDeleteMessage: ShellProps["onDeleteMessage"];
   onLoadOlderMessages: ShellProps["onLoadOlderMessages"];
   onRespondToQuestion?: (questionID: string, answer: string) => Promise<void>;
+  onSteerQueuedPrompt?: (queueID: string) => Promise<void>;
   onMessageSent: ShellProps["onMessageSent"];
   workspacePath?: string;
   onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
@@ -141,6 +145,8 @@ export function ConversationPanel({
             const agent = boundAgents.find((b) => b.agent.id === s.agentID);
             return { name: agent?.agent.name ?? "Agent" };
           })}
+        queuedPrompts={queuedPrompts}
+        onSteerQueuedPrompt={onSteerQueuedPrompt}
         onSent={(message) => {
           clearReplyTarget();
           onMessageSent(message);

@@ -129,6 +129,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close(websocket.StatusInternalError, "failed to stream active runs")
 		return
 	}
+	promptQueueReplays := s.app.PromptQueueReplayEvents(resolvedOrganizationID, conversationType, msg.ConversationID)
+	if err := s.streamWebSocketActiveRunReplays(ctx, conn, promptQueueReplays); err != nil {
+		_ = conn.Close(websocket.StatusInternalError, "failed to stream message queue")
+		return
+	}
 
 	readDone := make(chan struct{})
 	historyRequests := make(chan historyLoadRequest, 4)
@@ -168,6 +173,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if shouldSkipReplayedActiveRunEvent(event, activeRunReplays) {
+				continue
+			}
+			if shouldSkipReplayedPromptQueueEvent(event, promptQueueReplays) {
 				continue
 			}
 			event = redactEventProcessDetails(event)
@@ -253,6 +261,21 @@ func activeRunEventRunID(event domain.Event) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func shouldSkipReplayedPromptQueueEvent(event domain.Event, replays map[string]app.ActiveRunReplay) bool {
+	if len(replays) == 0 || event.Type != domain.EventAgentPromptQueued {
+		return false
+	}
+	payload, ok := event.Payload.(domain.AgentPromptQueuedPayload)
+	if !ok || payload.QueueID == "" {
+		return false
+	}
+	replay, ok := replays[payload.QueueID]
+	if !ok {
+		return false
+	}
+	return !event.CreatedAt.After(replay.Captured)
 }
 
 func parseHistoryLoadRequest(payload []byte, subscribed subscribeMessage, subscribedConversationType domain.ConversationType) (historyLoadRequest, bool) {

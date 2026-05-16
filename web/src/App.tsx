@@ -45,7 +45,8 @@ import {
   workspaceGitDiff,
   workspaceGitStatus,
   workspaceTree,
-  respondToInputRequest
+  respondToInputRequest,
+  steerQueuedPrompt
 } from "./api/client";
 import type {
   Agent,
@@ -83,7 +84,7 @@ import type { AgentXEvent } from "./ws/events";
 import { useConversationSocket } from "./ws/useConversationSocket";
 import { applyTheme, getInitialTheme, storeTheme, type ThemeMode } from "./theme";
 import { showAgentInputRequestNotification, showAgentMessageNotification } from "./notifications/browser";
-import type { PendingQuestion } from "./components/shell/types";
+import type { PendingQuestion, QueuedPrompt } from "./components/shell/types";
 
 interface ActiveConversation {
   type: ConversationType;
@@ -122,6 +123,12 @@ function agentNameForID(
   );
 }
 
+function upsertQueuedPrompt(current: QueuedPrompt[], item: QueuedPrompt): QueuedPrompt[] {
+  const next = current.filter((queued) => queued.queueID !== item.queueID);
+  next.push(item);
+  return next.sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
+}
+
 export default function App() {
   const queryClient = useQueryClient();
   const [sessionToken, setSessionToken] = useState(() => getToken());
@@ -135,9 +142,11 @@ export default function App() {
   const [messageHistoryHasMore, setMessageHistoryHasMore] = useState(false);
   const [streamingByRunID, setStreamingByRunID] = useState<Record<string, StreamingMessage>>({});
   const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null);
+  const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
   const streamingCacheRef = useRef<Record<string, Record<string, StreamingMessage>>>({});
   const pendingQuestionCacheRef = useRef<Record<string, PendingQuestion | null>>({});
+  const queuedPromptsCacheRef = useRef<Record<string, QueuedPrompt[]>>({});
   const hasSession = Boolean(sessionToken);
 
   useEffect(() => {
@@ -293,6 +302,14 @@ export default function App() {
         pendingQuestionCacheRef.current[prevKey] = current;
         return null;
       });
+      setQueuedPrompts((current) => {
+        if (current.length > 0) {
+          queuedPromptsCacheRef.current[prevKey] = current;
+        } else {
+          delete queuedPromptsCacheRef.current[prevKey];
+        }
+        return [];
+      });
     }
     prevConversationKeyRef.current = nextKey;
     setConversationMessages([]);
@@ -307,6 +324,7 @@ export default function App() {
     }
     const cachedQuestion = pendingQuestionCacheRef.current[nextKey];
     setPendingQuestion(cachedQuestion ?? null);
+    setQueuedPrompts(queuedPromptsCacheRef.current[nextKey] ?? []);
   }, [conversationKey(activeConversation)]);
 
   useEffect(() => {
@@ -402,6 +420,23 @@ export default function App() {
             removeMessageAndMarkReferencesDeleted(current, event.payload.message_id)
           );
           break;
+        case "AgentPromptQueued":
+          setQueuedPrompts((current) =>
+            upsertQueuedPrompt(current, {
+              queueID: event.payload.queue_id,
+              messageID: event.payload.message_id,
+              agentID: event.payload.agent_id,
+              body: event.payload.body,
+              createdAt: event.payload.created_at,
+              canSteer: event.payload.can_steer
+            })
+          );
+          break;
+        case "AgentPromptQueueRemoved":
+          setQueuedPrompts((current) =>
+            current.filter((item) => item.queueID !== event.payload.queue_id)
+          );
+          break;
         case "AgentRunStarted":
           setStreamingByRunID((current) => ({
             ...current,
@@ -437,6 +472,16 @@ export default function App() {
           });
           break;
         case "AgentRunCompleted":
+          setPendingQuestion((current) =>
+            current?.runID === event.payload.run_id ? null : current
+          );
+          setStreamingByRunID((current) => {
+            const next = { ...current };
+            delete next[event.payload.run_id];
+            return next;
+          });
+          break;
+        case "AgentRunCanceled":
           setPendingQuestion((current) =>
             current?.runID === event.payload.run_id ? null : current
           );
@@ -529,6 +574,7 @@ export default function App() {
     setOlderMessagesLoading(false);
     setMessageHistoryHasMore(false);
     setStreamingByRunID({});
+    setQueuedPrompts([]);
     void queryClient.invalidateQueries();
   }
 
@@ -544,6 +590,7 @@ export default function App() {
     setOlderMessagesLoading(false);
     setMessageHistoryHasMore(false);
     setStreamingByRunID({});
+    setQueuedPrompts([]);
     queryClient.clear();
   }
 
@@ -563,6 +610,7 @@ export default function App() {
     setOlderMessagesLoading(false);
     setMessageHistoryHasMore(false);
     setStreamingByRunID({});
+    setQueuedPrompts([]);
   }
 
   function handleSelectOrganization(orgID: string) {
@@ -717,6 +765,7 @@ export default function App() {
       setOlderMessagesLoading(false);
       setMessageHistoryHasMore(false);
       setStreamingByRunID({});
+      setQueuedPrompts([]);
     }
   }
 
@@ -740,6 +789,11 @@ export default function App() {
       answer
     );
     setPendingQuestion(null);
+  }
+
+  async function handleSteerQueuedPrompt(queueID: string) {
+    if (!activeConversation) return;
+    await steerQueuedPrompt(activeConversation.type, activeConversation.id, queueID);
   }
 
   async function handleSaveChannelAgents(
@@ -926,7 +980,9 @@ export default function App() {
       hasOlderMessages={messageHistoryHasMore}
       streaming={Object.values(streamingByRunID)}
       pendingQuestion={pendingQuestion}
+      queuedPrompts={queuedPrompts}
       onRespondToQuestion={handleRespondToQuestion}
+      onSteerQueuedPrompt={handleSteerQueuedPrompt}
       connectionStatus={connectionStatus}
       notificationSettings={notificationSettingsQuery.data}
       notificationSettingsLoading={notificationSettingsQuery.isLoading}

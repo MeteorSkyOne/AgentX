@@ -20,6 +20,7 @@ const runtimeContextMessageLimit = 40
 const runtimeContextBodyLimit = 4000
 
 var errAgentRunStopped = errors.New("agent run stopped")
+var errAgentRunCanceled = errors.New("agent run canceled")
 
 type agentRunOptions struct {
 	Prompt            string
@@ -92,7 +93,11 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 		agentID:          target.Agent.ID,
 	}
 	a.registerActiveAgentRun(activeKey, activeRun)
-	defer a.removeActiveAgentRun(activeKey, runID)
+	terminalStatus := "failed"
+	defer func() {
+		a.removeActiveAgentRun(activeKey, runID)
+		a.handleAgentRunTerminated(context.WithoutCancel(ctx), activeKey, terminalStatus)
+	}()
 
 	var tracker *agentRunTracker
 	resultSent := false
@@ -137,6 +142,7 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 	}
 	tracker = &runTracker
 	failRun := func(failCtx context.Context, providerSessionID string, err error) {
+		terminalStatus = "failed"
 		if failCtx.Err() != nil {
 			failCtx = context.WithoutCancel(failCtx)
 		}
@@ -216,7 +222,7 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 			failRun(ctx, "", err)
 			return
 		}
-		a.setActiveAgentRunSession(activeKey, runID, session)
+		a.setActiveAgentRunSession(ctx, activeKey, runID, session)
 
 		providerSessionID := session.CurrentSessionID()
 		if err := a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, providerSessionID, "running"); err != nil {
@@ -324,13 +330,31 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 					}
 					if opts.OnCompleted != nil {
 						if err := opts.OnCompleted(ctx); err != nil {
+							terminalStatus = "failed"
 							a.publishAgentRunFailedWithContext(userMessage, runID, agent.ID, opts.Team, err)
 							sendResult(domain.Message{}, err)
 							_ = session.Close(context.WithoutCancel(ctx))
 							return
 						}
 					}
+					terminalStatus = "completed"
 					sendResult(botMessage, nil)
+					_ = session.Close(context.WithoutCancel(ctx))
+					return
+				case agentruntime.EventCanceled:
+					terminalStatus = "canceled"
+					a.removePendingQuestions(userMessage.ConversationType, userMessage.ConversationID)
+					completedAt := time.Now().UTC()
+					a.recordAgentRunMetric(ctx, runTracker.metric(agentRunMetricInput{
+						Status:            "canceled",
+						ProviderSessionID: session.CurrentSessionID(),
+						CompletedAt:       completedAt,
+						FirstTokenAt:      firstTokenAt,
+						Usage:             usage,
+					}))
+					a.setCanceledAgentSession(ctx, agent.ID, userMessage, session.CurrentSessionID())
+					a.publishAgentRunCanceledWithContext(userMessage, runID, agent.ID, opts.Team)
+					sendResult(domain.Message{}, errAgentRunCanceled)
 					_ = session.Close(context.WithoutCancel(ctx))
 					return
 				case agentruntime.EventInputRequest:
@@ -359,6 +383,7 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 						a.notifyAgentInputRequest(context.WithoutCancel(ctx), agent.Name, userMessage.OrganizationID, userMessage.ConversationType, userMessage.ConversationID, payload)
 					}
 				case agentruntime.EventFailed:
+					terminalStatus = "failed"
 					a.removePendingQuestions(userMessage.ConversationType, userMessage.ConversationID)
 					err := runtimeEventError(evt)
 					if evt.StaleSession && previousSessionID != "" {
@@ -643,6 +668,10 @@ func (a *App) setFailedAgentSession(ctx context.Context, agentID string, message
 	_ = a.store.Sessions().SetAgentSession(ctx, agentID, message.ConversationType, message.ConversationID, providerSessionID, "failed")
 }
 
+func (a *App) setCanceledAgentSession(ctx context.Context, agentID string, message domain.Message, providerSessionID string) {
+	_ = a.store.Sessions().SetAgentSession(ctx, agentID, message.ConversationType, message.ConversationID, providerSessionID, "canceled")
+}
+
 type agentRunMetricScope struct {
 	ProjectID string
 	ChannelID string
@@ -857,6 +886,25 @@ func (a *App) recordAgentRunMetric(ctx context.Context, metric domain.AgentRunMe
 
 func (a *App) publishAgentRunFailed(message domain.Message, runID string, err error) {
 	a.publishAgentRunFailedWithContext(message, runID, "", nil, err)
+}
+
+func (a *App) publishAgentRunCanceledWithContext(message domain.Message, runID string, agentID string, team *domain.TeamMetadata) {
+	slog.Info(
+		"agent run canceled",
+		"run_id", runID,
+		"agent_id", agentID,
+		"organization_id", message.OrganizationID,
+		"conversation_type", message.ConversationType,
+		"conversation_id", message.ConversationID,
+		"message_id", message.ID,
+	)
+	a.publishConversationEvent(domain.Event{
+		Type:             domain.EventAgentRunCanceled,
+		OrganizationID:   message.OrganizationID,
+		ConversationType: message.ConversationType,
+		ConversationID:   message.ConversationID,
+		Payload:          domain.AgentRunPayload{RunID: runID, AgentID: agentID, Team: team},
+	})
 }
 
 func (a *App) publishAgentRunFailedWithContext(message domain.Message, runID string, agentID string, team *domain.TeamMetadata, err error) {

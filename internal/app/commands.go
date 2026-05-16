@@ -49,6 +49,7 @@ var builtinSlashCommands = map[string]struct{}{
 	"push":    {},
 	"review":  {},
 	"stop":    {},
+	"cancel":  {},
 	"discuss": {},
 	"goal":    {},
 }
@@ -116,6 +117,13 @@ func (a *App) dispatchSlashCommand(ctx context.Context, req SendMessageRequest, 
 			return domain.Message{}, err
 		}
 		return a.handleStopCommand(ctx, req, targets, len(command.Targets) == 0)
+	}
+	if command.Name == "cancel" {
+		targets, err := resolveNewCommandTargets(agents, command.Targets)
+		if err != nil {
+			return domain.Message{}, err
+		}
+		return a.handleCancelCommand(ctx, req, targets, len(command.Targets) == 0)
 	}
 	if command.Name == "discuss" {
 		targets, err := resolveDiscussCommandTargets(agents, command.Targets)
@@ -316,6 +324,7 @@ func discussMessageBody(targets []ConversationAgentContext, args string) string 
 
 func (a *App) handleStopCommand(ctx context.Context, req SendMessageRequest, targets []ConversationAgentContext, allAgents bool) (domain.Message, error) {
 	stopped := 0
+	clearedQueued := 0
 	stoppedHandles := make([]string, 0, len(targets))
 	agentIDs := make([]string, 0, len(targets))
 	agentHandles := make([]string, 0, len(targets))
@@ -331,14 +340,56 @@ func (a *App) handleStopCommand(ctx context.Context, req SendMessageRequest, tar
 			stopped += count
 			stoppedHandles = append(stoppedHandles, target.Agent.Handle)
 		}
+		clearedQueued += a.clearQueuedAgentPrompts(messageQueueKey{
+			conversationType: req.ConversationType,
+			conversationID:   req.ConversationID,
+			agentID:          target.Agent.ID,
+		}, "canceled")
 	}
 	body := stopCommandMessageBody(agentHandles, stoppedHandles, stopped, allAgents)
 	return a.createCommandSystemMessage(ctx, req, body, map[string]any{
-		"command_name":  "stop",
-		"agent_ids":     agentIDs,
-		"agent_handles": agentHandles,
-		"stopped_runs":  stopped,
-		"scope":         newContextScope(allAgents),
+		"command_name":           "stop",
+		"agent_ids":              agentIDs,
+		"agent_handles":          agentHandles,
+		"stopped_runs":           stopped,
+		"cleared_queued_prompts": clearedQueued,
+		"scope":                  newContextScope(allAgents),
+	})
+}
+
+func (a *App) handleCancelCommand(ctx context.Context, req SendMessageRequest, targets []ConversationAgentContext, allAgents bool) (domain.Message, error) {
+	var result cancelAgentRunResult
+	canceledHandles := make([]string, 0, len(targets))
+	unsupportedHandles := make([]string, 0, len(targets))
+	agentIDs := make([]string, 0, len(targets))
+	agentHandles := make([]string, 0, len(targets))
+	for _, target := range targets {
+		agentIDs = append(agentIDs, target.Agent.ID)
+		agentHandles = append(agentHandles, target.Agent.Handle)
+		cancelResult := a.cancelActiveAgentRuns(ctx, activeRunKey{
+			conversationType: req.ConversationType,
+			conversationID:   req.ConversationID,
+			agentID:          target.Agent.ID,
+		})
+		result.requested += cancelResult.requested
+		result.unsupported += cancelResult.unsupported
+		if cancelResult.requested > 0 {
+			canceledHandles = append(canceledHandles, target.Agent.Handle)
+		}
+		if cancelResult.unsupported > 0 {
+			unsupportedHandles = append(unsupportedHandles, target.Agent.Handle)
+		}
+	}
+	body := cancelCommandMessageBody(agentHandles, canceledHandles, unsupportedHandles, result, allAgents)
+	return a.createCommandSystemMessage(ctx, req, body, map[string]any{
+		"command_name":        "cancel",
+		"agent_ids":           agentIDs,
+		"agent_handles":       agentHandles,
+		"canceled_runs":       result.requested,
+		"unsupported_runs":    result.unsupported,
+		"canceled_handles":    canceledHandles,
+		"unsupported_handles": unsupportedHandles,
+		"scope":               newContextScope(allAgents),
 	})
 }
 
@@ -366,6 +417,52 @@ func stopCommandMessageBody(handles []string, stoppedHandles []string, stopped i
 		return fmt.Sprintf("Stopped active run for %s", mentions[0])
 	}
 	return fmt.Sprintf("Stopped %d active agent runs for %s", stopped, strings.Join(mentions, ", "))
+}
+
+func cancelCommandMessageBody(handles []string, canceledHandles []string, unsupportedHandles []string, result cancelAgentRunResult, allAgents bool) string {
+	if result.requested == 0 {
+		target := targetedCommandSuffix(handles, allAgents)
+		if result.unsupported > 0 {
+			return "No cancellable active agent runs" + target + " (/cancel is only supported by runtimes with soft interrupt)"
+		}
+		return "No active agent runs to cancel" + target
+	}
+	body := fmt.Sprintf("Cancel requested for %d active agent run", result.requested)
+	if result.requested != 1 {
+		body += "s"
+	}
+	if len(canceledHandles) > 0 && !allAgents {
+		body += " for " + strings.Join(prefixHandles(canceledHandles), ", ")
+	}
+	if result.unsupported > 0 {
+		body += fmt.Sprintf("; %d active run", result.unsupported)
+		if result.unsupported != 1 {
+			body += "s"
+		}
+		body += " do not support /cancel"
+		if len(unsupportedHandles) > 0 && !allAgents {
+			body += " for " + strings.Join(prefixHandles(unsupportedHandles), ", ")
+		}
+	}
+	return body
+}
+
+func targetedCommandSuffix(handles []string, allAgents bool) string {
+	if allAgents {
+		return ""
+	}
+	if len(handles) == 1 {
+		return " for @" + handles[0]
+	}
+	return " for selected agents"
+}
+
+func prefixHandles(handles []string) []string {
+	mentions := make([]string, 0, len(handles))
+	for _, handle := range handles {
+		mentions = append(mentions, "@"+handle)
+	}
+	return mentions
 }
 
 func (a *App) handleCompactCommand(ctx context.Context, req SendMessageRequest, target ConversationAgentContext, args string) (domain.Message, error) {

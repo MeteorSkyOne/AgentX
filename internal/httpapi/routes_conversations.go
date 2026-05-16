@@ -332,6 +332,44 @@ func (s *Server) handleInputResponse(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) handleMessageQueueSteer(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	conversationType, ok := parseConversationType(chi.URLParam(r, "type"))
+	if !ok {
+		writeError(w, http.StatusBadRequest, "unknown conversation type")
+		return
+	}
+
+	conversationID := chi.URLParam(r, "id")
+	if _, ok, err := s.authorizedConversationOrganizationID(r, userID, conversationType, conversationID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	} else if !ok {
+		writeError(w, http.StatusNotFound, "conversation not found")
+		return
+	}
+
+	if err := s.app.SteerQueuedPrompt(r.Context(), conversationType, conversationID, chi.URLParam(r, "queueID")); err != nil {
+		if errors.Is(err, app.ErrQueuedPromptNotFound) {
+			writeError(w, http.StatusNotFound, "queued prompt not found")
+			return
+		}
+		if errors.Is(err, app.ErrQueuedPromptNotSteerable) {
+			writeError(w, http.StatusConflict, "queued prompt is not steerable")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to steer queued prompt")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleAttachmentContent(w http.ResponseWriter, r *http.Request) {
 	userID, ok := userIDFromContext(r.Context())
 	if !ok {
