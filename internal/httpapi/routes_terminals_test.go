@@ -152,10 +152,7 @@ func TestWorkspaceTerminalWebSocketReportsProtocolErrors(t *testing.T) {
 	if err := conn.Write(ctx, websocket.MessageText, payload); err != nil {
 		t.Fatal(err)
 	}
-	frame := readTerminalFrame(t, ctx, conn)
-	if frame.Type != "error" || frame.Error != "invalid terminal input" {
-		t.Fatalf("terminal error frame = %#v, want invalid terminal input", frame)
-	}
+	waitTerminalError(t, ctx, conn, "invalid terminal input")
 }
 
 func createTerminalTestUserSession(t *testing.T, ctx context.Context, env testEnv, orgID string, role domain.Role) string {
@@ -262,6 +259,22 @@ func waitTerminalOutputContains(t *testing.T, ctx context.Context, conn *websock
 			t.Fatalf("terminal error: %s", frame.Error)
 		case "exit":
 			t.Fatalf("terminal exited before %q appeared; output so far: %q", needle, seen.String())
+		}
+	}
+}
+
+func waitTerminalError(t *testing.T, ctx context.Context, conn *websocket.Conn, want string) {
+	t.Helper()
+	for {
+		frame := readTerminalFrame(t, ctx, conn)
+		switch frame.Type {
+		case "error":
+			if frame.Error != want {
+				t.Fatalf("terminal error frame = %#v, want %q", frame, want)
+			}
+			return
+		case "exit":
+			t.Fatalf("terminal exited before error %q appeared", want)
 		}
 	}
 }

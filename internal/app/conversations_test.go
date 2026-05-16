@@ -339,6 +339,9 @@ func TestSendAttachmentOnlyMessagePersistsAndPassesFilesToRuntime(t *testing.T) 
 func TestSendMessageAcceptsGenericFileAttachmentsAndRejectsSlashCommandAttachments(t *testing.T) {
 	ctx := context.Background()
 	application, _, bootstrap := newConversationTestApp(t, ctx)
+	if err := application.store.ChannelAgents().ReplaceForChannel(ctx, bootstrap.Channel.ID, nil); err != nil {
+		t.Fatal(err)
+	}
 
 	message, err := application.SendMessage(ctx, SendMessageRequest{
 		UserID:           bootstrap.User.ID,
