@@ -880,6 +880,8 @@ func itemToProcessItem(item map[string]any, status string) *runtime.ProcessItem 
 			pi.Output = output
 		}
 		return pi
+	case "collabagenttoolcall":
+		return collabAgentToolCallToProcessItem(item, status)
 	case "message", "agent_message":
 		return nil
 	case "reasoning":
@@ -897,6 +899,39 @@ func itemToProcessItem(item map[string]any, status string) *runtime.ProcessItem 
 		return &runtime.ProcessItem{Type: "thinking", Text: text, Raw: item}
 	}
 	return nil
+}
+
+func collabAgentToolCallToProcessItem(item map[string]any, status string) *runtime.ProcessItem {
+	tool := normalizeItemType(stringVal(item, "tool"))
+	if tool != "spawnagent" {
+		return nil
+	}
+	callID := stringVal(item, "id")
+	if status == "completed" {
+		itemStatus := normalizeItemType(stringVal(item, "status"))
+		if itemStatus == "failed" {
+			itemStatus = "error"
+		}
+		return &runtime.ProcessItem{
+			Type:       "tool_result",
+			ToolName:   "Agent",
+			ToolCallID: callID,
+			Status:     itemStatus,
+			Raw:        item,
+		}
+	}
+	var input any
+	if prompt := stringVal(item, "prompt"); prompt != "" {
+		input = map[string]any{"description": prompt}
+	}
+	return &runtime.ProcessItem{
+		Type:       "tool_call",
+		ToolName:   "Agent",
+		ToolCallID: callID,
+		Status:     "started",
+		Input:      input,
+		Raw:        item,
+	}
 }
 
 func completedAgentMessageText(item map[string]any) string {

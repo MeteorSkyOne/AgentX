@@ -1,6 +1,7 @@
 import { createContext, lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent, WheelEvent } from "react";
 import {
+  Bot,
   Brain,
   Braces,
   CheckCircle2,
@@ -1381,6 +1382,7 @@ function StreamingItem({
   const label = isError ? "System" : agentName ?? "Agent";
   const process = processFromStreaming(item);
   const workingLabel = useStreamingWorkingLabel(item.startedAt, item.endedAt);
+  const subagents = useMemo(() => getSubagentSummary(process), [process]);
 
   return (
     <div className={cn("group flex min-w-0 max-w-full gap-3 rounded-md px-1 py-1 md:gap-4 md:px-2", isError && "opacity-70")}>
@@ -1425,13 +1427,76 @@ function StreamingItem({
             onOpenWorkspacePath={onOpenWorkspacePath}
           />
         </div>
-        {workingLabel && (
-          <div className="text-[11px] font-medium text-muted-foreground">
-            {workingLabel}
+        {(workingLabel || subagents.length > 0) && (
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-[11px] font-medium text-muted-foreground">
+              {workingLabel && <span>{workingLabel}</span>}
+              <SubagentBadge subagents={subagents} />
+            </div>
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+function SubagentBadge({ subagents }: { subagents: SubagentInfo[] }) {
+  const [open, setOpen] = useState(false);
+  const activeCount = subagents.filter((s) => s.active).length;
+  const totalCount = subagents.length;
+
+  if (totalCount === 0) return null;
+
+  const label =
+    activeCount > 0
+      ? `${activeCount} subagent${activeCount !== 1 ? "s" : ""}`
+      : `${totalCount} subagent${totalCount !== 1 ? "s" : ""} done`;
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium transition-colors",
+            activeCount > 0
+              ? "bg-blue-500/10 text-blue-400 hover:bg-blue-500/20"
+              : "bg-muted text-muted-foreground hover:bg-muted/80"
+          )}
+        >
+          <Bot className="h-3 w-3" />
+          <span>{label}</span>
+          {open ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronRight className="h-2.5 w-2.5" />}
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="mt-1 space-y-1 rounded-md border border-border/60 bg-background/50 p-2 text-xs">
+          {subagents.map((sa) => (
+            <div
+              key={sa.toolCallID}
+              className={cn(
+                "flex items-center gap-2 rounded px-2 py-1",
+                sa.active ? "text-foreground" : "text-muted-foreground/60"
+              )}
+            >
+              <span
+                className={cn(
+                  "flex h-4 w-4 shrink-0 items-center justify-center rounded-full",
+                  sa.active ? "bg-blue-500/10 text-blue-400" : "bg-emerald-500/10 text-emerald-400"
+                )}
+              >
+                {sa.active ? (
+                  <Bot className="h-2.5 w-2.5 animate-pulse" />
+                ) : (
+                  <CheckCircle2 className="h-2.5 w-2.5" />
+                )}
+              </span>
+              <span>{sa.description}</span>
+            </div>
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
@@ -1924,6 +1989,44 @@ function processFromStreaming(item: StreamingMessage): ProcessItem[] {
     return [{ type: "thinking", text: item.thinking }];
   }
   return [];
+}
+
+interface SubagentInfo {
+  toolCallID: string;
+  description: string;
+  active: boolean;
+}
+
+function getSubagentSummary(process: ProcessItem[]): SubagentInfo[] {
+  const completedIDs = new Set<string>();
+  for (const item of process) {
+    if (item.type === "tool_result" && item.tool_call_id) {
+      completedIDs.add(item.tool_call_id);
+    }
+  }
+
+  const subagents: SubagentInfo[] = [];
+  for (const item of process) {
+    if (item.type === "tool_call" && item.tool_name === "Agent" && item.tool_call_id) {
+      const input = item.input as Record<string, unknown> | null;
+      const description = truncateSubagentDescription(
+        (typeof input?.description === "string" ? input.description : null) ??
+        (typeof input?.subagent_type === "string" ? input.subagent_type : null) ??
+        (typeof input?.prompt === "string" ? input.prompt : null) ??
+        "Subagent"
+      );
+      subagents.push({
+        toolCallID: item.tool_call_id,
+        description,
+        active: !completedIDs.has(item.tool_call_id),
+      });
+    }
+  }
+  return subagents;
+}
+
+function truncateSubagentDescription(text: string, maxLen = 60): string {
+  return text.length <= maxLen ? text : text.slice(0, maxLen - 1) + "…";
 }
 
 function rawProcessValue(item: DisplayProcessItem): unknown {

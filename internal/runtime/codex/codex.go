@@ -342,6 +342,12 @@ func (h *lineHandler) handleEventMessage(item map[string]any) ([]runtime.Event, 
 				Raw:  item,
 			}}}}, nil
 		}
+	case "collab_agent_spawn_begin":
+		events := h.flushPendingAsThinking()
+		events = append(events, runtime.Event{Type: runtime.EventDelta, Process: codexCollabSpawnStarted(item)})
+		return events, nil
+	case "collab_agent_spawn_end":
+		return []runtime.Event{{Type: runtime.EventDelta, Process: codexCollabSpawnCompleted(item)}}, nil
 	default:
 		if process := codexToolProcessItems(item); len(process) > 0 {
 			return []runtime.Event{{Type: runtime.EventDelta, Process: process}}, nil
@@ -586,6 +592,43 @@ func codexToolResultItem(item map[string]any) runtime.ProcessItem {
 		Output:     output,
 		Raw:        item,
 	}
+}
+
+func codexCollabSpawnStarted(item map[string]any) []runtime.ProcessItem {
+	callID := stringValue(item, "call_id")
+	if callID == "" {
+		return nil
+	}
+	var input any
+	if prompt := stringValue(item, "prompt"); prompt != "" {
+		input = map[string]any{"description": prompt}
+	}
+	return []runtime.ProcessItem{{
+		Type:       "tool_call",
+		ToolName:   "Agent",
+		ToolCallID: callID,
+		Status:     "started",
+		Input:      input,
+		Raw:        item,
+	}}
+}
+
+func codexCollabSpawnCompleted(item map[string]any) []runtime.ProcessItem {
+	callID := stringValue(item, "call_id")
+	if callID == "" {
+		return nil
+	}
+	status := normalizedType(stringValue(item, "status"))
+	if strings.Contains(status, "error") || status == "not_found" || status == "notfound" || status == "failed" {
+		status = "error"
+	}
+	return []runtime.ProcessItem{{
+		Type:       "tool_result",
+		ToolName:   "Agent",
+		ToolCallID: callID,
+		Status:     status,
+		Raw:        item,
+	}}
 }
 
 func isCodexToolCallType(itemType string) bool {
