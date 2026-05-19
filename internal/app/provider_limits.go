@@ -18,7 +18,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/meteorsky/agentx/internal/domain"
@@ -1109,21 +1108,8 @@ func providerEnvMapValue(values map[string]string, keys ...string) string {
 func providerProbeCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.WaitDelay = providerProbeWaitDelay
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		return killProviderProbeProcessGroup(cmd)
-	}
+	configureProviderProbeCommand(cmd)
 	return cmd
-}
-
-func killProviderProbeProcessGroup(cmd *exec.Cmd) error {
-	if cmd.Process == nil {
-		return os.ErrProcessDone
-	}
-	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil && err != syscall.ESRCH {
-		return err
-	}
-	return nil
 }
 
 func providerProbeError(operation string, err error, stderr string) error {
