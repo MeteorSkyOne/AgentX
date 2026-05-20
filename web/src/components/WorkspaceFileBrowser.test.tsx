@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -23,6 +23,7 @@ vi.mock("./WorkspaceFileEditor", () => ({
 }));
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
 });
 
@@ -227,6 +228,55 @@ describe("WorkspaceFileEditorPane markdown controls", () => {
       limit: 200,
     }));
     expect(await screen.findByRole("button", { name: "src/main.go line 2" })).toBeTruthy();
+  });
+
+  it("debounces workspace search while typing", async () => {
+    vi.useFakeTimers();
+    const onSearchWorkspace = vi.fn(async () => ({
+      query: "needle",
+      mode: "files" as const,
+      engine: "fallback" as const,
+      truncated: false,
+      results: [],
+    }));
+
+    render(<SearchHarness onSearchWorkspace={onSearchWorkspace} />);
+
+    const input = screen.getByRole("textbox", { name: "Search project files" });
+    fireEvent.change(input, { target: { value: "n" } });
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+    fireEvent.change(input, { target: { value: "ne" } });
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(onSearchWorkspace).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+    });
+    expect(onSearchWorkspace).toHaveBeenCalledTimes(1);
+    expect(onSearchWorkspace).toHaveBeenCalledWith("w1", expect.objectContaining({ q: "ne" }));
+  });
+
+  it("handles null search results defensively", async () => {
+    const onSearchWorkspace = vi.fn(async () => ({
+      query: "missing",
+      mode: "files" as const,
+      engine: "fallback" as const,
+      truncated: false,
+      results: null,
+    } as any));
+
+    render(<SearchHarness onSearchWorkspace={onSearchWorkspace} />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Search project files" }), {
+      target: { value: "missing" },
+    });
+
+    expect(await screen.findByText("0 results")).toBeTruthy();
+    expect(screen.getByText("No results.")).toBeTruthy();
   });
 
   it("opens search results at the returned content position", () => {

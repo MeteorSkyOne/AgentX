@@ -103,7 +103,7 @@ func (s *Server) handleWorkspaceSearch(w http.ResponseWriter, r *http.Request) {
 		Mode:      opts.mode,
 		Engine:    engine,
 		Truncated: truncated,
-		Results:   results,
+		Results:   nonNilWorkspaceSearchResults(results),
 	})
 }
 
@@ -184,11 +184,11 @@ func searchWorkspaceFilesWithRg(ctx context.Context, root string, opts workspace
 			return nil, false, searchCtx.Err()
 		}
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return nil, false, nil
+			return []workspaceSearchResult{}, false, nil
 		}
 		return nil, false, fmt.Errorf("rg --files failed: %s: %w", strings.TrimSpace(stderr.String()), err)
 	}
-	var results []workspaceSearchResult
+	results := make([]workspaceSearchResult, 0)
 	lines := strings.Split(strings.ReplaceAll(string(output), "\r\n", "\n"), "\n")
 	for _, line := range lines {
 		path := normalizeWorkspaceSearchPath(line)
@@ -322,7 +322,7 @@ func searchWorkspaceFallback(ctx context.Context, root string, opts workspaceSea
 	}
 	searchCtx, cancel := context.WithTimeout(ctx, workspaceSearchCommandTimeout)
 	defer cancel()
-	var results []workspaceSearchResult
+	results := make([]workspaceSearchResult, 0)
 	truncated := false
 	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -534,4 +534,11 @@ func workspaceSearchPreview(line string) string {
 		return line
 	}
 	return string(runes[:workspaceSearchMaxPreviewRunes])
+}
+
+func nonNilWorkspaceSearchResults(results []workspaceSearchResult) []workspaceSearchResult {
+	if results == nil {
+		return []workspaceSearchResult{}
+	}
+	return results
 }

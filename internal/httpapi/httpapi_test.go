@@ -970,6 +970,11 @@ func TestHTTPWorkspaceSearchFallbackFindsFilesAndContent(t *testing.T) {
 	if !limited.Truncated || len(limited.Results) != 1 {
 		t.Fatalf("limited content search = %#v, want one truncated result", limited)
 	}
+	var empty workspaceSearchResponse
+	getJSON(t, searchURL+"?mode=files&q="+url.QueryEscape("missing"), bootstrap.SessionToken, http.StatusOK, &empty)
+	if empty.Results == nil || len(empty.Results) != 0 {
+		t.Fatalf("empty file search results = %#v, want non-nil empty list", empty.Results)
+	}
 	getJSON(t, searchURL+"?mode=content&regex=true&q=%5B", bootstrap.SessionToken, http.StatusBadRequest, nil)
 	getJSON(t, searchURL+"?mode=content&q=", bootstrap.SessionToken, http.StatusBadRequest, nil)
 }

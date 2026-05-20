@@ -63,6 +63,8 @@ const LazyWorkspaceGitDiffViewer = lazy(() =>
   import("./WorkspaceFileEditor").then((module) => ({ default: module.WorkspaceGitDiffViewer }))
 );
 
+const workspaceSearchDebounceMs = 400;
+
 export interface WorkspaceFileBrowserActions {
   onLoadTree: (workspaceID: string, path?: string) => Promise<WorkspaceTreeEntry>;
   onSearchWorkspace?: (
@@ -383,7 +385,7 @@ export function useWorkspaceFileBrowser({
           limit: 200,
         });
         if (searchRequestRef.current !== requestID) return;
-        setSearchResults(response.results);
+        setSearchResults(response.results ?? []);
         setSearchTruncated(response.truncated);
         setSearchEngine(response.engine);
         if (!options.quiet) {
@@ -1233,7 +1235,7 @@ function WorkspaceSearchControls({
     }
     const timeout = window.setTimeout(() => {
       void controller.loadSearch({ quiet: true });
-    }, 250);
+    }, workspaceSearchDebounceMs);
     return () => window.clearTimeout(timeout);
   }, [
     controller.canSearchWorkspace,
