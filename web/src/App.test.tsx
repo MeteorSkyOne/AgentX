@@ -5,7 +5,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import type { Channel, Message } from "./api/types";
+import { channelThreads, conversationContext, projectChannels, projects } from "./api/client";
+import type { Channel, Message, Thread } from "./api/types";
 import type { AgentXEvent } from "./ws/events";
 
 const mocks = vi.hoisted(() => ({
@@ -116,6 +117,12 @@ const project = {
   created_at: now,
   updated_at: now,
 };
+const otherProject = {
+  ...project,
+  id: "prj2",
+  name: "Other Project",
+  workspace_id: "wks2",
+};
 const projectWorkspace = {
   id: "wks1",
   organization_id: organization.id,
@@ -134,6 +141,28 @@ const channel: Channel = {
   name: "general",
   team_max_batches: 6,
   team_max_runs: 12,
+  created_at: now,
+  updated_at: now,
+};
+const otherChannel: Channel = {
+  ...channel,
+  id: "chn2",
+  project_id: otherProject.id,
+  name: "other",
+};
+const forumChannel: Channel = {
+  ...channel,
+  id: "chn_forum",
+  type: "thread",
+  name: "forum",
+};
+const thread: Thread = {
+  id: "thr1",
+  organization_id: organization.id,
+  project_id: project.id,
+  channel_id: forumChannel.id,
+  title: "Forum post",
+  created_by: user.id,
   created_at: now,
   updated_at: now,
 };
@@ -166,6 +195,18 @@ beforeEach(() => {
   mocks.socketConversationID = undefined;
   mocks.socketConversationType = undefined;
   mocks.loadOlderMessages.mockReset();
+  localStorage.clear();
+  vi.mocked(projects).mockImplementation(async () => [project]);
+  vi.mocked(projectChannels).mockImplementation(async () => [channel]);
+  vi.mocked(channelThreads).mockImplementation(async () => []);
+  vi.mocked(conversationContext).mockImplementation(async () => ({
+    project,
+    channel,
+    agents: [],
+    binding: null,
+    agent: null,
+    workspace: projectWorkspace,
+  }) as any);
 });
 
 afterEach(() => {
@@ -173,6 +214,62 @@ afterEach(() => {
 });
 
 describe("App conversation selection", () => {
+  it("restores the last selected project and channel after reload", async () => {
+    localStorage.setItem(
+      "agentx:last-selection",
+      JSON.stringify({
+        organizationID: organization.id,
+        projectID: otherProject.id,
+        channelID: otherChannel.id,
+      })
+    );
+    vi.mocked(projects).mockImplementation(async () => [project, otherProject]);
+    vi.mocked(projectChannels).mockImplementation(async (projectID: string) =>
+      projectID === otherProject.id ? [otherChannel] : [channel]
+    );
+
+    renderWithClient(<App />);
+
+    await waitFor(() => {
+      expect(projectChannels).toHaveBeenCalledWith(otherProject.id);
+      expect(mocks.socketConversationType).toBe("channel");
+      expect(mocks.socketConversationID).toBe(otherChannel.id);
+    });
+  });
+
+  it("restores the last selected forum post after reload", async () => {
+    localStorage.setItem(
+      "agentx:last-selection",
+      JSON.stringify({
+        organizationID: organization.id,
+        projectID: project.id,
+        channelID: forumChannel.id,
+        conversationType: "thread",
+        conversationID: thread.id,
+      })
+    );
+    vi.mocked(projectChannels).mockImplementation(async () => [forumChannel]);
+    vi.mocked(channelThreads).mockImplementation(async () => [thread]);
+    vi.mocked(conversationContext).mockImplementation(async () => ({
+      project,
+      channel: forumChannel,
+      thread,
+      agents: [],
+      binding: null,
+      agent: null,
+      workspace: projectWorkspace,
+    }) as any);
+
+    renderWithClient(<App />);
+
+    await waitFor(() => {
+      expect(channelThreads).toHaveBeenCalledWith(forumChannel.id);
+      expect(conversationContext).toHaveBeenCalledWith("thread", thread.id);
+      expect(mocks.socketConversationType).toBe("thread");
+      expect(mocks.socketConversationID).toBe(thread.id);
+    });
+  });
+
   it("keeps messages when the current channel is selected again", async () => {
     renderWithClient(<App />);
 
