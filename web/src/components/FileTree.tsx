@@ -48,6 +48,7 @@ interface FileTreeProps {
   directoryErrors?: Record<string, string | null | undefined>;
   canManageEntries?: boolean;
   onSelectFile: (path: string, entry: FileTreeEntry) => void;
+  onDoubleClickFile?: (path: string, entry: FileTreeEntry) => void;
   onLoadDirectory?: (path: string, entry: FileTreeEntry) => void;
   onCreateEntry?: (parentPath: string, type: FileTreeEntry["type"]) => void;
   onRenameEntry?: (entry: FileTreeEntry) => void;
@@ -100,6 +101,7 @@ export function FileTree({
   directoryErrors,
   canManageEntries = true,
   onSelectFile,
+  onDoubleClickFile,
   onLoadDirectory,
   onCreateEntry,
   onRenameEntry,
@@ -336,6 +338,7 @@ export function FileTree({
         onDragOver={handleFileDragOver}
         onDrop={handleFileDrop}
         onClick={() => onSelectFile(entry.path, entry)}
+        onDoubleClick={() => onDoubleClickFile?.(entry.path, entry)}
       >
         <FileText className="h-3.5 w-3.5 shrink-0 text-blue-400" />
         <span className="truncate">{entry.name}</span>

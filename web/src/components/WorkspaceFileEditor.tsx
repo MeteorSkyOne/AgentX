@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Editor, { DiffEditor, type DiffOnMount, type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
@@ -113,6 +113,32 @@ export function WorkspaceFileEditor({
     controller.fileOpenRequestID,
     controller.filePath,
   ]);
+
+  const prevModelPathRef = useRef(editorModelPath);
+  const prevActiveTabIdRef = useRef(controller.activeTabId);
+  const pendingRestoreRef = useRef<unknown>(null);
+
+  useLayoutEffect(() => {
+    if (prevModelPathRef.current !== editorModelPath) {
+      const editorInstance = editorRef.current;
+      const prevTabId = prevActiveTabIdRef.current;
+      if (editorInstance && prevTabId) {
+        controller.saveTabEditorViewState(prevTabId, editorInstance.saveViewState());
+      }
+      pendingRestoreRef.current = controller.activeTabEditorViewState;
+      prevModelPathRef.current = editorModelPath;
+      prevActiveTabIdRef.current = controller.activeTabId;
+    }
+  }, [editorModelPath, controller]);
+
+  useEffect(() => {
+    const viewState = pendingRestoreRef.current;
+    if (!viewState) return;
+    pendingRestoreRef.current = null;
+    const editorInstance = editorRef.current;
+    if (!editorInstance) return;
+    editorInstance.restoreViewState(viewState as editor.ICodeEditorViewState);
+  });
 
   const handleOpenPreviewPath = useCallback(
     (target: WorkspacePathTarget) => {

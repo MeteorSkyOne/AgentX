@@ -52,6 +52,13 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { FileTree } from "./FileTree";
 import { isMarkdownFilePath, isPdfFilePath } from "./workspaceFileLanguages";
 
@@ -111,10 +118,25 @@ export interface WorkspaceFilePosition {
 
 export interface WorkspaceFileOpenOptions {
   position?: WorkspaceFilePosition;
+  preview?: boolean;
 }
 
 export type WorkspaceFileViewMode = "edit" | "preview" | "split";
 export type WorkspacePaneView = "files" | "changes";
+
+export interface WorkspaceFileTab {
+  id: string;
+  filePath: string;
+  fileBody: string;
+  fileLoading: boolean;
+  fileLoadError: string | null;
+  editorViewState: unknown;
+  fileViewMode: WorkspaceFileViewMode;
+  fileOpenPosition?: WorkspaceFilePosition;
+  fileOpenRequestID: number;
+  dirty: boolean;
+  preview: boolean;
+}
 
 interface WorkspaceFileBrowserProps extends WorkspaceFileBrowserActions {
   workspaceID?: string;
@@ -170,6 +192,17 @@ export interface WorkspaceFileBrowserController {
   canUseWorkspace: boolean;
   canFetchFileBlob: boolean;
   canSearchWorkspace: boolean;
+  tabs: readonly WorkspaceFileTab[];
+  activeTabId: string | null;
+  activeTabEditorViewState: unknown;
+  switchTab: (tabId: string) => void;
+  closeTab: (tabId: string) => void;
+  closeOtherTabs: (tabId: string) => void;
+  closeAllTabs: () => void;
+  pinTab: (tabId: string) => void;
+  reorderTabs: (fromIndex: number, toIndex: number) => void;
+  setActiveTabEditorViewState: (viewState: unknown) => void;
+  saveTabEditorViewState: (tabId: string, viewState: unknown) => void;
   setFilePath: (path: string) => void;
   setFileBody: (body: string) => void;
   setSearchQuery: (query: string) => void;
@@ -220,8 +253,25 @@ export function useWorkspaceFileBrowser({
   onLoadGitStatus,
   onLoadGitDiff,
 }: Omit<WorkspaceFileBrowserProps, "theme"> & { autoLoadTree?: boolean }): WorkspaceFileBrowserController {
-  const [filePath, setFilePath] = useState(initialPath);
-  const [fileBody, setFileBody] = useState("");
+  const [tabs, setTabs] = useState<WorkspaceFileTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const nextTabIdRef = useRef(0);
+  const tabFileRequestRef = useRef<Record<string, number>>({});
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+  const activeTabIdRef = useRef(activeTabId);
+  activeTabIdRef.current = activeTabId;
+
+  const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
+
+  const filePath = activeTab?.filePath ?? "";
+  const fileBody = activeTab?.fileBody ?? "";
+  const fileLoading = activeTab?.fileLoading ?? false;
+  const fileLoadError = activeTab?.fileLoadError ?? null;
+  const fileOpenPosition = activeTab?.fileOpenPosition;
+  const fileOpenRequestID = activeTab?.fileOpenRequestID ?? 0;
+  const fileViewMode = activeTab?.fileViewMode ?? "edit";
+
   const [tree, setTree] = useState<WorkspaceTreeEntry>();
   const [workspaceTreeResetKey, setWorkspaceTreeResetKey] = useState(0);
   const [workspaceTreeLoading, setWorkspaceTreeLoading] = useState(false);
@@ -238,8 +288,6 @@ export function useWorkspaceFileBrowser({
   const [searchResults, setSearchResults] = useState<WorkspaceSearchResult[]>([]);
   const [searchTruncated, setSearchTruncated] = useState(false);
   const [searchEngine, setSearchEngine] = useState<WorkspaceSearchResponse["engine"]>();
-  const [fileLoading, setFileLoading] = useState(false);
-  const [fileLoadError, setFileLoadError] = useState<string | null>(null);
   const [fileSaving, setFileSaving] = useState(false);
   const [fileDownloading, setFileDownloading] = useState(false);
   const [fileDeleting, setFileDeleting] = useState(false);
@@ -256,13 +304,9 @@ export function useWorkspaceFileBrowser({
   const [gitDiffLoading, setGitDiffLoading] = useState(false);
   const [gitDiffError, setGitDiffError] = useState<string | null>(null);
   const [gitSelectedPath, setGitSelectedPath] = useState("");
-  const [fileOpenPosition, setFileOpenPosition] = useState<WorkspaceFilePosition>();
-  const [fileOpenRequestID, setFileOpenRequestID] = useState(0);
-  const [fileViewMode, setFileViewMode] = useState<WorkspaceFileViewMode>("edit");
   const workspaceTreeRequestRef = useRef(0);
   const directoryRequestRef = useRef<Record<string, number>>({});
   const searchRequestRef = useRef(0);
-  const fileRequestRef = useRef(0);
   const gitStatusRequestRef = useRef(0);
   const gitDiffRequestRef = useRef(0);
 
@@ -271,6 +315,114 @@ export function useWorkspaceFileBrowser({
   const canFetchFileBlob = Boolean(workspaceID && onFetchFileBlob);
   const canSearchWorkspace = Boolean(workspaceID && onSearchWorkspace);
   const gitEnabled = Boolean(onLoadGitStatus && onLoadGitDiff);
+
+  const updateTab = useCallback((tabId: string, patch: Partial<WorkspaceFileTab>) => {
+    setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, ...patch } : t)));
+  }, []);
+
+  const setFilePath = useCallback(
+    (path: string) => {
+      const id = activeTabIdRef.current;
+      if (id) updateTab(id, { filePath: path });
+    },
+    [updateTab]
+  );
+
+  const setFileBody = useCallback(
+    (body: string) => {
+      const id = activeTabIdRef.current;
+      if (id) {
+        setTabs((prev) =>
+          prev.map((t) => {
+            if (t.id !== id) return t;
+            if (t.fileBody === body) return t;
+            return { ...t, fileBody: body, dirty: true, preview: false };
+          })
+        );
+      }
+    },
+    []
+  );
+
+  const setFileViewMode = useCallback(
+    (mode: WorkspaceFileViewMode) => {
+      const id = activeTabIdRef.current;
+      if (id) updateTab(id, { fileViewMode: mode });
+    },
+    [updateTab]
+  );
+
+  const switchTab = useCallback((tabId: string) => {
+    setActiveTabId(tabId);
+  }, []);
+
+  const closeTab = useCallback(
+    (tabId: string) => {
+      const currentTabs = tabsRef.current;
+      const index = currentTabs.findIndex((t) => t.id === tabId);
+      if (index === -1) return;
+      const next = currentTabs.filter((t) => t.id !== tabId);
+      setTabs(next);
+      if (tabId === activeTabIdRef.current) {
+        const newActive =
+          next.length === 0
+            ? null
+            : (next[Math.min(index, next.length - 1)]?.id ?? null);
+        setActiveTabId(newActive);
+      }
+    },
+    []
+  );
+
+  const closeOtherTabs = useCallback(
+    (tabId: string) => {
+      setTabs((prev) => prev.filter((t) => t.id === tabId));
+      setActiveTabId(tabId);
+    },
+    []
+  );
+
+  const closeAllTabs = useCallback(() => {
+    setTabs([]);
+    setActiveTabId(null);
+  }, []);
+
+  const pinTab = useCallback(
+    (tabId: string) => {
+      updateTab(tabId, { preview: false });
+    },
+    [updateTab]
+  );
+
+  const reorderTabs = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      if (fromIndex === toIndex) return;
+      setTabs((prev) => {
+        if (fromIndex < 0 || fromIndex >= prev.length) return prev;
+        const clamped = Math.max(0, Math.min(toIndex, prev.length - 1));
+        const next = [...prev];
+        const [moved] = next.splice(fromIndex, 1);
+        next.splice(clamped, 0, moved);
+        return next;
+      });
+    },
+    []
+  );
+
+  const setActiveTabEditorViewState = useCallback(
+    (viewState: unknown) => {
+      const id = activeTabIdRef.current;
+      if (id) updateTab(id, { editorViewState: viewState });
+    },
+    [updateTab]
+  );
+
+  const saveTabEditorViewState = useCallback(
+    (tabId: string, viewState: unknown) => {
+      updateTab(tabId, { editorViewState: viewState });
+    },
+    [updateTab]
+  );
 
   const loadTree = useCallback(
     async (options: { quiet?: boolean } = {}) => {
@@ -453,38 +605,85 @@ export function useWorkspaceFileBrowser({
       const targetPath = path.trim();
       if (!workspaceID || !targetPath) return;
       setWorkspacePaneViewState("files");
-      const requestID = ++fileRequestRef.current;
-      setFileLoading(true);
-      setFileLoadError(null);
-      setFilePath(targetPath);
-      setFileOpenPosition(normalizeWorkspaceFilePosition(options.position));
-      setFileOpenRequestID(requestID);
+      const isPreview = options.preview === true;
+      const normalizedPosition = normalizeWorkspaceFilePosition(options.position);
+
+      const currentTabs = tabsRef.current;
+      const currentActiveId = activeTabIdRef.current;
+      const normalizedTarget = normalizeWorkspaceTreePath(targetPath);
+      const existingTab = currentTabs.find(
+        (t) => normalizeWorkspaceTreePath(t.filePath) === normalizedTarget
+      );
+
+      if (existingTab) {
+        const patch: Partial<WorkspaceFileTab> = {};
+        if (normalizedPosition) {
+          patch.fileOpenPosition = normalizedPosition;
+          patch.fileOpenRequestID = (existingTab.fileOpenRequestID ?? 0) + 1;
+        }
+        if (!isPreview && existingTab.preview) {
+          patch.preview = false;
+        }
+        if (Object.keys(patch).length > 0) {
+          updateTab(existingTab.id, patch);
+        }
+        setActiveTabId(existingTab.id);
+        return;
+      }
+
+      const newId = String(++nextTabIdRef.current);
+      const newTab: WorkspaceFileTab = {
+        id: newId,
+        filePath: targetPath,
+        fileBody: "",
+        fileLoading: true,
+        fileLoadError: null,
+        editorViewState: null,
+        fileViewMode: "edit",
+        fileOpenPosition: normalizedPosition,
+        fileOpenRequestID: 1,
+        dirty: false,
+        preview: isPreview,
+      };
+
+      if (isPreview) {
+        const previewIndex = currentTabs.findIndex((t) => t.preview);
+        if (previewIndex !== -1) {
+          setTabs((prev) => prev.map((t) => (t.preview ? newTab : t)));
+        } else {
+          const activeIndex = currentTabs.findIndex((t) => t.id === currentActiveId);
+          const insertAt = activeIndex === -1 ? currentTabs.length : activeIndex + 1;
+          setTabs((prev) => [...prev.slice(0, insertAt), newTab, ...prev.slice(insertAt)]);
+        }
+      } else {
+        const activeIndex = currentTabs.findIndex((t) => t.id === currentActiveId);
+        const insertAt = activeIndex === -1 ? currentTabs.length : activeIndex + 1;
+        setTabs((prev) => [...prev.slice(0, insertAt), newTab, ...prev.slice(insertAt)]);
+      }
+      setActiveTabId(newId);
+
+      const requestID = (tabFileRequestRef.current[newId] ?? 0) + 1;
+      tabFileRequestRef.current[newId] = requestID;
+
       try {
         if (isPdfFilePath(targetPath)) {
-          if (fileRequestRef.current !== requestID) return;
-          setFileBody("");
-          setFileLoadError(null);
+          if (tabFileRequestRef.current[newId] !== requestID) return;
+          updateTab(newId, { fileBody: "", fileLoadError: null, fileLoading: false });
           setWorkspaceStatus("Loaded");
           return;
         }
         const body = await onReadFile(workspaceID, targetPath);
-        if (fileRequestRef.current !== requestID) return;
-        setFileBody(body);
-        setFileLoadError(null);
+        if (tabFileRequestRef.current[newId] !== requestID) return;
+        updateTab(newId, { fileBody: body, fileLoadError: null, fileLoading: false });
         setWorkspaceStatus("Loaded");
       } catch (err) {
-        if (fileRequestRef.current !== requestID) return;
+        if (tabFileRequestRef.current[newId] !== requestID) return;
         const message = err instanceof Error ? err.message : "Load failed";
-        setFileBody("");
-        setFileLoadError(message);
+        updateTab(newId, { fileBody: "", fileLoadError: message, fileLoading: false });
         setWorkspaceStatus(message);
-      } finally {
-        if (fileRequestRef.current === requestID) {
-          setFileLoading(false);
-        }
       }
     },
-    [filePath, onReadFile, workspaceID]
+    [filePath, onReadFile, updateTab, workspaceID]
   );
 
   const loadGitStatus = useCallback(
@@ -612,7 +811,7 @@ export function useWorkspaceFileBrowser({
 
   const saveFile = useCallback(async () => {
     const targetPath = filePath.trim();
-    if (!workspaceID || !targetPath) return;
+    if (!workspaceID || !targetPath || !activeTabId) return;
     if (isPdfFilePath(targetPath)) {
       setWorkspaceStatus("PDF files cannot be edited here");
       return;
@@ -620,8 +819,7 @@ export function useWorkspaceFileBrowser({
     setFileSaving(true);
     try {
       await onWriteFile(workspaceID, targetPath, fileBody);
-      setFilePath(targetPath);
-      setFileLoadError(null);
+      updateTab(activeTabId, { filePath: targetPath, fileLoadError: null, dirty: false, preview: false });
       setWorkspaceStatus("Saved");
       await refreshTreeForFilePath(targetPath);
     } catch (err) {
@@ -629,7 +827,7 @@ export function useWorkspaceFileBrowser({
     } finally {
       setFileSaving(false);
     }
-  }, [fileBody, filePath, onWriteFile, refreshTreeForFilePath, workspaceID]);
+  }, [activeTabId, fileBody, filePath, onWriteFile, refreshTreeForFilePath, updateTab, workspaceID]);
 
   const fetchFileBlob = useCallback(
     async (path = filePath, options: { download?: boolean } = {}) => {
@@ -659,12 +857,11 @@ export function useWorkspaceFileBrowser({
 
   const deleteFile = useCallback(async () => {
     const targetPath = filePath.trim();
-    if (!workspaceID || !targetPath) return;
+    if (!workspaceID || !targetPath || !activeTabId) return;
     setFileDeleting(true);
     try {
       await onDeleteFile(workspaceID, targetPath);
-      setFileBody("");
-      setFileLoadError(null);
+      closeTab(activeTabId);
       setWorkspaceStatus("Deleted");
       await refreshTreeForFilePath(targetPath);
     } catch (err) {
@@ -672,7 +869,7 @@ export function useWorkspaceFileBrowser({
     } finally {
       setFileDeleting(false);
     }
-  }, [filePath, onDeleteFile, refreshTreeForFilePath, workspaceID]);
+  }, [activeTabId, closeTab, filePath, onDeleteFile, refreshTreeForFilePath, workspaceID]);
 
   const createEntry = useCallback(
     async (parentPath: string, name: string, type: WorkspaceEntryType) => {
@@ -690,12 +887,27 @@ export function useWorkspaceFileBrowser({
         }
         await refreshTreeForEntryPaths([targetPath]);
         if (type === "file") {
-          fileRequestRef.current += 1;
-          setFilePath(targetPath);
-          setFileBody("");
-          setFileLoadError(null);
-          setFileOpenPosition(undefined);
-          setFileOpenRequestID(fileRequestRef.current);
+          const newId = String(++nextTabIdRef.current);
+          const newTab: WorkspaceFileTab = {
+            id: newId,
+            filePath: targetPath,
+            fileBody: "",
+            fileLoading: false,
+            fileLoadError: null,
+            editorViewState: null,
+            fileViewMode: "edit",
+            fileOpenPosition: undefined,
+            fileOpenRequestID: 1,
+            dirty: false,
+            preview: false,
+          };
+          const currentActiveId = activeTabIdRef.current;
+          setTabs((prev) => {
+            const activeIndex = prev.findIndex((t) => t.id === currentActiveId);
+            const insertAt = activeIndex === -1 ? prev.length : activeIndex + 1;
+            return [...prev.slice(0, insertAt), newTab, ...prev.slice(insertAt)];
+          });
+          setActiveTabId(newId);
         }
         setWorkspaceStatus(type === "directory" ? "Folder created" : "File created");
         return targetPath;
@@ -724,7 +936,12 @@ export function useWorkspaceFileBrowser({
       setEntryActionPending(true);
       try {
         await onMoveEntry(workspaceID, entry.path, targetPath);
-        setFilePath((currentPath) => replaceMovedWorkspacePath(currentPath, entry.path, targetPath));
+        setTabs((prev) =>
+          prev.map((t) => {
+            const newPath = replaceMovedWorkspacePath(t.filePath, entry.path, targetPath);
+            return newPath !== t.filePath ? { ...t, filePath: newPath } : t;
+          })
+        );
         setWorkspaceStatus("Renamed");
         await refreshTreeForEntryPaths([entry.path, targetPath]);
         return targetPath;
@@ -754,14 +971,23 @@ export function useWorkspaceFileBrowser({
         } else {
           throw new Error("Folder deletion is not supported");
         }
-        const openPathAffected = workspacePathIsSameOrInside(filePath.trim(), entry.path);
-        setFilePath((currentPath) =>
-          workspacePathIsSameOrInside(currentPath.trim(), entry.path) ? "" : currentPath
-        );
-        if (openPathAffected) {
-          setFileBody("");
-          setFileLoadError(null);
-        }
+        setTabs((prev) => {
+          const next = prev.filter(
+            (t) => !workspacePathIsSameOrInside(t.filePath.trim(), entry.path)
+          );
+          if (next.length !== prev.length && activeTabId) {
+            const activeRemoved = !next.some((t) => t.id === activeTabId);
+            if (activeRemoved) {
+              const oldIndex = prev.findIndex((t) => t.id === activeTabId);
+              const newActive =
+                next.length === 0
+                  ? null
+                  : (next[Math.min(oldIndex, next.length - 1)]?.id ?? null);
+              setActiveTabId(newActive);
+            }
+          }
+          return next;
+        });
         setWorkspaceStatus("Deleted");
         await refreshTreeForEntryPaths([entry.path]);
       } catch (err) {
@@ -773,7 +999,7 @@ export function useWorkspaceFileBrowser({
         setEntryActionPending(false);
       }
     },
-    [filePath, onDeleteEntry, onDeleteFile, refreshTreeForEntryPaths, workspaceID]
+    [activeTabId, filePath, onDeleteEntry, onDeleteFile, refreshTreeForEntryPaths, workspaceID]
   );
 
   const moveEntry = useCallback(
@@ -795,7 +1021,12 @@ export function useWorkspaceFileBrowser({
       setEntryActionPending(true);
       try {
         await onMoveEntry(workspaceID, entry.path, targetPath);
-        setFilePath((currentPath) => replaceMovedWorkspacePath(currentPath, entry.path, targetPath));
+        setTabs((prev) =>
+          prev.map((t) => {
+            const newPath = replaceMovedWorkspacePath(t.filePath, entry.path, targetPath);
+            return newPath !== t.filePath ? { ...t, filePath: newPath } : t;
+          })
+        );
         setWorkspaceStatus("Moved");
         await refreshTreeForEntryPaths([entry.path, targetPath]);
         return targetPath;
@@ -814,13 +1045,13 @@ export function useWorkspaceFileBrowser({
     workspaceTreeRequestRef.current += 1;
     directoryRequestRef.current = {};
     searchRequestRef.current += 1;
-    fileRequestRef.current += 1;
+    tabFileRequestRef.current = {};
     gitStatusRequestRef.current += 1;
     gitDiffRequestRef.current += 1;
+    setTabs([]);
+    setActiveTabId(null);
     setTree(undefined);
     setWorkspaceTreeResetKey((current) => current + 1);
-    setFilePath(initialPath);
-    setFileBody("");
     setWorkspaceTreeError(null);
     setDirectoryLoadingPaths(new Set());
     setDirectoryLoadErrors({});
@@ -834,9 +1065,7 @@ export function useWorkspaceFileBrowser({
     setSearchResults([]);
     setSearchTruncated(false);
     setSearchEngine(undefined);
-    setFileLoadError(null);
     setWorkspaceTreeLoading(false);
-    setFileLoading(false);
     setFileSaving(false);
     setFileDownloading(false);
     setFileDeleting(false);
@@ -852,9 +1081,6 @@ export function useWorkspaceFileBrowser({
     setGitDiffLoading(false);
     setGitDiffError(null);
     setGitSelectedPath("");
-    setFileOpenPosition(undefined);
-    setFileOpenRequestID(0);
-    setFileViewMode("edit");
     setWorkspaceStatus(null);
   }, [initialPath, workspaceID]);
 
@@ -911,6 +1137,17 @@ export function useWorkspaceFileBrowser({
     canUseWorkspace,
     canFetchFileBlob,
     canSearchWorkspace,
+    tabs,
+    activeTabId,
+    activeTabEditorViewState: activeTab?.editorViewState ?? null,
+    switchTab,
+    closeTab,
+    closeOtherTabs,
+    closeAllTabs,
+    pinTab,
+    reorderTabs,
+    setActiveTabEditorViewState,
+    saveTabEditorViewState,
     setFilePath,
     setFileBody,
     setSearchQuery,
@@ -1439,12 +1676,15 @@ function WorkspaceSearchResults({
               selected={controller.filePath === result.path}
               mode={controller.searchMode}
               onSelect={() => {
-                void controller.loadFile(result.path, result.line_number ? {
-                  position: {
-                    lineNumber: result.line_number,
-                    column: result.column ?? 1,
-                  },
-                } : undefined);
+                void controller.loadFile(result.path, {
+                  preview: true,
+                  ...(result.line_number ? {
+                    position: {
+                      lineNumber: result.line_number,
+                      column: result.column ?? 1,
+                    },
+                  } : undefined),
+                });
                 onFileSelected?.();
               }}
             />
@@ -1793,6 +2033,10 @@ export function WorkspaceFileTree({
         canManageEntries={controller.canUseWorkspace && !controller.entryActionPending}
         onLoadDirectory={(path) => void controller.loadDirectory(path)}
         onSelectFile={(path) => {
+          void controller.loadFile(path, { preview: true });
+          onFileSelected?.();
+        }}
+        onDoubleClickFile={(path) => {
           void controller.loadFile(path);
           onFileSelected?.();
         }}
@@ -1980,6 +2224,164 @@ function WorkspaceEntryDeleteDialog({
   );
 }
 
+function WorkspaceFileTabBar({
+  controller,
+}: {
+  controller: WorkspaceFileBrowserController;
+}) {
+  const [dragTabId, setDragTabId] = useState<string | null>(null);
+  const [dropIndicator, setDropIndicator] = useState<{ index: number; side: "left" | "right" } | null>(null);
+
+  if (controller.tabs.length === 0) return null;
+
+  function handleDragStart(e: React.DragEvent, tabId: string) {
+    setDragTabId(tabId);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("application/x-agentx-tab", tabId);
+  }
+
+  function handleDragOver(e: React.DragEvent, index: number) {
+    if (!dragTabId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const rect = e.currentTarget.getBoundingClientRect();
+    const midX = rect.left + rect.width / 2;
+    const side = e.clientX < midX ? "left" : "right";
+    setDropIndicator({ index, side });
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    if (!dragTabId || !dropIndicator) return;
+    const fromIndex = controller.tabs.findIndex((t) => t.id === dragTabId);
+    if (fromIndex === -1) return;
+    let toIndex = dropIndicator.side === "right" ? dropIndicator.index + 1 : dropIndicator.index;
+    if (fromIndex < toIndex) toIndex -= 1;
+    controller.reorderTabs(fromIndex, toIndex);
+    setDragTabId(null);
+    setDropIndicator(null);
+  }
+
+  function handleDragEnd() {
+    setDragTabId(null);
+    setDropIndicator(null);
+  }
+
+  return (
+    <div
+      className="flex shrink-0 items-center overflow-x-auto border-b border-border bg-muted/30"
+      role="tablist"
+      aria-label="Open files"
+      style={{ scrollbarWidth: "none" }}
+      onDrop={handleDrop}
+      onDragOver={(e) => { if (dragTabId) e.preventDefault(); }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+          setDropIndicator(null);
+        }
+      }}
+    >
+      {controller.tabs.map((tab, index) => {
+        const active = tab.id === controller.activeTabId;
+        const dragging = tab.id === dragTabId;
+        const fileName = tab.filePath.split("/").pop() || tab.filePath;
+        const showLeftIndicator = dropIndicator?.index === index && dropIndicator.side === "left";
+        const showRightIndicator = dropIndicator?.index === index && dropIndicator.side === "right";
+
+        return (
+          <ContextMenu key={tab.id}>
+            <ContextMenuTrigger asChild>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={active}
+                title={tab.filePath}
+                draggable
+                onDragStart={(e) => handleDragStart(e, tab.id)}
+                onDragEnd={handleDragEnd}
+                onDragOver={(e) => handleDragOver(e, index)}
+                className={cn(
+                  "group relative flex shrink-0 items-center gap-1.5 border-r border-border px-3 py-1.5 text-xs outline-none transition-colors",
+                  active
+                    ? "bg-background text-foreground"
+                    : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                  dragging && "opacity-40"
+                )}
+                onClick={() => controller.switchTab(tab.id)}
+                onDoubleClick={() => {
+                  if (tab.preview) controller.pinTab(tab.id);
+                }}
+                onMouseDown={(e) => {
+                  if (e.button === 1) {
+                    e.preventDefault();
+                    controller.closeTab(tab.id);
+                  }
+                }}
+              >
+                {showLeftIndicator && (
+                  <span className="pointer-events-none absolute -left-px top-1 bottom-1 w-0.5 rounded-full bg-primary" />
+                )}
+                <FileText className="h-3 w-3 shrink-0 text-blue-400" />
+                <span className={cn("max-w-40 truncate", tab.preview && "italic")}>
+                  {fileName}
+                </span>
+                {tab.dirty ? (
+                  <span
+                    className={cn(
+                      "ml-0.5 inline-block h-2 w-2 shrink-0 rounded-full bg-current",
+                      "group-hover:hidden"
+                    )}
+                    aria-label="Unsaved changes"
+                  />
+                ) : null}
+                <button
+                  type="button"
+                  className={cn(
+                    "ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm hover:bg-accent",
+                    !tab.dirty && "opacity-0 group-hover:opacity-100",
+                    tab.dirty && "hidden group-hover:inline-flex"
+                  )}
+                  title="Close"
+                  aria-label={`Close ${fileName}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    controller.closeTab(tab.id);
+                  }}
+                  draggable={false}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+                {showRightIndicator && (
+                  <span className="pointer-events-none absolute -right-px top-1 bottom-1 w-0.5 rounded-full bg-primary" />
+                )}
+              </button>
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <ContextMenuItem onSelect={() => controller.closeTab(tab.id)}>
+                Close
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={() => controller.closeOtherTabs(tab.id)}>
+                Close Others
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={() => controller.closeAllTabs()}>
+                Close All
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                onSelect={() => {
+                  void navigator.clipboard.writeText(tab.filePath);
+                }}
+              >
+                Copy Path
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
+        );
+      })}
+    </div>
+  );
+}
+
 export function WorkspaceFileEditorPane({
   controller,
   theme,
@@ -2077,6 +2479,7 @@ export function WorkspaceFileEditorPane({
         ) : (
           null
         )}
+        <WorkspaceFileTabBar controller={controller} />
         <WorkspaceFileEditor
           controller={controller}
           theme={theme}
@@ -2534,21 +2937,27 @@ export function WorkspaceFileBrowser({
               </ResizablePanel>
               <ResizableHandle withHandle />
               <ResizablePanel defaultSize={72} minSize={48}>
-                <WorkspaceFileEditor
-                  controller={controller}
-                  theme={theme}
-                  contentAriaLabel="File content"
-                  className="h-full"
-                />
+                <div className="flex h-full flex-col">
+                  <WorkspaceFileTabBar controller={controller} />
+                  <WorkspaceFileEditor
+                    controller={controller}
+                    theme={theme}
+                    contentAriaLabel="File content"
+                    className="min-h-0 flex-1"
+                  />
+                </div>
               </ResizablePanel>
             </ResizablePanelGroup>
           ) : (
-            <WorkspaceFileEditor
-              controller={controller}
-              theme={theme}
-              contentAriaLabel="File content"
-              className="h-full"
-            />
+            <div className="flex h-full flex-col">
+              <WorkspaceFileTabBar controller={controller} />
+              <WorkspaceFileEditor
+                controller={controller}
+                theme={theme}
+                contentAriaLabel="File content"
+                className="min-h-0 flex-1"
+              />
+            </div>
           )}
         </div>
       </div>

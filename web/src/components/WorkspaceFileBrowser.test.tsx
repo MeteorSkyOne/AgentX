@@ -304,6 +304,7 @@ describe("WorkspaceFileEditorPane markdown controls", () => {
     fireEvent.click(screen.getByRole("button", { name: "src/main.go line 2" }));
 
     expect(loadFile).toHaveBeenCalledWith("src/main.go", {
+      preview: true,
       position: { lineNumber: 2, column: 12 },
     });
   });
@@ -483,6 +484,17 @@ function controllerFixture(
     canUseWorkspace: true,
     canFetchFileBlob: true,
     canSearchWorkspace: false,
+    tabs: [],
+    activeTabId: null,
+    activeTabEditorViewState: null,
+    switchTab: vi.fn(),
+    closeTab: vi.fn(),
+    closeOtherTabs: vi.fn(),
+    closeAllTabs: vi.fn(),
+    pinTab: vi.fn(),
+    reorderTabs: vi.fn(),
+    setActiveTabEditorViewState: vi.fn(),
+    saveTabEditorViewState: vi.fn(),
     setFilePath: vi.fn(),
     setFileBody: vi.fn(),
     setSearchQuery: vi.fn(),
