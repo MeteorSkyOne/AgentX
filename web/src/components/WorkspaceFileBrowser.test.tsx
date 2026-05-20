@@ -193,6 +193,70 @@ describe("WorkspaceFileEditorPane markdown controls", () => {
 
     expect(loadGitDiff).toHaveBeenCalledWith("src/main.go");
   });
+
+  it("runs workspace search from the project files pane", async () => {
+    const onSearchWorkspace = vi.fn(async () => ({
+      query: "needle",
+      mode: "content" as const,
+      engine: "fallback" as const,
+      truncated: false,
+      results: [
+        {
+          path: "src/main.go",
+          name: "main.go",
+          line_number: 2,
+          column: 12,
+          preview: "println(\"needle\")",
+        },
+      ],
+    }));
+
+    render(<SearchHarness onSearchWorkspace={onSearchWorkspace} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Search file content" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Search project files" }), {
+      target: { value: "needle" },
+    });
+
+    await waitFor(() => expect(onSearchWorkspace).toHaveBeenCalledWith("w1", {
+      q: "needle",
+      mode: "content",
+      case_sensitive: false,
+      regex: false,
+      whole_word: false,
+      limit: 200,
+    }));
+    expect(await screen.findByRole("button", { name: "src/main.go line 2" })).toBeTruthy();
+  });
+
+  it("opens search results at the returned content position", () => {
+    const loadFile = vi.fn(async () => undefined);
+    render(
+      <WorkspaceFileTreePaneHarness
+        controller={controllerFixture({
+          canSearchWorkspace: true,
+          searchQuery: "needle",
+          searchMode: "content",
+          searchResults: [
+            {
+              path: "src/main.go",
+              name: "main.go",
+              line_number: 2,
+              column: 12,
+              preview: "println(\"needle\")",
+            },
+          ],
+          loadFile,
+        })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "src/main.go line 2" }));
+
+    expect(loadFile).toHaveBeenCalledWith("src/main.go", {
+      position: { lineNumber: 2, column: 12 },
+    });
+  });
 });
 
 function WorkspaceFileBrowserHookHarness({
@@ -287,6 +351,24 @@ function PdfLoadHarness({
   );
 }
 
+function SearchHarness({
+  onSearchWorkspace,
+}: {
+  onSearchWorkspace: NonNullable<Parameters<typeof useWorkspaceFileBrowser>[0]["onSearchWorkspace"]>;
+}) {
+  const controller = useWorkspaceFileBrowser({
+    workspaceID: "w1",
+    workspacePath: "/workspace/AgentX",
+    autoLoadTree: false,
+    onLoadTree: async () => workspaceTreeFixture(),
+    onSearchWorkspace,
+    onReadFile: async () => "",
+    onWriteFile: async () => undefined,
+    onDeleteFile: async () => undefined,
+  });
+  return <WorkspaceFileTreePaneHarness controller={controller} />;
+}
+
 function WorkspaceFileTreePaneHarness({
   controller,
 }: {
@@ -316,6 +398,16 @@ function controllerFixture(
     workspaceTreeError: null,
     directoryLoadingPaths: new Set(),
     directoryLoadErrors: {},
+    searchQuery: "",
+    searchMode: "files",
+    searchCaseSensitive: false,
+    searchRegex: false,
+    searchWholeWord: false,
+    searchLoading: false,
+    searchError: null,
+    searchResults: [],
+    searchTruncated: false,
+    searchEngine: undefined,
     fileLoading: false,
     fileLoadError: null,
     fileSaving: false,
@@ -340,8 +432,14 @@ function controllerFixture(
     fileViewMode: "edit",
     canUseWorkspace: true,
     canFetchFileBlob: true,
+    canSearchWorkspace: false,
     setFilePath: vi.fn(),
     setFileBody: vi.fn(),
+    setSearchQuery: vi.fn(),
+    setSearchMode: vi.fn(),
+    setSearchCaseSensitive: vi.fn(),
+    setSearchRegex: vi.fn(),
+    setSearchWholeWord: vi.fn(),
     setFileViewMode: vi.fn(),
     setWorkspacePaneView: vi.fn(),
     setGitScope: vi.fn(),
@@ -349,6 +447,8 @@ function controllerFixture(
     setGitCompare: vi.fn(),
     loadTree: vi.fn(async () => undefined),
     loadDirectory: vi.fn(async () => undefined),
+    loadSearch: vi.fn(async () => undefined),
+    clearSearch: vi.fn(),
     loadFile: vi.fn(async () => undefined),
     loadGitStatus: vi.fn(async () => undefined),
     loadGitDiff: vi.fn(async () => undefined),

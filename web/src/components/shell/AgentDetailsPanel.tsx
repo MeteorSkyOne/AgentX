@@ -61,6 +61,7 @@ export function AgentDetailsPanel({
   onUpdateAgent,
   onDeleteAgent,
   onLoadWorkspaceTree,
+  onSearchWorkspace,
   onReadWorkspaceFile,
   onFetchWorkspaceFileBlob,
   onWriteWorkspaceFile,
@@ -80,6 +81,7 @@ export function AgentDetailsPanel({
   onUpdateAgent: ShellProps["onUpdateAgent"];
   onDeleteAgent: ShellProps["onDeleteAgent"];
   onLoadWorkspaceTree: ShellProps["onLoadWorkspaceTree"];
+  onSearchWorkspace: ShellProps["onSearchWorkspace"];
   onReadWorkspaceFile: ShellProps["onReadWorkspaceFile"];
   onFetchWorkspaceFileBlob: ShellProps["onFetchWorkspaceFileBlob"];
   onWriteWorkspaceFile: ShellProps["onWriteWorkspaceFile"];
@@ -533,6 +535,7 @@ export function AgentDetailsPanel({
               initialPath={defaultAgentInstructionPath(selected?.kind)}
               theme={theme}
               onLoadTree={onLoadWorkspaceTree}
+              onSearchWorkspace={onSearchWorkspace}
               onReadFile={onReadWorkspaceFile}
               onFetchFileBlob={onFetchWorkspaceFileBlob}
               onWriteFile={onWriteWorkspaceFile}

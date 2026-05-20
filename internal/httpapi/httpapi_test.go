@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -912,6 +913,65 @@ func TestHTTPWorkspaceTreeLazyLoadsDirectories(t *testing.T) {
 
 	getJSON(t, treeURL+"?path=README.md", bootstrap.SessionToken, http.StatusBadRequest, nil)
 	getJSON(t, treeURL+"?path=../secret", bootstrap.SessionToken, http.StatusBadRequest, nil)
+}
+
+func TestHTTPWorkspaceSearchFallbackFindsFilesAndContent(t *testing.T) {
+	ts := newTestServer(t)
+	bootstrap := setupHTTP(t, ts.URL)
+	workspacePath := filepath.Join(t.TempDir(), "search-workspace")
+	var project domain.Project
+	postJSON(t, ts.URL+"/api/organizations/"+bootstrap.Organization.ID+"/projects", bootstrap.SessionToken, map[string]string{
+		"name":           "Search Workspace",
+		"workspace_path": workspacePath,
+	}, http.StatusOK, &project)
+
+	var workspace domain.Workspace
+	getJSON(t, ts.URL+"/api/workspaces/"+project.WorkspaceID, bootstrap.SessionToken, http.StatusOK, &workspace)
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "README.md"), "Hello AgentX\nneedle here\n")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "src", "main.go"), "package main\nfunc main() { println(\"needle\") }\n")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, ".hidden", "secret.txt"), "needle\n")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "archive.bin"), string([]byte{0, 1, 2}))
+
+	originalRgPath := workspaceSearchRgPath
+	workspaceSearchRgPath = filepath.Join(t.TempDir(), "missing-rg")
+	t.Cleanup(func() { workspaceSearchRgPath = originalRgPath })
+
+	searchURL := ts.URL + "/api/workspaces/" + workspace.ID + "/search"
+	var fileResults workspaceSearchResponse
+	getJSON(t, searchURL+"?mode=files&q="+url.QueryEscape("main"), bootstrap.SessionToken, http.StatusOK, &fileResults)
+	if fileResults.Engine != "fallback" || fileResults.Mode != workspaceSearchModeFiles || len(fileResults.Results) != 1 {
+		t.Fatalf("file search = %#v, want one fallback result", fileResults)
+	}
+	if fileResults.Results[0].Path != "src/main.go" || fileResults.Results[0].Name != "main.go" {
+		t.Fatalf("file result = %#v, want src/main.go", fileResults.Results[0])
+	}
+
+	var contentResults workspaceSearchResponse
+	getJSON(t, searchURL+"?mode=content&q="+url.QueryEscape("needle"), bootstrap.SessionToken, http.StatusOK, &contentResults)
+	if contentResults.Engine != "fallback" || contentResults.Mode != workspaceSearchModeContent {
+		t.Fatalf("content search metadata = %#v, want fallback content", contentResults)
+	}
+	gotPaths := make([]string, 0, len(contentResults.Results))
+	for _, result := range contentResults.Results {
+		gotPaths = append(gotPaths, result.Path)
+		if strings.HasPrefix(result.Path, ".hidden/") || result.Path == "archive.bin" {
+			t.Fatalf("content search included hidden or binary result: %#v", result)
+		}
+	}
+	if strings.Join(gotPaths, ",") != "README.md,src/main.go" {
+		t.Fatalf("content result paths = %#v, want README.md and src/main.go", gotPaths)
+	}
+	if first := contentResults.Results[0]; first.LineNumber != 2 || first.Column != 1 || first.Preview != "needle here" {
+		t.Fatalf("first content result = %#v, want line 2 column 1 preview", first)
+	}
+
+	var limited workspaceSearchResponse
+	getJSON(t, searchURL+"?mode=content&limit=1&q="+url.QueryEscape("needle"), bootstrap.SessionToken, http.StatusOK, &limited)
+	if !limited.Truncated || len(limited.Results) != 1 {
+		t.Fatalf("limited content search = %#v, want one truncated result", limited)
+	}
+	getJSON(t, searchURL+"?mode=content&regex=true&q=%5B", bootstrap.SessionToken, http.StatusBadRequest, nil)
+	getJSON(t, searchURL+"?mode=content&q=", bootstrap.SessionToken, http.StatusBadRequest, nil)
 }
 
 func TestHTTPWorkspaceGitStatusAndDiff(t *testing.T) {

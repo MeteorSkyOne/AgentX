@@ -34,6 +34,8 @@ import type {
   WorkspaceGitDiff,
   WorkspaceGitScope,
   WorkspaceGitStatus,
+  WorkspaceSearchMode,
+  WorkspaceSearchResponse,
   WorkspaceTreeEntry
 } from "./types";
 
@@ -508,6 +510,28 @@ export function workspaceFile(workspaceID: string, path: string): Promise<Worksp
   const params = new URLSearchParams({ path });
   return request<WorkspaceFile>(
     `/api/workspaces/${encodeURIComponent(workspaceID)}/files?${params.toString()}`
+  );
+}
+
+export function workspaceSearch(
+  workspaceID: string,
+  options: {
+    q: string;
+    mode?: WorkspaceSearchMode;
+    case_sensitive?: boolean;
+    regex?: boolean;
+    whole_word?: boolean;
+    limit?: number;
+  }
+): Promise<WorkspaceSearchResponse> {
+  const params = new URLSearchParams({ q: options.q });
+  if (options.mode) params.set("mode", options.mode);
+  if (options.case_sensitive) params.set("case_sensitive", "true");
+  if (options.regex) params.set("regex", "true");
+  if (options.whole_word) params.set("whole_word", "true");
+  if (options.limit) params.set("limit", String(options.limit));
+  return request<WorkspaceSearchResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceID)}/search?${params.toString()}`
   );
 }
 

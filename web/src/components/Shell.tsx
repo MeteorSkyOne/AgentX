@@ -172,6 +172,7 @@ export function Shell({
   onUpdateUserPreferences,
   onTestNotificationSettings,
   onLoadWorkspaceTree,
+  onSearchWorkspace,
   onReadWorkspaceFile,
   onFetchWorkspaceFileBlob,
   onWriteWorkspaceFile,
@@ -304,6 +305,7 @@ export function Shell({
     workspacePath: projectWorkspace?.path,
     autoLoadTree: false,
     onLoadTree: onLoadWorkspaceTree,
+    onSearchWorkspace,
     onReadFile: onReadWorkspaceFile,
     onFetchFileBlob: onFetchWorkspaceFileBlob,
     onWriteFile: onWriteWorkspaceFile,
@@ -1429,6 +1431,7 @@ export function Shell({
               onUpdateAgent={onUpdateAgent}
               onDeleteAgent={onDeleteAgent}
               onLoadWorkspaceTree={onLoadWorkspaceTree}
+              onSearchWorkspace={onSearchWorkspace}
               onReadWorkspaceFile={onReadWorkspaceFile}
               onFetchWorkspaceFileBlob={onFetchWorkspaceFileBlob}
               onWriteWorkspaceFile={onWriteWorkspaceFile}
@@ -1900,6 +1903,7 @@ export function Shell({
                 onUpdateAgent={onUpdateAgent}
                 onDeleteAgent={onDeleteAgent}
                 onLoadWorkspaceTree={onLoadWorkspaceTree}
+                onSearchWorkspace={onSearchWorkspace}
                 onReadWorkspaceFile={onReadWorkspaceFile}
                 onFetchWorkspaceFileBlob={onFetchWorkspaceFileBlob}
                 onWriteWorkspaceFile={onWriteWorkspaceFile}

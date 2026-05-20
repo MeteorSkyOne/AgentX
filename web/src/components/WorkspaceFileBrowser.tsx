@@ -5,17 +5,23 @@ import {
   ChevronUp,
   Code2,
   Columns2,
+  CaseSensitive,
   Database,
   Download,
   Eye,
   FileDiff,
+  FileSearch,
   FileText,
   FolderOpen,
   GitBranch,
   GitCompare,
+  Regex,
   RefreshCw,
   Save,
+  Search,
+  TextSearch,
   Trash2,
+  WholeWord,
   X,
 } from "lucide-react";
 import type {
@@ -24,6 +30,9 @@ import type {
   WorkspaceGitDiff,
   WorkspaceGitScope,
   WorkspaceGitStatus,
+  WorkspaceSearchMode,
+  WorkspaceSearchResponse,
+  WorkspaceSearchResult,
   WorkspaceTreeEntry,
 } from "@/api/types";
 import type { ThemeMode } from "@/theme";
@@ -56,6 +65,17 @@ const LazyWorkspaceGitDiffViewer = lazy(() =>
 
 export interface WorkspaceFileBrowserActions {
   onLoadTree: (workspaceID: string, path?: string) => Promise<WorkspaceTreeEntry>;
+  onSearchWorkspace?: (
+    workspaceID: string,
+    options: {
+      q: string;
+      mode?: WorkspaceSearchMode;
+      case_sensitive?: boolean;
+      regex?: boolean;
+      whole_word?: boolean;
+      limit?: number;
+    }
+  ) => Promise<WorkspaceSearchResponse>;
   onReadFile: (workspaceID: string, path: string) => Promise<string>;
   onFetchFileBlob?: (
     workspaceID: string,
@@ -112,6 +132,16 @@ export interface WorkspaceFileBrowserController {
   workspaceTreeError: string | null;
   directoryLoadingPaths: ReadonlySet<string>;
   directoryLoadErrors: Record<string, string | null | undefined>;
+  searchQuery: string;
+  searchMode: WorkspaceSearchMode;
+  searchCaseSensitive: boolean;
+  searchRegex: boolean;
+  searchWholeWord: boolean;
+  searchLoading: boolean;
+  searchError: string | null;
+  searchResults: WorkspaceSearchResult[];
+  searchTruncated: boolean;
+  searchEngine?: WorkspaceSearchResponse["engine"];
   fileLoading: boolean;
   fileLoadError: string | null;
   fileSaving: boolean;
@@ -137,8 +167,14 @@ export interface WorkspaceFileBrowserController {
   trimmedPath: string;
   canUseWorkspace: boolean;
   canFetchFileBlob: boolean;
+  canSearchWorkspace: boolean;
   setFilePath: (path: string) => void;
   setFileBody: (body: string) => void;
+  setSearchQuery: (query: string) => void;
+  setSearchMode: (mode: WorkspaceSearchMode) => void;
+  setSearchCaseSensitive: (caseSensitive: boolean) => void;
+  setSearchRegex: (regex: boolean) => void;
+  setSearchWholeWord: (wholeWord: boolean) => void;
   setFileViewMode: (mode: WorkspaceFileViewMode) => void;
   setWorkspacePaneView: (view: WorkspacePaneView) => void;
   setGitScope: (scope: WorkspaceGitScope) => void;
@@ -146,6 +182,8 @@ export interface WorkspaceFileBrowserController {
   setGitCompare: (compare: string) => void;
   loadTree: (options?: { quiet?: boolean }) => Promise<void>;
   loadDirectory: (path: string, options?: { quiet?: boolean; force?: boolean }) => Promise<void>;
+  loadSearch: (options?: { quiet?: boolean }) => Promise<void>;
+  clearSearch: () => void;
   loadFile: (path?: string, options?: WorkspaceFileOpenOptions) => Promise<void>;
   loadGitStatus: (options?: { quiet?: boolean; scope?: WorkspaceGitScope; target?: string; compare?: string }) => Promise<void>;
   loadGitDiff: (path: string) => Promise<void>;
@@ -169,6 +207,7 @@ export function useWorkspaceFileBrowser({
   initialPath = "",
   autoLoadTree = true,
   onLoadTree,
+  onSearchWorkspace,
   onReadFile,
   onFetchFileBlob,
   onWriteFile,
@@ -187,6 +226,16 @@ export function useWorkspaceFileBrowser({
   const [workspaceTreeError, setWorkspaceTreeError] = useState<string | null>(null);
   const [directoryLoadingPaths, setDirectoryLoadingPaths] = useState<Set<string>>(() => new Set());
   const [directoryLoadErrors, setDirectoryLoadErrors] = useState<Record<string, string | null | undefined>>({});
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchMode, setSearchMode] = useState<WorkspaceSearchMode>("files");
+  const [searchCaseSensitive, setSearchCaseSensitive] = useState(false);
+  const [searchRegex, setSearchRegex] = useState(false);
+  const [searchWholeWord, setSearchWholeWord] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<WorkspaceSearchResult[]>([]);
+  const [searchTruncated, setSearchTruncated] = useState(false);
+  const [searchEngine, setSearchEngine] = useState<WorkspaceSearchResponse["engine"]>();
   const [fileLoading, setFileLoading] = useState(false);
   const [fileLoadError, setFileLoadError] = useState<string | null>(null);
   const [fileSaving, setFileSaving] = useState(false);
@@ -210,6 +259,7 @@ export function useWorkspaceFileBrowser({
   const [fileViewMode, setFileViewMode] = useState<WorkspaceFileViewMode>("edit");
   const workspaceTreeRequestRef = useRef(0);
   const directoryRequestRef = useRef<Record<string, number>>({});
+  const searchRequestRef = useRef(0);
   const fileRequestRef = useRef(0);
   const gitStatusRequestRef = useRef(0);
   const gitDiffRequestRef = useRef(0);
@@ -217,6 +267,7 @@ export function useWorkspaceFileBrowser({
   const trimmedPath = filePath.trim();
   const canUseWorkspace = Boolean(workspaceID);
   const canFetchFileBlob = Boolean(workspaceID && onFetchFileBlob);
+  const canSearchWorkspace = Boolean(workspaceID && onSearchWorkspace);
   const gitEnabled = Boolean(onLoadGitStatus && onLoadGitDiff);
 
   const loadTree = useCallback(
@@ -295,6 +346,72 @@ export function useWorkspaceFileBrowser({
       }
     },
     [onLoadTree, tree, workspaceID]
+  );
+
+  const clearSearch = useCallback(() => {
+    searchRequestRef.current += 1;
+    setSearchQuery("");
+    setSearchLoading(false);
+    setSearchError(null);
+    setSearchResults([]);
+    setSearchTruncated(false);
+    setSearchEngine(undefined);
+  }, []);
+
+  const loadSearch = useCallback(
+    async (options: { quiet?: boolean } = {}) => {
+      const query = searchQuery.trim();
+      if (!workspaceID || !onSearchWorkspace || !query) {
+        searchRequestRef.current += 1;
+        setSearchLoading(false);
+        setSearchError(null);
+        setSearchResults([]);
+        setSearchTruncated(false);
+        setSearchEngine(undefined);
+        return;
+      }
+      const requestID = ++searchRequestRef.current;
+      setSearchLoading(true);
+      setSearchError(null);
+      try {
+        const response = await onSearchWorkspace(workspaceID, {
+          q: query,
+          mode: searchMode,
+          case_sensitive: searchCaseSensitive,
+          regex: searchRegex,
+          whole_word: searchWholeWord,
+          limit: 200,
+        });
+        if (searchRequestRef.current !== requestID) return;
+        setSearchResults(response.results);
+        setSearchTruncated(response.truncated);
+        setSearchEngine(response.engine);
+        if (!options.quiet) {
+          setWorkspaceStatus(response.truncated ? "Search results limited" : "Search complete");
+        }
+      } catch (err) {
+        if (searchRequestRef.current !== requestID) return;
+        const message = err instanceof Error ? err.message : "Search failed";
+        setSearchResults([]);
+        setSearchTruncated(false);
+        setSearchEngine(undefined);
+        setSearchError(message);
+        if (!options.quiet) setWorkspaceStatus(message);
+      } finally {
+        if (searchRequestRef.current === requestID) {
+          setSearchLoading(false);
+        }
+      }
+    },
+    [
+      onSearchWorkspace,
+      searchCaseSensitive,
+      searchMode,
+      searchQuery,
+      searchRegex,
+      searchWholeWord,
+      workspaceID,
+    ]
   );
 
   const refreshTreeForFilePath = useCallback(
@@ -694,6 +811,7 @@ export function useWorkspaceFileBrowser({
   useEffect(() => {
     workspaceTreeRequestRef.current += 1;
     directoryRequestRef.current = {};
+    searchRequestRef.current += 1;
     fileRequestRef.current += 1;
     gitStatusRequestRef.current += 1;
     gitDiffRequestRef.current += 1;
@@ -704,6 +822,16 @@ export function useWorkspaceFileBrowser({
     setWorkspaceTreeError(null);
     setDirectoryLoadingPaths(new Set());
     setDirectoryLoadErrors({});
+    setSearchQuery("");
+    setSearchMode("files");
+    setSearchCaseSensitive(false);
+    setSearchRegex(false);
+    setSearchWholeWord(false);
+    setSearchLoading(false);
+    setSearchError(null);
+    setSearchResults([]);
+    setSearchTruncated(false);
+    setSearchEngine(undefined);
     setFileLoadError(null);
     setWorkspaceTreeLoading(false);
     setFileLoading(false);
@@ -745,6 +873,16 @@ export function useWorkspaceFileBrowser({
     workspaceTreeError,
     directoryLoadingPaths,
     directoryLoadErrors,
+    searchQuery,
+    searchMode,
+    searchCaseSensitive,
+    searchRegex,
+    searchWholeWord,
+    searchLoading,
+    searchError,
+    searchResults,
+    searchTruncated,
+    searchEngine,
     fileLoading,
     fileLoadError,
     fileSaving,
@@ -770,8 +908,14 @@ export function useWorkspaceFileBrowser({
     trimmedPath,
     canUseWorkspace,
     canFetchFileBlob,
+    canSearchWorkspace,
     setFilePath,
     setFileBody,
+    setSearchQuery,
+    setSearchMode,
+    setSearchCaseSensitive,
+    setSearchRegex,
+    setSearchWholeWord,
     setFileViewMode,
     setWorkspacePaneView,
     setGitScope,
@@ -779,6 +923,8 @@ export function useWorkspaceFileBrowser({
     setGitCompare,
     loadTree,
     loadDirectory,
+    loadSearch,
+    clearSearch,
     loadFile,
     loadGitStatus,
     loadGitDiff,
@@ -1042,12 +1188,21 @@ export function WorkspaceFileTreePane({
         {controller.gitEnabled && (
           <WorkspacePaneViewSwitch controller={controller} />
         )}
+        {controller.workspacePaneView === "files" && controller.canSearchWorkspace && (
+          <WorkspaceSearchControls controller={controller} />
+        )}
         <div className="min-h-0 flex-1">
           {controller.gitEnabled && controller.workspacePaneView === "changes" ? (
             <WorkspaceGitChangesList
               controller={controller}
               className="h-full"
               onChangeSelected={onChangeSelected}
+            />
+          ) : controller.canSearchWorkspace && controller.searchQuery.trim() ? (
+            <WorkspaceSearchResults
+              controller={controller}
+              className="h-full"
+              onFileSelected={onFileSelected}
             />
           ) : (
             <WorkspaceFileTree
@@ -1061,6 +1216,293 @@ export function WorkspaceFileTreePane({
       </div>
     </div>
   );
+}
+
+function WorkspaceSearchControls({
+  controller,
+}: {
+  controller: WorkspaceFileBrowserController;
+}) {
+  const query = controller.searchQuery.trim();
+
+  useEffect(() => {
+    if (!controller.canSearchWorkspace) return;
+    if (!query) {
+      controller.loadSearch({ quiet: true });
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      void controller.loadSearch({ quiet: true });
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [
+    controller.canSearchWorkspace,
+    controller.searchCaseSensitive,
+    controller.searchMode,
+    controller.searchRegex,
+    controller.searchWholeWord,
+    query,
+  ]);
+
+  return (
+    <div className="flex shrink-0 flex-col gap-2 rounded-md border border-border bg-background/50 p-2">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={controller.searchQuery}
+            onChange={(event) => controller.setSearchQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                void controller.loadSearch();
+              } else if (event.key === "Escape") {
+                controller.clearSearch();
+              }
+            }}
+            placeholder={controller.searchMode === "content" ? "Search content" : "Search files"}
+            aria-label="Search project files"
+            className="h-8 pl-7 pr-8 text-xs"
+          />
+          {controller.searchQuery ? (
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              className="absolute right-0.5 top-1/2 h-7 w-7 -translate-y-1/2"
+              title="Clear search"
+              aria-label="Clear search"
+              onClick={controller.clearSearch}
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          ) : null}
+        </div>
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="outline"
+          title="Run search"
+          aria-label="Run search"
+          disabled={!query || controller.searchLoading}
+          onClick={() => void controller.loadSearch()}
+        >
+          <RefreshCw className={cn("h-3.5 w-3.5", controller.searchLoading && "animate-spin")} />
+        </Button>
+      </div>
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <div
+          className="grid grid-cols-2 rounded-md border border-border bg-background p-0.5"
+          role="group"
+          aria-label="Search mode"
+        >
+          <WorkspaceSearchModeButton
+            selected={controller.searchMode === "files"}
+            label="Search filenames"
+            onClick={() => controller.setSearchMode("files")}
+          >
+            <FileSearch className="h-3.5 w-3.5" />
+            Files
+          </WorkspaceSearchModeButton>
+          <WorkspaceSearchModeButton
+            selected={controller.searchMode === "content"}
+            label="Search file content"
+            onClick={() => controller.setSearchMode("content")}
+          >
+            <TextSearch className="h-3.5 w-3.5" />
+            Text
+          </WorkspaceSearchModeButton>
+        </div>
+        <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Search options">
+          <WorkspaceSearchToggle
+            selected={controller.searchCaseSensitive}
+            label="Match case"
+            onClick={() => controller.setSearchCaseSensitive(!controller.searchCaseSensitive)}
+          >
+            <CaseSensitive className="h-3.5 w-3.5" />
+          </WorkspaceSearchToggle>
+          <WorkspaceSearchToggle
+            selected={controller.searchWholeWord}
+            label="Match whole word"
+            onClick={() => controller.setSearchWholeWord(!controller.searchWholeWord)}
+          >
+            <WholeWord className="h-3.5 w-3.5" />
+          </WorkspaceSearchToggle>
+          <WorkspaceSearchToggle
+            selected={controller.searchRegex}
+            label="Use regular expression"
+            onClick={() => controller.setSearchRegex(!controller.searchRegex)}
+          >
+            <Regex className="h-3.5 w-3.5" />
+          </WorkspaceSearchToggle>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WorkspaceSearchModeButton({
+  selected,
+  label,
+  onClick,
+  children,
+}: {
+  selected: boolean;
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant={selected ? "secondary" : "ghost"}
+      className="h-7 justify-center gap-1.5 px-2 text-xs"
+      aria-label={label}
+      aria-pressed={selected}
+      onClick={onClick}
+    >
+      {children}
+    </Button>
+  );
+}
+
+function WorkspaceSearchToggle({
+  selected,
+  label,
+  onClick,
+  children,
+}: {
+  selected: boolean;
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Button
+      type="button"
+      size="icon-sm"
+      variant={selected ? "secondary" : "ghost"}
+      className="h-7 w-7"
+      title={label}
+      aria-label={label}
+      aria-pressed={selected}
+      onClick={onClick}
+    >
+      {children}
+    </Button>
+  );
+}
+
+function WorkspaceSearchResults({
+  controller,
+  className,
+  onFileSelected,
+}: {
+  controller: WorkspaceFileBrowserController;
+  className?: string;
+  onFileSelected?: () => void;
+}) {
+  const results = controller.searchResults;
+  const query = controller.searchQuery.trim();
+
+  return (
+    <div className={cn("flex min-h-0 flex-col overflow-hidden rounded-md border border-border bg-background/50", className)}>
+      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border px-2 text-[11px] text-muted-foreground">
+        <Search className="h-3 w-3 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">
+          {controller.searchLoading
+            ? "Searching..."
+            : controller.searchError
+              ? "Search failed"
+              : `${results.length} result${results.length === 1 ? "" : "s"}${controller.searchTruncated ? " (limited)" : ""}`}
+        </span>
+        {controller.searchEngine && (
+          <span className="shrink-0 uppercase">{controller.searchEngine}</span>
+        )}
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto p-2" role="list" aria-label="Search results">
+        {controller.searchError ? (
+          <p className="px-1 py-1 text-xs text-destructive">{controller.searchError}</p>
+        ) : controller.searchLoading && results.length === 0 ? (
+          <p className="px-1 py-1 text-xs text-muted-foreground">Searching...</p>
+        ) : !query ? (
+          <p className="px-1 py-1 text-xs text-muted-foreground">Enter a search query.</p>
+        ) : results.length === 0 ? (
+          <p className="px-1 py-1 text-xs text-muted-foreground">No results.</p>
+        ) : (
+          results.map((result, index) => (
+            <WorkspaceSearchResultRow
+              key={workspaceSearchResultKey(result, index)}
+              result={result}
+              selected={controller.filePath === result.path}
+              mode={controller.searchMode}
+              onSelect={() => {
+                void controller.loadFile(result.path, result.line_number ? {
+                  position: {
+                    lineNumber: result.line_number,
+                    column: result.column ?? 1,
+                  },
+                } : undefined);
+                onFileSelected?.();
+              }}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WorkspaceSearchResultRow({
+  result,
+  selected,
+  mode,
+  onSelect,
+}: {
+  result: WorkspaceSearchResult;
+  selected: boolean;
+  mode: WorkspaceSearchMode;
+  onSelect: () => void;
+}) {
+  const isContent = mode === "content" && result.line_number;
+  return (
+    <div role="listitem">
+      <button
+        type="button"
+        className={cn(
+          "flex min-h-8 w-full items-start gap-2 rounded px-1.5 py-1 text-left text-xs transition-colors",
+          selected
+            ? "bg-accent text-foreground"
+            : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+        )}
+        aria-label={isContent ? `${result.path} line ${result.line_number}` : result.path}
+        onClick={onSelect}
+      >
+        {isContent ? (
+          <TextSearch className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-400" />
+        ) : (
+          <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-400" />
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate">
+            {result.path}
+            {isContent ? (
+              <span className="text-muted-foreground">:{result.line_number}</span>
+            ) : null}
+          </span>
+          {isContent && result.preview ? (
+            <span className="block truncate font-mono text-[11px] text-muted-foreground">
+              {result.preview}
+            </span>
+          ) : null}
+        </span>
+      </button>
+    </div>
+  );
+}
+
+function workspaceSearchResultKey(result: WorkspaceSearchResult, index: number): string {
+  return `${result.path}:${result.line_number ?? 0}:${result.column ?? 0}:${index}`;
 }
 
 function WorkspacePaneViewSwitch({
@@ -2014,7 +2456,9 @@ export function WorkspaceFileBrowser({
   initialPath = "",
   theme,
   onLoadTree,
+  onSearchWorkspace,
   onReadFile,
+  onFetchFileBlob,
   onWriteFile,
   onDeleteFile,
   onCreateEntry,
@@ -2033,7 +2477,9 @@ export function WorkspaceFileBrowser({
     workspacePath,
     initialPath,
     onLoadTree,
+    onSearchWorkspace,
     onReadFile,
+    onFetchFileBlob,
     onWriteFile,
     onDeleteFile,
     onCreateEntry,

@@ -102,6 +102,7 @@ vi.mock("./api/client", () => ({
   workspaceFile: vi.fn(),
   workspaceGitDiff: vi.fn(),
   workspaceGitStatus: vi.fn(),
+  workspaceSearch: vi.fn(),
   workspaceTree: vi.fn(),
 }));
 

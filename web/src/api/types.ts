@@ -401,6 +401,25 @@ export interface WorkspaceGitDiff {
   modified: string;
 }
 
+export type WorkspaceSearchMode = "files" | "content";
+export type WorkspaceSearchEngine = "rg" | "fallback";
+
+export interface WorkspaceSearchResult {
+  path: string;
+  name: string;
+  line_number?: number;
+  column?: number;
+  preview?: string;
+}
+
+export interface WorkspaceSearchResponse {
+  query: string;
+  mode: WorkspaceSearchMode;
+  engine: WorkspaceSearchEngine;
+  truncated: boolean;
+  results: WorkspaceSearchResult[];
+}
+
 export interface ConversationBinding {
   id: string;
   organization_id: string;

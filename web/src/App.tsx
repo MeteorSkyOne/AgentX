@@ -44,6 +44,7 @@ import {
   workspaceFile,
   workspaceGitDiff,
   workspaceGitStatus,
+  workspaceSearch,
   workspaceTree,
   respondToInputRequest,
   steerQueuedPrompt
@@ -68,6 +69,8 @@ import type {
   WorkspaceGitDiff,
   WorkspaceGitScope,
   WorkspaceGitStatus,
+  WorkspaceSearchMode,
+  WorkspaceSearchResponse,
   WorkspaceTreeEntry
 } from "./api/types";
 import { LoginView } from "./components/LoginView";
@@ -1032,6 +1035,20 @@ export default function App() {
     return workspaceTree(workspaceID, path);
   }
 
+  async function handleSearchWorkspace(
+    workspaceID: string,
+    options: {
+      q: string;
+      mode?: WorkspaceSearchMode;
+      case_sensitive?: boolean;
+      regex?: boolean;
+      whole_word?: boolean;
+      limit?: number;
+    }
+  ): Promise<WorkspaceSearchResponse> {
+    return workspaceSearch(workspaceID, options);
+  }
+
   async function handleWriteWorkspaceFile(workspaceID: string, path: string, body: string) {
     await putWorkspaceFile(workspaceID, path, body);
   }
@@ -1157,6 +1174,7 @@ export default function App() {
       onUpdateUserPreferences={handleUpdateUserPreferences}
       onTestNotificationSettings={handleTestNotificationSettings}
       onLoadWorkspaceTree={handleLoadWorkspaceTree}
+      onSearchWorkspace={handleSearchWorkspace}
       onReadWorkspaceFile={handleReadWorkspaceFile}
       onFetchWorkspaceFileBlob={handleFetchWorkspaceFileBlob}
       onWriteWorkspaceFile={handleWriteWorkspaceFile}

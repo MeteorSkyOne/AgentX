@@ -21,6 +21,8 @@ import type {
   WorkspaceGitDiff,
   WorkspaceGitScope,
   WorkspaceGitStatus,
+  WorkspaceSearchMode,
+  WorkspaceSearchResponse,
   WorkspaceTreeEntry,
 } from "../../api/types";
 import type { ThemeMode } from "../../theme";
@@ -151,6 +153,17 @@ export interface ShellProps {
   onUpdateUserPreferences: (payload: UserPreferences) => Promise<UserPreferences>;
   onTestNotificationSettings: () => Promise<void>;
   onLoadWorkspaceTree: (workspaceID: string, path?: string) => Promise<WorkspaceTreeEntry>;
+  onSearchWorkspace: (
+    workspaceID: string,
+    options: {
+      q: string;
+      mode?: WorkspaceSearchMode;
+      case_sensitive?: boolean;
+      regex?: boolean;
+      whole_word?: boolean;
+      limit?: number;
+    }
+  ) => Promise<WorkspaceSearchResponse>;
   onReadWorkspaceFile: (workspaceID: string, path: string) => Promise<string>;
   onFetchWorkspaceFileBlob: (
     workspaceID: string,
