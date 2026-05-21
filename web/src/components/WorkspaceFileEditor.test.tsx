@@ -126,6 +126,48 @@ describe("WorkspaceFileEditor markdown preview", () => {
     });
   });
 
+  it("restores markdown preview scroll positions by tab", () => {
+    const saveTabMarkdownPreviewScrollTop = vi.fn();
+    const { rerender } = render(
+      <WorkspaceFileEditor
+        controller={controllerFixture({
+          activeTabId: "tab-1",
+          activeTabMarkdownPreviewScrollTop: 480,
+          filePath: "docs/readme.md",
+          fileBody: "# Readme\n\nBody",
+          fileViewMode: "preview",
+          saveTabMarkdownPreviewScrollTop,
+        })}
+        theme="dark"
+        contentAriaLabel="File content"
+        className="h-96"
+      />
+    );
+
+    const preview = screen.getByTestId("workspace-file-markdown-preview");
+    expect(preview.scrollTop).toBe(480);
+    preview.scrollTop = 640;
+
+    rerender(
+      <WorkspaceFileEditor
+        controller={controllerFixture({
+          activeTabId: "tab-2",
+          activeTabMarkdownPreviewScrollTop: 120,
+          filePath: "docs/other.md",
+          fileBody: "# Other\n\nBody",
+          fileViewMode: "preview",
+          saveTabMarkdownPreviewScrollTop,
+        })}
+        theme="dark"
+        contentAriaLabel="File content"
+        className="h-96"
+      />
+    );
+
+    expect(saveTabMarkdownPreviewScrollTop).toHaveBeenCalledWith("tab-1", 640);
+    expect(screen.getByTestId("workspace-file-markdown-preview").scrollTop).toBe(120);
+  });
+
   it("keeps non-markdown files in edit mode", () => {
     renderEditor({
       filePath: "src/main.go",
@@ -352,6 +394,7 @@ function controllerFixture(
     tabs: [],
     activeTabId: null,
     activeTabEditorViewState: null,
+    activeTabMarkdownPreviewScrollTop: 0,
     switchTab: vi.fn(),
     closeTab: vi.fn(),
     closeOtherTabs: vi.fn(),
@@ -360,6 +403,7 @@ function controllerFixture(
     reorderTabs: vi.fn(),
     setActiveTabEditorViewState: vi.fn(),
     saveTabEditorViewState: vi.fn(),
+    saveTabMarkdownPreviewScrollTop: vi.fn(),
     setFilePath: vi.fn(),
     setFileBody: vi.fn(),
     setSearchQuery: vi.fn(),

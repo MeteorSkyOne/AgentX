@@ -131,6 +131,7 @@ export interface WorkspaceFileTab {
   fileLoading: boolean;
   fileLoadError: string | null;
   editorViewState: unknown;
+  markdownPreviewScrollTop: number;
   fileViewMode: WorkspaceFileViewMode;
   fileOpenPosition?: WorkspaceFilePosition;
   fileOpenRequestID: number;
@@ -195,6 +196,7 @@ export interface WorkspaceFileBrowserController {
   tabs: readonly WorkspaceFileTab[];
   activeTabId: string | null;
   activeTabEditorViewState: unknown;
+  activeTabMarkdownPreviewScrollTop: number;
   switchTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
   closeOtherTabs: (tabId: string) => void;
@@ -203,6 +205,7 @@ export interface WorkspaceFileBrowserController {
   reorderTabs: (fromIndex: number, toIndex: number) => void;
   setActiveTabEditorViewState: (viewState: unknown) => void;
   saveTabEditorViewState: (tabId: string, viewState: unknown) => void;
+  saveTabMarkdownPreviewScrollTop: (tabId: string, scrollTop: number) => void;
   setFilePath: (path: string) => void;
   setFileBody: (body: string) => void;
   setSearchQuery: (query: string) => void;
@@ -424,6 +427,14 @@ export function useWorkspaceFileBrowser({
     [updateTab]
   );
 
+  const saveTabMarkdownPreviewScrollTop = useCallback(
+    (tabId: string, scrollTop: number) => {
+      if (!Number.isFinite(scrollTop)) return;
+      updateTab(tabId, { markdownPreviewScrollTop: Math.max(0, scrollTop) });
+    },
+    [updateTab]
+  );
+
   const loadTree = useCallback(
     async (options: { quiet?: boolean } = {}) => {
       if (!workspaceID) return;
@@ -639,6 +650,7 @@ export function useWorkspaceFileBrowser({
         fileLoading: true,
         fileLoadError: null,
         editorViewState: null,
+        markdownPreviewScrollTop: 0,
         fileViewMode: "edit",
         fileOpenPosition: normalizedPosition,
         fileOpenRequestID: 1,
@@ -895,6 +907,7 @@ export function useWorkspaceFileBrowser({
             fileLoading: false,
             fileLoadError: null,
             editorViewState: null,
+            markdownPreviewScrollTop: 0,
             fileViewMode: "edit",
             fileOpenPosition: undefined,
             fileOpenRequestID: 1,
@@ -1140,6 +1153,7 @@ export function useWorkspaceFileBrowser({
     tabs,
     activeTabId,
     activeTabEditorViewState: activeTab?.editorViewState ?? null,
+    activeTabMarkdownPreviewScrollTop: activeTab?.markdownPreviewScrollTop ?? 0,
     switchTab,
     closeTab,
     closeOtherTabs,
@@ -1148,6 +1162,7 @@ export function useWorkspaceFileBrowser({
     reorderTabs,
     setActiveTabEditorViewState,
     saveTabEditorViewState,
+    saveTabMarkdownPreviewScrollTop,
     setFilePath,
     setFileBody,
     setSearchQuery,

@@ -460,8 +460,26 @@ function MarkdownPreview({
   onOpenWorkspacePath: (target: WorkspacePathTarget) => void;
   className?: string;
 }) {
+  const previewRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const previewElement = previewRef.current;
+    if (!previewElement) return;
+    previewElement.scrollTop = controller.activeTabMarkdownPreviewScrollTop;
+    return () => {
+      if (controller.activeTabId) {
+        controller.saveTabMarkdownPreviewScrollTop(controller.activeTabId, previewElement.scrollTop);
+      }
+    };
+  }, [
+    controller.activeTabId,
+    controller.activeTabMarkdownPreviewScrollTop,
+    controller.saveTabMarkdownPreviewScrollTop,
+  ]);
+
   return (
     <div
+      ref={previewRef}
       className={cn(
         "prose prose-sm h-full min-h-0 w-full max-w-none overflow-auto break-words bg-background p-4 text-foreground dark:prose-invert",
         className
