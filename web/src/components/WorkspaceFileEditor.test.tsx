@@ -168,6 +168,25 @@ describe("WorkspaceFileEditor markdown preview", () => {
     expect(screen.getByTestId("workspace-file-markdown-preview").scrollTop).toBe(120);
   });
 
+  it("reapplies markdown preview scroll after async content changes", async () => {
+    renderEditor({
+      activeTabId: "tab-1",
+      activeTabMarkdownPreviewScrollTop: 480,
+      filePath: "docs/readme.md",
+      fileBody: "# Readme\n\n```mermaid\ngraph LR\nA --> B\n```",
+      fileViewMode: "preview",
+    });
+
+    const preview = screen.getByTestId("workspace-file-markdown-preview");
+    expect(preview.scrollTop).toBe(480);
+
+    preview.scrollTop = 80;
+    fireEvent.scroll(preview);
+    preview.firstElementChild?.appendChild(document.createElement("div"));
+
+    await waitFor(() => expect(preview.scrollTop).toBe(480));
+  });
+
   it("keeps non-markdown files in edit mode", () => {
     renderEditor({
       filePath: "src/main.go",

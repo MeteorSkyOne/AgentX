@@ -461,14 +461,86 @@ function MarkdownPreview({
   className?: string;
 }) {
   const previewRef = useRef<HTMLDivElement | null>(null);
+  const previewContentRef = useRef<HTMLDivElement | null>(null);
 
   useLayoutEffect(() => {
     const previewElement = previewRef.current;
+    const contentElement = previewContentRef.current;
     if (!previewElement) return;
-    previewElement.scrollTop = controller.activeTabMarkdownPreviewScrollTop;
+    const targetScrollTop = controller.activeTabMarkdownPreviewScrollTop;
+    let cancelled = false;
+    let restoreActive = true;
+    let userInteracted = false;
+    let reachedTargetScrollTop = false;
+    let restoreFrame: number | null = null;
+
+    const updateReachedTarget = () => {
+      if (Math.abs(previewElement.scrollTop - targetScrollTop) < 1) {
+        reachedTargetScrollTop = true;
+      }
+    };
+
+    const restoreScrollTop = () => {
+      if (cancelled || !restoreActive || userInteracted) return;
+      previewElement.scrollTop = targetScrollTop;
+      updateReachedTarget();
+    };
+
+    const scheduleRestore = () => {
+      if (restoreFrame !== null) return;
+      restoreFrame = requestAnimationFrame(() => {
+        restoreFrame = null;
+        restoreScrollTop();
+      });
+    };
+
+    const stopRestoring = () => {
+      userInteracted = true;
+      restoreActive = false;
+    };
+
+    previewElement.addEventListener("wheel", stopRestoring, { passive: true });
+    previewElement.addEventListener("touchstart", stopRestoring, { passive: true });
+    previewElement.addEventListener("pointerdown", stopRestoring);
+    previewElement.addEventListener("keydown", stopRestoring);
+    restoreScrollTop();
+
+    const resizeObserver =
+      contentElement && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(scheduleRestore)
+        : null;
+    if (contentElement) {
+      resizeObserver?.observe(contentElement);
+    }
+
+    const mutationObserver =
+      contentElement && typeof MutationObserver !== "undefined"
+        ? new MutationObserver(scheduleRestore)
+        : null;
+    if (contentElement) {
+      mutationObserver?.observe(contentElement, {
+        childList: true,
+        subtree: true,
+      });
+    }
+
     return () => {
+      cancelled = true;
+      if (restoreFrame !== null) {
+        cancelAnimationFrame(restoreFrame);
+      }
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+      previewElement.removeEventListener("wheel", stopRestoring);
+      previewElement.removeEventListener("touchstart", stopRestoring);
+      previewElement.removeEventListener("pointerdown", stopRestoring);
+      previewElement.removeEventListener("keydown", stopRestoring);
       if (controller.activeTabId) {
-        controller.saveTabMarkdownPreviewScrollTop(controller.activeTabId, previewElement.scrollTop);
+        const scrollTop =
+          !userInteracted && !reachedTargetScrollTop
+            ? Math.max(previewElement.scrollTop, targetScrollTop)
+            : previewElement.scrollTop;
+        controller.saveTabMarkdownPreviewScrollTop(controller.activeTabId, scrollTop);
       }
     };
   }, [
@@ -486,12 +558,14 @@ function MarkdownPreview({
       )}
       data-testid="workspace-file-markdown-preview"
     >
-      <MarkdownRenderer
-        text={controller.fileBody}
-        workspacePath={controller.workspacePath}
-        relativeLinkBasePath={controller.trimmedPath}
-        onOpenWorkspacePath={onOpenWorkspacePath}
-      />
+      <div ref={previewContentRef}>
+        <MarkdownRenderer
+          text={controller.fileBody}
+          workspacePath={controller.workspacePath}
+          relativeLinkBasePath={controller.trimmedPath}
+          onOpenWorkspacePath={onOpenWorkspacePath}
+        />
+      </div>
     </div>
   );
 }
