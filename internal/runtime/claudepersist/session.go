@@ -519,8 +519,37 @@ func (s *persistentSession) handleControlRequest(payload map[string]any) *runtim
 		return nil
 	}
 
-	// Check if this is an AskUserQuestion permission request
 	request, _ := payload["request"].(map[string]any)
+
+	toolName := claude.StringValue(request, "tool_name")
+
+	// When in a plan-mode override session, auto-approve ExitPlanMode and
+	// restore the base permission mode so the process exits plan cleanly.
+	if request != nil && (toolName == "ExitPlanMode" || toolName == "ExitPlanModeV2") && s.modeOverride != "" {
+		response := map[string]any{
+			"type": "control_response",
+			"response": map[string]any{
+				"subtype":    "success",
+				"request_id": requestID,
+				"response": map[string]any{
+					"behavior":     "allow",
+					"updatedInput": map[string]any{},
+					"updatedPermissions": []any{
+						map[string]any{
+							"type":        "setMode",
+							"mode":        s.baseMode,
+							"destination": "session",
+						},
+					},
+				},
+			},
+		}
+		if err := s.process.WriteJSON(response); err != nil {
+			slog.Warn("claudepersist: failed to send ExitPlanMode response", "key", s.key, "error", err)
+		}
+		return nil
+	}
+
 	if request != nil && claude.StringValue(request, "tool_name") == "AskUserQuestion" {
 		input, _ := request["input"].(map[string]any)
 		if input != nil {
