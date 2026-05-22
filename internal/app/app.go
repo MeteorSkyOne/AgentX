@@ -363,9 +363,12 @@ func (a *App) clearActiveRunPendingQuestions(conversationType domain.Conversatio
 	}
 }
 
-func (r *activeAgentRun) appendDelta(text string, thinking string, process []domain.ProcessItem, team *domain.TeamMetadata) {
+func (r *activeAgentRun) appendDelta(text string, thinking string, process []domain.ProcessItem, clearText bool, team *domain.TeamMetadata) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if clearText {
+		r.text = ""
+	}
 	r.text += text
 	r.thinking += thinking
 	if len(process) > 0 {

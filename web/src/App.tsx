@@ -594,7 +594,7 @@ export default function App() {
                 runID: event.payload.run_id,
                 agentID: event.payload.agent_id ?? existing?.agentID,
                 startedAt: existing?.startedAt ?? event.created_at,
-                text: `${existing?.text ?? ""}${event.payload.text}`,
+                text: `${event.payload.clear_text ? "" : (existing?.text ?? "")}${event.payload.text}`,
                 team: event.payload.team ?? existing?.team,
                 thinking: event.payload.thinking
                   ? `${existing?.thinking ?? ""}${event.payload.thinking}`

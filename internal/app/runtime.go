@@ -291,16 +291,16 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 					}
 					process := runtimeProcessItems(evt)
 					processBuf = append(processBuf, process...)
-					if evt.Text == "" && evt.Thinking == "" && len(process) == 0 {
+					if evt.Text == "" && evt.Thinking == "" && len(process) == 0 && !evt.ClearText {
 						continue
 					}
-					activeRun.appendDelta(evt.Text, evt.Thinking, process, opts.Team)
+					activeRun.appendDelta(evt.Text, evt.Thinking, process, evt.ClearText, opts.Team)
 					a.publishConversationEvent(domain.Event{
 						Type:             domain.EventAgentOutputDelta,
 						OrganizationID:   userMessage.OrganizationID,
 						ConversationType: userMessage.ConversationType,
 						ConversationID:   userMessage.ConversationID,
-						Payload:          domain.AgentOutputDeltaPayload{RunID: runID, AgentID: agent.ID, Text: evt.Text, Thinking: evt.Thinking, Process: process, Team: opts.Team},
+						Payload:          domain.AgentOutputDeltaPayload{RunID: runID, AgentID: agent.ID, Text: evt.Text, Thinking: evt.Thinking, Process: process, ClearText: evt.ClearText, Team: opts.Team},
 					})
 				case agentruntime.EventCompleted:
 					a.removePendingQuestions(userMessage.ConversationType, userMessage.ConversationID)

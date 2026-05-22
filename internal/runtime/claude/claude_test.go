@@ -400,8 +400,25 @@ func TestCompletedResultOnlyPromotesAssistantTextBeforeTool(t *testing.T) {
 	handler := newLineHandler("fallback")
 
 	handler.HandleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"I will inspect first."}]}}`))
-	handler.HandleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"README.md"}}]}}`))
+
+	// Tool use promotes the preceding text to a process item during streaming.
+	toolEvents, err := handler.HandleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"README.md"}}]}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(toolEvents) != 1 {
+		t.Fatalf("tool events = %#v", toolEvents)
+	}
+	if !toolEvents[0].ClearText {
+		t.Fatal("expected ClearText on tool event")
+	}
+	if len(toolEvents[0].Process) < 1 || toolEvents[0].Process[0].Type != "thinking" || toolEvents[0].Process[0].Text != "I will inspect first." {
+		t.Fatalf("expected promoted text as first process item, got %#v", toolEvents[0].Process)
+	}
+
 	handler.HandleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"Final answer."}]}}`))
+
+	// Result should not re-emit the already-promoted text.
 	events, err := handler.HandleLine([]byte(`{"type":"result","subtype":"success","is_error":false,"result":"Final answer.","session_id":"s1"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -409,11 +426,11 @@ func TestCompletedResultOnlyPromotesAssistantTextBeforeTool(t *testing.T) {
 	if len(events) != 1 || events[0].Type != runtime.EventCompleted {
 		t.Fatalf("events = %#v", events)
 	}
-	if events[0].Thinking != "I will inspect first." {
-		t.Fatalf("thinking = %q, want only the stage summary", events[0].Thinking)
+	if events[0].Thinking != "" {
+		t.Fatalf("thinking = %q, want empty (already emitted during streaming)", events[0].Thinking)
 	}
-	if len(events[0].Process) != 1 || events[0].Process[0].Text != "I will inspect first." {
-		t.Fatalf("process = %#v", events[0].Process)
+	if len(events[0].Process) != 0 {
+		t.Fatalf("process = %#v, want empty (already emitted during streaming)", events[0].Process)
 	}
 }
 

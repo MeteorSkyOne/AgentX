@@ -108,6 +108,7 @@ type Event struct {
 	Text         string
 	Thinking     string
 	Process      []ProcessItem
+	ClearText    bool
 	Usage        *Usage
 	Error        string
 	StaleSession bool

@@ -58,12 +58,13 @@ type MessageHistoryCompletedPayload struct {
 }
 
 type AgentOutputDeltaPayload struct {
-	RunID    string        `json:"run_id"`
-	AgentID  string        `json:"agent_id"`
-	Text     string        `json:"text"`
-	Thinking string        `json:"thinking,omitempty"`
-	Process  []ProcessItem `json:"process,omitempty"`
-	Team     *TeamMetadata `json:"team,omitempty"`
+	RunID     string        `json:"run_id"`
+	AgentID   string        `json:"agent_id"`
+	Text      string        `json:"text"`
+	Thinking  string        `json:"thinking,omitempty"`
+	Process   []ProcessItem `json:"process,omitempty"`
+	ClearText bool          `json:"clear_text,omitempty"`
+	Team      *TeamMetadata `json:"team,omitempty"`
 }
 
 type AgentRunPayload struct {

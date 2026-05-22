@@ -272,13 +272,22 @@ func (s *persistentSession) handleLine(line []byte, textBuf *strings.Builder, pe
 			return false, nil
 		}
 		if text != "" {
+			if textBuf.Len() > 0 {
+				textBuf.WriteByte('\n')
+			}
 			textBuf.WriteString(text)
+		}
+		var clearText bool
+		if thinking != "" || len(process) > 0 {
+			if promoted := promotePendingImmediate(pendingTextBuf); promoted != "" {
+				process = append([]runtime.ProcessItem{{Type: "thinking", Text: promoted}}, process...)
+				clearText = true
+			}
+		}
+		if text != "" {
 			appendStageText(pendingTextBuf, text)
 		}
-		if thinking != "" || len(process) > 0 {
-			promotePendingStageText(pendingTextBuf, stageTextBuf)
-		}
-		s.emit(runtime.Event{Type: runtime.EventDelta, Text: text, Thinking: thinking, Process: process})
+		s.emit(runtime.Event{Type: runtime.EventDelta, Text: text, Thinking: thinking, Process: process, ClearText: clearText})
 		return false, nil
 
 	case "result":
@@ -344,6 +353,15 @@ func promotePendingStageText(pendingTextBuf *strings.Builder, stageTextBuf *stri
 	}
 	appendStageText(stageTextBuf, text)
 	pendingTextBuf.Reset()
+}
+
+func promotePendingImmediate(pendingTextBuf *strings.Builder) string {
+	text := strings.TrimSpace(pendingTextBuf.String())
+	if text == "" {
+		return ""
+	}
+	pendingTextBuf.Reset()
+	return text
 }
 
 func sameNormalizedText(left string, right string) bool {

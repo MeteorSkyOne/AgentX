@@ -69,6 +69,7 @@ export interface AgentOutputDeltaEvent extends BaseEvent {
     text: string;
     thinking?: string;
     process?: ProcessItem[];
+    clear_text?: boolean;
     team?: TeamMetadata;
   };
 }

@@ -365,12 +365,21 @@ func (h *lineHandler) HandleLine(line []byte) ([]runtime.Event, error) {
 		}
 		if text != "" {
 			h.appendText(text)
+		}
+		var clearText bool
+		if thinking != "" || len(process) > 0 {
+			h.mu.Lock()
+			promoted := h.promotePendingTextImmediateLocked()
+			h.mu.Unlock()
+			if promoted != "" {
+				process = append([]runtime.ProcessItem{{Type: "thinking", Text: promoted}}, process...)
+				clearText = true
+			}
+		}
+		if text != "" {
 			h.appendPendingText(text)
 		}
-		if thinking != "" || len(process) > 0 {
-			h.promotePendingTextToStage()
-		}
-		return []runtime.Event{{Type: runtime.EventDelta, Text: text, Thinking: thinking, Process: process}}, nil
+		return []runtime.Event{{Type: runtime.EventDelta, Text: text, Thinking: thinking, Process: process, ClearText: clearText}}, nil
 	case "result":
 		if isErrorResult(payload) {
 			errText := resultError(payload)
@@ -430,12 +439,6 @@ func (h *lineHandler) appendPendingText(text string) {
 	appendLine(&h.pendingText, text)
 }
 
-func (h *lineHandler) promotePendingTextToStage() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.promotePendingTextToStageLocked()
-}
-
 func (h *lineHandler) text() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -465,6 +468,15 @@ func (h *lineHandler) promotePendingTextToStageLocked() {
 	}
 	appendLine(&h.stageText, text)
 	h.pendingText.Reset()
+}
+
+func (h *lineHandler) promotePendingTextImmediateLocked() string {
+	text := strings.TrimSpace(h.pendingText.String())
+	if text == "" {
+		return ""
+	}
+	h.pendingText.Reset()
+	return text
 }
 
 func appendLine(b *strings.Builder, text string) {
