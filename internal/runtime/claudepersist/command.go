@@ -43,9 +43,7 @@ func (r *Runtime) buildArgs(req runtime.StartSessionRequest) []string {
 	}
 
 	mode := strings.TrimSpace(r.opts.PermissionMode)
-	if override := strings.TrimSpace(req.PermissionMode); override != "" {
-		mode = override
-	} else if req.YoloMode {
+	if req.YoloMode {
 		mode = "bypassPermissions"
 	}
 	if mode != "" {

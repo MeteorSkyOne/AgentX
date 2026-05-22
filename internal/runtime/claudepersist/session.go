@@ -32,11 +32,12 @@ type persistentSession struct {
 	alive               bool
 	started             bool
 	turnHeld            bool
-	detachOnClose       bool
 	done                chan struct{}
 	closeOnce           sync.Once
 	pendingInput        chan inputAnswer
 	pendingControlInput map[string]any
+	modeOverride        string
+	baseMode            string
 }
 
 func newPersistentSession(proc *procpool.ManagedProcess, key string, rt *Runtime) *persistentSession {
@@ -95,6 +96,7 @@ func (s *persistentSession) Send(ctx context.Context, input runtime.Input) error
 		return nil
 	}
 	s.started = true
+	modeOverride := s.modeOverride
 	s.mu.Unlock()
 
 	if err := s.process.AcquireTurn(ctx); err != nil {
@@ -104,6 +106,10 @@ func (s *persistentSession) Send(ctx context.Context, input runtime.Input) error
 	s.mu.Lock()
 	s.turnHeld = true
 	s.mu.Unlock()
+
+	if modeOverride != "" {
+		s.sendSetPermissionMode(modeOverride)
+	}
 
 	msg, err := buildUserMessage(input)
 	if err != nil {
@@ -152,15 +158,14 @@ func (s *persistentSession) Close(ctx context.Context) error {
 	s.alive = false
 	turnHeld := s.turnHeld
 	s.turnHeld = false
-	detach := s.detachOnClose
+	modeOverride := s.modeOverride
 	s.mu.Unlock()
 
+	if modeOverride != "" {
+		s.sendSetPermissionMode(s.baseMode)
+	}
 	if turnHeld {
 		s.process.ReleaseTurn()
-	}
-	if detach {
-		s.rt.pool.Detach(s.process)
-		s.process.Kill()
 	}
 	s.closeEventStream()
 	return nil
@@ -298,6 +303,9 @@ func (s *persistentSession) handleLine(line []byte, textBuf *strings.Builder, pe
 		if inputReq := s.handleControlRequest(payload); inputReq != nil {
 			return false, inputReq
 		}
+		return false, nil
+
+	case "control_response":
 		return false, nil
 
 	default:
@@ -532,4 +540,18 @@ func (s *persistentSession) handleControlRequest(payload map[string]any) *runtim
 		slog.Warn("claudepersist: failed to send permission response", "key", s.key, "error", err)
 	}
 	return nil
+}
+
+func (s *persistentSession) sendSetPermissionMode(mode string) {
+	msg := map[string]any{
+		"type":       "control_request",
+		"request_id": id.New("ctrl"),
+		"request": map[string]any{
+			"subtype": "set_permission_mode",
+			"mode":    mode,
+		},
+	}
+	if err := s.process.WriteJSON(msg); err != nil {
+		slog.Warn("claudepersist: failed to send set_permission_mode", "key", s.key, "mode", mode, "error", err)
+	}
 }
