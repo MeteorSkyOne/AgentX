@@ -86,6 +86,38 @@ done
 	assertProviderLimitJSONRedacted(t, got, "person@example.com")
 }
 
+func TestCodexWindowsPreferRateLimitsByLimitID(t *testing.T) {
+	windows, _ := codexWindowsFromRateLimitResult(map[string]any{
+		"rateLimits": map[string]any{
+			"primary": map[string]any{"usedPercent": float64(99), "windowDurationMins": float64(60)},
+		},
+		"rateLimitsByLimitId": map[string]any{
+			"codex": map[string]any{
+				"primary":   map[string]any{"usedPercent": float64(42), "windowDurationMins": float64(300)},
+				"secondary": map[string]any{"usedPercent": float64(10), "windowDurationMins": float64(10080)},
+			},
+		},
+	})
+	if len(windows) != 2 {
+		t.Fatalf("windows = %#v, want two", windows)
+	}
+	if windows[0].Label != "5-hour" || windows[0].UsedPercent == nil || *windows[0].UsedPercent != 42 {
+		t.Fatalf("primary window = %#v", windows[0])
+	}
+	if windows[1].Label != "Weekly" || windows[1].UsedPercent == nil || *windows[1].UsedPercent != 10 {
+		t.Fatalf("secondary window = %#v", windows[1])
+	}
+
+	windows, _ = codexWindowsFromRateLimitResult(map[string]any{
+		"rateLimits": map[string]any{
+			"primary": map[string]any{"usedPercent": float64(5), "windowDurationMins": float64(120)},
+		},
+	})
+	if len(windows) != 1 || windows[0].Label != "2-hour" {
+		t.Fatalf("generic window = %#v", windows)
+	}
+}
+
 func TestProviderLimitServiceClaudeReadsUsageAPI(t *testing.T) {
 	script := writeExecutable(t, "claude", `#!/bin/sh
 if [ "$1" != "auth" ] || [ "$2" != "status" ] || [ "$3" != "--json" ]; then

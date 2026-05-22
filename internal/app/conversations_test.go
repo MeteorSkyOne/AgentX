@@ -3332,6 +3332,288 @@ func TestSlashCompactUnsupportedForCodexWritesSystemMessage(t *testing.T) {
 	}
 }
 
+func TestSlashStatusReturnsRuntimeSnapshotWithoutAgentRun(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	if err := app.store.Sessions().SetAgentSession(ctx, bootstrap.Agent.ID, domain.ConversationChannel, bootstrap.Channel.ID, "provider_1", "completed"); err != nil {
+		t.Fatal(err)
+	}
+	total := int64(76420)
+	window := int64(400000)
+	if err := app.store.Sessions().SetAgentSessionContextUsage(ctx, bootstrap.Agent.ID, domain.ConversationChannel, bootstrap.Channel.ID, &domain.ContextUsage{
+		TotalTokens:         &total,
+		ContextWindowTokens: &window,
+		Source:              "test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	message, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/status",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.SenderType != domain.SenderSystem {
+		t.Fatalf("sender = %s, want system", message.SenderType)
+	}
+	if !strings.Contains(message.Body, "Status for @"+bootstrap.Agent.Handle) || !strings.Contains(message.Body, "Context: 76,420 / 400,000 tokens") || !strings.Contains(message.Body, "Limits: unavailable") {
+		t.Fatalf("status body = %q", message.Body)
+	}
+	messages, err := app.ListMessages(ctx, domain.ConversationChannel, bootstrap.Channel.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("messages len = %d, want only status system message: %#v", len(messages), messages)
+	}
+}
+
+func TestSlashStatusRequiresTargetInMultiAgentConversation(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	second, err := app.CreateAgent(ctx, AgentCreateRequest{
+		UserID:         bootstrap.User.ID,
+		OrganizationID: bootstrap.Organization.ID,
+		Name:           "Agent Two",
+		Handle:         "agent_two",
+		Kind:           domain.AgentKindFake,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SetChannelAgents(ctx, bootstrap.Channel.ID, []domain.ChannelAgent{
+		{AgentID: bootstrap.Agent.ID},
+		{AgentID: second.ID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/status",
+	})
+	if !IsCommandInputError(err) || !strings.Contains(err.Error(), "requires an @agent target") {
+		t.Fatalf("err = %v, want command target error", err)
+	}
+
+	message, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/status @agent_two",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(message.Body, "Status for @agent_two") {
+		t.Fatalf("status body = %q", message.Body)
+	}
+}
+
+func TestSlashStatusUsesActiveRunContextUsage(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	persistedTotal := int64(10)
+	activeTotal := int64(200)
+	window := int64(1000)
+	if err := app.store.Sessions().SetAgentSessionContextUsage(ctx, bootstrap.Agent.ID, domain.ConversationChannel, bootstrap.Channel.ID, &domain.ContextUsage{
+		TotalTokens:         &persistedTotal,
+		ContextWindowTokens: &window,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run := &activeAgentRun{
+		runID:            "run_status",
+		agentID:          bootstrap.Agent.ID,
+		organizationID:   bootstrap.Organization.ID,
+		conversationType: domain.ConversationChannel,
+		conversationID:   bootstrap.Channel.ID,
+		startedAt:        time.Now().UTC(),
+	}
+	run.setContextUsage(&agentruntime.ContextUsage{TotalTokens: &activeTotal, ContextWindowTokens: &window})
+	app.registerActiveAgentRun(activeRunKey{
+		conversationType: domain.ConversationChannel,
+		conversationID:   bootstrap.Channel.ID,
+		agentID:          bootstrap.Agent.ID,
+	}, run)
+
+	message, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/status",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(message.Body, "Context: 200 / 1,000 tokens") {
+		t.Fatalf("status body = %q", message.Body)
+	}
+}
+
+func TestSlashStatusProbesClaudeContextCommand(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	claudeAuth := writeExecutable(t, "claude-auth", `#!/bin/sh
+cat <<'JSON'
+{"loggedIn":false,"method":"oauth","provider":"claude.ai"}
+JSON
+`)
+	app := New(st, eventbus.New(), Options{
+		AdminToken:       "secret",
+		DataDir:          t.TempDir(),
+		DefaultAgentKind: domain.AgentKindClaude,
+		ProviderLimits:   ProviderLimitOptions{ClaudeCommand: claudeAuth, ProbeTimeout: time.Second},
+		Runtimes: map[string]agentruntime.Runtime{
+			domain.AgentKindClaude: scriptedRuntime{events: []agentruntime.Event{{
+				Type: agentruntime.EventCompleted,
+				Text: "Context window: 76,420 / 200,000 tokens (38%)",
+			}}},
+		},
+	})
+	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Sessions().SetAgentSession(ctx, bootstrap.Agent.ID, domain.ConversationChannel, bootstrap.Channel.ID, "claude-session", "completed"); err != nil {
+		t.Fatal(err)
+	}
+
+	message, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/status",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(message.Body, "Context: 76,420 / 200,000 tokens (38%)") {
+		t.Fatalf("status body = %q", message.Body)
+	}
+	session, err := st.Sessions().ByConversation(ctx, bootstrap.Agent.ID, domain.ConversationChannel, bootstrap.Channel.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.ContextUsage == nil || session.ContextUsage.UsedPercent == nil || *session.ContextUsage.UsedPercent != 38 {
+		t.Fatalf("stored context usage = %#v", session.ContextUsage)
+	}
+}
+
+func TestSlashStatusUsesStructuredClaudePersistentContextUsage(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	claudeAuth := writeExecutable(t, "claude-auth", `#!/bin/sh
+cat <<'JSON'
+{"loggedIn":false,"method":"oauth","provider":"claude.ai"}
+JSON
+`)
+	total := int64(76420)
+	window := int64(200000)
+	percent := 38.21
+	rt := &contextUsageRuntime{usage: &agentruntime.ContextUsage{
+		TotalTokens:         &total,
+		ContextWindowTokens: &window,
+		UsedPercent:         &percent,
+		Model:               "claude-test",
+		Source:              "claude_get_context_usage",
+	}}
+	app := New(st, eventbus.New(), Options{
+		AdminToken:       "secret",
+		DataDir:          t.TempDir(),
+		DefaultAgentKind: domain.AgentKindClaudePersistent,
+		ProviderLimits:   ProviderLimitOptions{ClaudeCommand: claudeAuth, ProbeTimeout: time.Second},
+		Runtimes: map[string]agentruntime.Runtime{
+			domain.AgentKindClaudePersistent: rt,
+		},
+	})
+	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	message, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/status",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(message.Body, "Context: 76,420 / 200,000 tokens (38.2%)") {
+		t.Fatalf("status body = %q", message.Body)
+	}
+	if rt.wasSent() {
+		t.Fatal("expected structured context usage path without sending /context")
+	}
+}
+
+func TestParseClaudeContextOutputRemainingPercent(t *testing.T) {
+	usage := parseClaudeContextOutput("Context left until auto-compact: 62%")
+	if usage == nil || usage.UsedPercent == nil || *usage.UsedPercent != 38 {
+		t.Fatalf("usage = %#v, want 38%% used", usage)
+	}
+}
+
+func TestSlashNewClearsStoredContextUsage(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	total := int64(100)
+	if err := app.store.Sessions().SetAgentSessionContextUsage(ctx, bootstrap.Agent.ID, domain.ConversationChannel, bootstrap.Channel.ID, &domain.ContextUsage{TotalTokens: &total}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/new",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	message, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/status",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(message.Body, "Context: unavailable") {
+		t.Fatalf("status body = %q", message.Body)
+	}
+}
+
 func TestUpdateThreadTitlePreservesCatalogOrder(t *testing.T) {
 	ctx := context.Background()
 	application, _, bootstrap := newConversationTestApp(t, ctx)
@@ -3584,6 +3866,13 @@ func (s *recordingSessionStore) SetAgentSessionContextStartedAt(ctx context.Cont
 	return nil
 }
 
+func (s *recordingSessionStore) SetAgentSessionContextUsage(ctx context.Context, agentID string, conversationType domain.ConversationType, conversationID string, usage *domain.ContextUsage) error {
+	s.agentID = agentID
+	s.conversationType = conversationType
+	s.conversationID = conversationID
+	return nil
+}
+
 func (s *recordingSessionStore) ByConversation(ctx context.Context, agentID string, conversationType domain.ConversationType, conversationID string) (domain.AgentSession, error) {
 	return domain.AgentSession{}, sql.ErrNoRows
 }
@@ -3601,6 +3890,75 @@ func (r scriptedRuntime) StartSession(ctx context.Context, req agentruntime.Star
 		script: r.events,
 		events: make(chan agentruntime.Event, len(r.events)),
 	}, nil
+}
+
+type contextUsageRuntime struct {
+	mu    sync.Mutex
+	usage *agentruntime.ContextUsage
+	sent  bool
+}
+
+func (r *contextUsageRuntime) StartSession(ctx context.Context, req agentruntime.StartSessionRequest) (agentruntime.Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return &contextUsageSession{
+		id:      "context-usage:" + req.SessionKey,
+		runtime: r,
+		events:  make(chan agentruntime.Event),
+	}, nil
+}
+
+func (r *contextUsageRuntime) wasSent() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.sent
+}
+
+type contextUsageSession struct {
+	id      string
+	runtime *contextUsageRuntime
+	events  chan agentruntime.Event
+	once    sync.Once
+}
+
+func (s *contextUsageSession) ContextUsage(ctx context.Context) (*agentruntime.ContextUsage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.runtime.mu.Lock()
+	defer s.runtime.mu.Unlock()
+	return s.runtime.usage, nil
+}
+
+func (s *contextUsageSession) Send(ctx context.Context, input agentruntime.Input) error {
+	s.runtime.mu.Lock()
+	s.runtime.sent = true
+	s.runtime.mu.Unlock()
+	return nil
+}
+
+func (s *contextUsageSession) Events() <-chan agentruntime.Event {
+	return s.events
+}
+
+func (s *contextUsageSession) CurrentSessionID() string {
+	return s.id
+}
+
+func (s *contextUsageSession) Alive() bool {
+	return true
+}
+
+func (s *contextUsageSession) RespondToInputRequest(questionID string, answer string) error {
+	return nil
+}
+
+func (s *contextUsageSession) Close(ctx context.Context) error {
+	s.once.Do(func() {
+		close(s.events)
+	})
+	return nil
 }
 
 type teamScriptRuntime struct {

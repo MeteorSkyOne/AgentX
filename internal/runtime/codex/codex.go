@@ -797,12 +797,15 @@ func errorText(payload map[string]any) string {
 
 func codexTurnUsage(payload map[string]any) *runtime.Usage {
 	value, ok := firstPresent(payload, "usage", "token_usage", "tokenUsage")
+	var parents []map[string]any
+	parents = append(parents, payload)
 	if !ok {
 		for _, key := range []string{"turn", "response", "payload", "info"} {
 			nested, _ := payload[key].(map[string]any)
 			if nested == nil {
 				continue
 			}
+			parents = append(parents, nested)
 			value, ok = firstPresent(nested, "usage", "token_usage", "tokenUsage", "last_token_usage", "lastTokenUsage")
 			if ok {
 				break
@@ -816,13 +819,19 @@ func codexTurnUsage(payload map[string]any) *runtime.Usage {
 	if usageMap == nil {
 		return nil
 	}
-	return codexUsageFromMap(usageMap, value)
+	usage := codexUsageFromMap(usageMap, value)
+	usage.Context = codexContextUsageFromMap(usageMap, parents, "turn.completed")
+	return usage
 }
 
 func codexTokenCountUsage(payload map[string]any) *runtime.Usage {
 	value, ok := firstPresent(payload, "last_token_usage", "lastTokenUsage", "usage", "token_usage", "tokenUsage")
+	parents := []map[string]any{payload}
 	if !ok {
 		info, _ := payload["info"].(map[string]any)
+		if info != nil {
+			parents = append(parents, info)
+		}
 		value, ok = firstPresent(info, "last_token_usage", "lastTokenUsage", "usage", "token_usage", "tokenUsage", "total_token_usage", "totalTokenUsage")
 		if !ok {
 			return nil
@@ -832,7 +841,9 @@ func codexTokenCountUsage(payload map[string]any) *runtime.Usage {
 	if usageMap == nil {
 		return nil
 	}
-	return codexUsageFromMap(usageMap, value)
+	usage := codexUsageFromMap(usageMap, value)
+	usage.Context = codexContextUsageFromMap(usageMap, parents, "token_count.info")
+	return usage
 }
 
 func codexUsageFromMap(values map[string]any, raw any) *runtime.Usage {
@@ -863,6 +874,45 @@ func codexUsageFromMap(values map[string]any, raw any) *runtime.Usage {
 		usage.TotalTokens = &total
 	}
 	return usage
+}
+
+func codexContextUsageFromMap(values map[string]any, parents []map[string]any, source string) *runtime.ContextUsage {
+	totalTokens := int64Field(values, "total_tokens", "totalTokens", "total")
+	windowTokens := int64Field(values, "model_context_window", "modelContextWindow", "context_window_tokens", "contextWindowTokens", "context_window", "contextWindow")
+	usedPercent := float64Field(values, "used_percent", "usedPercent", "context_used_percent", "contextUsedPercent")
+	model := firstTextValue(values, "model", "model_id", "modelId")
+	for _, parent := range parents {
+		if totalTokens == nil {
+			totalTokens = int64Field(parent, "total_tokens", "totalTokens", "total")
+		}
+		if windowTokens == nil {
+			windowTokens = int64Field(parent, "model_context_window", "modelContextWindow", "context_window_tokens", "contextWindowTokens", "context_window", "contextWindow")
+		}
+		if usedPercent == nil {
+			usedPercent = float64Field(parent, "used_percent", "usedPercent", "context_used_percent", "contextUsedPercent")
+		}
+		if model == "" {
+			model = firstTextValue(parent, "model", "model_id", "modelId")
+		}
+	}
+	if usedPercent == nil && totalTokens != nil && windowTokens != nil && *windowTokens > 0 {
+		percent := (float64(*totalTokens) / float64(*windowTokens)) * 100
+		usedPercent = &percent
+	}
+	if totalTokens == nil && windowTokens == nil && usedPercent == nil && model == "" {
+		return nil
+	}
+	return &runtime.ContextUsage{
+		TotalTokens:           totalTokens,
+		InputTokens:           int64Field(values, "input_tokens", "inputTokens", "prompt_tokens", "promptTokens", "input", "prompt"),
+		CachedInputTokens:     int64Field(values, "cached_input_tokens", "cachedInputTokens", "cached_tokens", "cachedTokens", "cache_read_input_tokens", "cacheReadInputTokens"),
+		OutputTokens:          int64Field(values, "output_tokens", "outputTokens", "completion_tokens", "completionTokens", "output", "completion"),
+		ReasoningOutputTokens: int64Field(values, "reasoning_output_tokens", "reasoningOutputTokens", "reasoning_tokens", "reasoningTokens"),
+		ContextWindowTokens:   windowTokens,
+		UsedPercent:           usedPercent,
+		Model:                 model,
+		Source:                source,
+	}
 }
 
 func firstTextValue(values map[string]any, keys ...string) string {

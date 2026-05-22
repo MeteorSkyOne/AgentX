@@ -799,6 +799,51 @@ func TestSessionUpsertAllowsRepeatedAgentConversation(t *testing.T) {
 	}
 }
 
+func TestSessionContextUsageRoundTripAndReset(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	defer st.Close()
+
+	fixture := seedBindingFixture(t, ctx, st)
+	total := int64(1234)
+	window := int64(8000)
+	used := 15.425
+	if err := st.Sessions().SetAgentSession(ctx, fixture.agent1.ID, domain.ConversationChannel, "chn_usage", "provider_1", "completed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Sessions().SetAgentSessionContextUsage(ctx, fixture.agent1.ID, domain.ConversationChannel, "chn_usage", &domain.ContextUsage{
+		TotalTokens:         &total,
+		ContextWindowTokens: &window,
+		UsedPercent:         &used,
+		Model:               "gpt-test",
+		Source:              "test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	session, err := st.Sessions().ByConversation(ctx, fixture.agent1.ID, domain.ConversationChannel, "chn_usage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.ContextUsage == nil || session.ContextUsage.TotalTokens == nil || *session.ContextUsage.TotalTokens != total || session.ContextUsage.ContextWindowTokens == nil || *session.ContextUsage.ContextWindowTokens != window {
+		t.Fatalf("context usage = %#v", session.ContextUsage)
+	}
+	if session.ContextUsageUpdatedAt == nil {
+		t.Fatalf("context_usage_updated_at is nil")
+	}
+
+	if err := st.Sessions().ResetAgentSessionContext(ctx, fixture.agent1.ID, domain.ConversationChannel, "chn_usage", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	session, err = st.Sessions().ByConversation(ctx, fixture.agent1.ID, domain.ConversationChannel, "chn_usage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.ContextUsage != nil || session.ContextUsageUpdatedAt != nil {
+		t.Fatalf("context usage after reset = %#v updated=%v", session.ContextUsage, session.ContextUsageUpdatedAt)
+	}
+}
+
 func TestAgentEnvRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)

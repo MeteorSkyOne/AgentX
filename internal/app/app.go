@@ -74,6 +74,8 @@ type activeAgentRun struct {
 	process          []domain.ProcessItem
 	team             *domain.TeamMetadata
 	pendingQuestion  *domain.AgentInputRequestPayload
+	contextUsage     *domain.ContextUsage
+	contextUsageAt   *time.Time
 	cancelRequested  bool
 	cancel           context.CancelCauseFunc
 	session          agentruntime.Session
@@ -396,6 +398,24 @@ func (r *activeAgentRun) clearPendingQuestion(questionID string) {
 	}
 }
 
+func (r *activeAgentRun) setContextUsage(usage *agentruntime.ContextUsage) {
+	if usage == nil {
+		return
+	}
+	copied := contextUsageToDomain(usage)
+	now := time.Now().UTC()
+	r.mu.Lock()
+	r.contextUsage = copied
+	r.contextUsageAt = &now
+	r.mu.Unlock()
+}
+
+func (r *activeAgentRun) latestContextUsage() (*domain.ContextUsage, *time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return cloneDomainContextUsage(r.contextUsage), cloneTimePtr(r.contextUsageAt)
+}
+
 func (r *activeAgentRun) replayEvents() ([]domain.Event, time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -460,6 +480,56 @@ func cloneProcessItems(process []domain.ProcessItem) []domain.ProcessItem {
 	copied := make([]domain.ProcessItem, len(process))
 	copy(copied, process)
 	return copied
+}
+
+func contextUsageToDomain(usage *agentruntime.ContextUsage) *domain.ContextUsage {
+	if usage == nil {
+		return nil
+	}
+	return &domain.ContextUsage{
+		TotalTokens:           cloneInt64Ptr(usage.TotalTokens),
+		InputTokens:           cloneInt64Ptr(usage.InputTokens),
+		CachedInputTokens:     cloneInt64Ptr(usage.CachedInputTokens),
+		OutputTokens:          cloneInt64Ptr(usage.OutputTokens),
+		ReasoningOutputTokens: cloneInt64Ptr(usage.ReasoningOutputTokens),
+		ContextWindowTokens:   cloneInt64Ptr(usage.ContextWindowTokens),
+		UsedPercent:           cloneFloat64Ptr(usage.UsedPercent),
+		Model:                 usage.Model,
+		Source:                usage.Source,
+	}
+}
+
+func cloneDomainContextUsage(usage *domain.ContextUsage) *domain.ContextUsage {
+	if usage == nil {
+		return nil
+	}
+	return &domain.ContextUsage{
+		TotalTokens:           cloneInt64Ptr(usage.TotalTokens),
+		InputTokens:           cloneInt64Ptr(usage.InputTokens),
+		CachedInputTokens:     cloneInt64Ptr(usage.CachedInputTokens),
+		OutputTokens:          cloneInt64Ptr(usage.OutputTokens),
+		ReasoningOutputTokens: cloneInt64Ptr(usage.ReasoningOutputTokens),
+		ContextWindowTokens:   cloneInt64Ptr(usage.ContextWindowTokens),
+		UsedPercent:           cloneFloat64Ptr(usage.UsedPercent),
+		Model:                 usage.Model,
+		Source:                usage.Source,
+	}
+}
+
+func cloneInt64Ptr(value *int64) *int64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneFloat64Ptr(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func (a *App) runtimeForAgent(agent domain.Agent) (agentruntime.Runtime, bool) {

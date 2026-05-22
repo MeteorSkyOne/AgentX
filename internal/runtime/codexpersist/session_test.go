@@ -129,6 +129,39 @@ func TestTurnCompletedInterruptedEmitsCanceled(t *testing.T) {
 	}
 }
 
+func TestThreadTokenUsageUpdatedEmitsContextUsage(t *testing.T) {
+	s := &persistentSession{events: make(chan runtime.Event, 1), model: "gpt-thread"}
+	state := newNotificationState()
+
+	terminal := s.handleNotification(jsonRPCMessage{
+		Method: "thread/tokenUsage/updated",
+		Params: map[string]any{
+			"tokenUsage": map[string]any{
+				"total": map[string]any{
+					"inputTokens":           float64(700),
+					"cachedInputTokens":     float64(100),
+					"outputTokens":          float64(20),
+					"reasoningOutputTokens": float64(5),
+					"totalTokens":           float64(725),
+				},
+				"modelContextWindow": float64(4000),
+			},
+		},
+	}, state)
+
+	if terminal {
+		t.Fatalf("token usage update should not be terminal")
+	}
+	evt := <-s.events
+	if evt.Type != runtime.EventDelta || evt.Usage == nil || evt.Usage.Context == nil {
+		t.Fatalf("event = %#v", evt)
+	}
+	contextUsage := evt.Usage.Context
+	if ptrValue(contextUsage.TotalTokens) != 725 || ptrValue(contextUsage.ContextWindowTokens) != 4000 || contextUsage.Model != "gpt-thread" || contextUsage.Source != "thread/tokenUsage/updated" {
+		t.Fatalf("context usage = %#v", contextUsage)
+	}
+}
+
 func TestTurnStartResultSetsActiveTurnID(t *testing.T) {
 	s := &persistentSession{}
 
@@ -225,6 +258,13 @@ func (r *recordingSessionRPC) Notifications() <-chan jsonRPCMessage {
 
 func (r *recordingSessionRPC) RespondToRequest(id any, result any) error {
 	return nil
+}
+
+func ptrValue(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func TestEmitAfterCloseEventStreamDoesNotPanic(t *testing.T) {

@@ -286,16 +286,27 @@ func scanAgentSession(scanner interface {
 }) (domain.AgentSession, error) {
 	var session domain.AgentSession
 	var conversationType, updatedAt string
-	var contextStartedAt sql.NullString
+	var contextStartedAt, contextUsageJSON, contextUsageUpdatedAt sql.NullString
 	if err := scanner.Scan(
 		&session.AgentID, &conversationType, &session.ConversationID, &session.ProviderSessionID,
-		&session.Status, &contextStartedAt, &updatedAt,
+		&session.Status, &contextStartedAt, &contextUsageJSON, &contextUsageUpdatedAt, &updatedAt,
 	); err != nil {
 		return domain.AgentSession{}, err
 	}
 	session.ConversationType = domain.ConversationType(conversationType)
 	var err error
 	session.ContextStartedAt, err = parseNullableTime(contextStartedAt)
+	if err != nil {
+		return domain.AgentSession{}, err
+	}
+	if contextUsageJSON.Valid && contextUsageJSON.String != "" {
+		var usage domain.ContextUsage
+		if err := json.Unmarshal([]byte(contextUsageJSON.String), &usage); err != nil {
+			return domain.AgentSession{}, err
+		}
+		session.ContextUsage = &usage
+	}
+	session.ContextUsageUpdatedAt, err = parseNullableTime(contextUsageUpdatedAt)
 	if err != nil {
 		return domain.AgentSession{}, err
 	}

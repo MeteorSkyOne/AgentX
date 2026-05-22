@@ -491,14 +491,7 @@ func codexAuthFromAccountResult(result map[string]any) ProviderLimitAuth {
 }
 
 func codexWindowsFromRateLimitResult(result map[string]any) ([]ProviderLimitWindow, string) {
-	limits := asMap(result["rateLimits"])
-	if limits == nil {
-		limits = asMap(result["rate_limits"])
-	}
-	if limits == nil {
-		limits = result
-	}
-
+	limits := codexRateLimitMap(result)
 	windows := make([]ProviderLimitWindow, 0, 2)
 	for _, key := range []string{"primary", "secondary"} {
 		windowMap := asMap(limits[key])
@@ -508,6 +501,25 @@ func codexWindowsFromRateLimitResult(result map[string]any) ([]ProviderLimitWind
 		windows = append(windows, codexWindowFromMap(key, windowMap))
 	}
 	return windows, sanitizedAuthField(stringField(limits, "rateLimitReachedType", "rate_limit_reached_type"))
+}
+
+func codexRateLimitMap(result map[string]any) map[string]any {
+	for _, key := range []string{"rateLimitsByLimitId", "rate_limits_by_limit_id"} {
+		byID := asMap(result[key])
+		if byID == nil {
+			continue
+		}
+		if codex := asMap(byID["codex"]); codex != nil {
+			return codex
+		}
+	}
+	if limits := asMap(result["rateLimits"]); limits != nil {
+		return limits
+	}
+	if limits := asMap(result["rate_limits"]); limits != nil {
+		return limits
+	}
+	return result
 }
 
 func codexWindowFromMap(fallback string, values map[string]any) ProviderLimitWindow {
@@ -537,10 +549,39 @@ func providerLimitWindowKind(fallback string, windowMinutes int) (string, string
 	case codexWeeklyWindowMinutes:
 		return "seven_day", "Weekly"
 	default:
-		if fallback == "secondary" {
-			return "secondary", "Secondary"
+		if windowMinutes > 0 {
+			return fallback, providerLimitDurationLabel(windowMinutes)
 		}
-		return "primary", "Primary"
+		return fallback, providerLimitFallbackLabel(fallback)
+	}
+}
+
+func providerLimitFallbackLabel(fallback string) string {
+	fallback = strings.TrimSpace(fallback)
+	if fallback == "" {
+		return "Window"
+	}
+	return strings.ToUpper(fallback[:1]) + fallback[1:]
+}
+
+func providerLimitDurationLabel(windowMinutes int) string {
+	switch {
+	case windowMinutes%(24*60) == 0:
+		days := windowMinutes / (24 * 60)
+		if days == 1 {
+			return "1-day"
+		}
+		return fmt.Sprintf("%d-day", days)
+	case windowMinutes%60 == 0:
+		hours := windowMinutes / 60
+		if hours == 1 {
+			return "1-hour"
+		}
+		return fmt.Sprintf("%d-hour", hours)
+	case windowMinutes == 1:
+		return "1-minute"
+	default:
+		return fmt.Sprintf("%d-minute", windowMinutes)
 	}
 }
 

@@ -140,7 +140,20 @@ type Usage struct {
 	TotalCostUSD             *float64
 	DurationMS               *int64
 	DurationAPIMS            *int64
+	Context                  *ContextUsage
 	Raw                      any
+}
+
+type ContextUsage struct {
+	TotalTokens           *int64   `json:"total_tokens,omitempty"`
+	InputTokens           *int64   `json:"input_tokens,omitempty"`
+	CachedInputTokens     *int64   `json:"cached_input_tokens,omitempty"`
+	OutputTokens          *int64   `json:"output_tokens,omitempty"`
+	ReasoningOutputTokens *int64   `json:"reasoning_output_tokens,omitempty"`
+	ContextWindowTokens   *int64   `json:"context_window_tokens,omitempty"`
+	UsedPercent           *float64 `json:"used_percent,omitempty"`
+	Model                 string   `json:"model,omitempty"`
+	Source                string   `json:"source,omitempty"`
 }
 
 type ProcessItem struct {
@@ -166,6 +179,10 @@ type Session interface {
 	Alive() bool
 	Close(ctx context.Context) error
 	RespondToInputRequest(questionID string, answer string) error
+}
+
+type ContextUsageReader interface {
+	ContextUsage(ctx context.Context) (*ContextUsage, error)
 }
 
 type Stopper interface {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -153,6 +154,61 @@ func (s *persistentSession) RespondToInputRequest(questionID string, answer stri
 	}
 }
 
+func (s *persistentSession) ContextUsage(ctx context.Context) (*runtime.ContextUsage, error) {
+	s.mu.Lock()
+	if !s.alive {
+		s.mu.Unlock()
+		return nil, procpool.ErrProcessDead
+	}
+	if s.started {
+		s.mu.Unlock()
+		return nil, errors.New("cannot read context usage while session is running")
+	}
+	s.started = true
+	s.mu.Unlock()
+
+	if err := s.process.AcquireTurn(ctx); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	s.turnHeld = true
+	s.mu.Unlock()
+	defer s.releaseTurn()
+
+	requestID := id.New("ctx")
+	msg := map[string]any{
+		"type":       "control_request",
+		"request_id": requestID,
+		"request": map[string]any{
+			"subtype": "get_context_usage",
+		},
+	}
+	if err := s.process.WriteJSON(msg); err != nil {
+		return nil, err
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-s.process.Done():
+			return nil, s.processExitError("persistent process exited while reading context usage")
+		case line, ok := <-s.process.StdoutLines():
+			if !ok {
+				return nil, s.processExitError("stdout closed while reading context usage")
+			}
+			usage, matched, err := contextUsageFromControlResponse(line, requestID)
+			if !matched {
+				continue
+			}
+			if err == nil && usage == nil {
+				err = errors.New("context usage response did not include usage")
+			}
+			return usage, err
+		}
+	}
+}
+
 func (s *persistentSession) Close(ctx context.Context) error {
 	s.mu.Lock()
 	s.alive = false
@@ -169,6 +225,120 @@ func (s *persistentSession) Close(ctx context.Context) error {
 	}
 	s.closeEventStream()
 	return nil
+}
+
+func contextUsageFromControlResponse(line []byte, requestID string) (*runtime.ContextUsage, bool, error) {
+	var payload map[string]any
+	if err := json.Unmarshal(line, &payload); err != nil {
+		return nil, false, nil
+	}
+	if claude.StringValue(payload, "type") != "control_response" {
+		return nil, false, nil
+	}
+	response, _ := payload["response"].(map[string]any)
+	if response == nil || claude.StringValue(response, "request_id") != requestID {
+		return nil, false, nil
+	}
+	if subtype := claude.StringValue(response, "subtype"); subtype != "" && subtype != "success" {
+		if message := firstStringValue(response, "error", "message"); message != "" {
+			return nil, true, errors.New(message)
+		}
+		return nil, true, errors.New("context usage request failed")
+	}
+	data, _ := response["response"].(map[string]any)
+	if data == nil {
+		return nil, true, nil
+	}
+	usage := &runtime.ContextUsage{
+		TotalTokens:         firstInt64Ptr(data, "totalTokens", "total_tokens"),
+		ContextWindowTokens: firstInt64Ptr(data, "rawMaxTokens", "raw_max_tokens", "maxTokens", "max_tokens"),
+		UsedPercent:         firstFloat64Ptr(data, "percentage", "usedPercent", "used_percent"),
+		Model:               firstStringValue(data, "model"),
+		Source:              "claude_get_context_usage",
+	}
+	if usage.TotalTokens == nil && usage.ContextWindowTokens == nil && usage.UsedPercent == nil && usage.Model == "" {
+		return nil, true, nil
+	}
+	return usage, true, nil
+}
+
+func firstStringValue(values map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if text := claude.StringValue(values, key); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func firstInt64Ptr(values map[string]any, keys ...string) *int64 {
+	for _, key := range keys {
+		value, ok := values[key]
+		if !ok || value == nil {
+			continue
+		}
+		if parsed, ok := numberInt64(value); ok {
+			return &parsed
+		}
+	}
+	return nil
+}
+
+func firstFloat64Ptr(values map[string]any, keys ...string) *float64 {
+	for _, key := range keys {
+		value, ok := values[key]
+		if !ok || value == nil {
+			continue
+		}
+		if parsed, ok := numberFloat64(value); ok {
+			return &parsed
+		}
+	}
+	return nil
+}
+
+func numberInt64(value any) (int64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed), true
+	case int64:
+		return typed, true
+	case float64:
+		return int64(typed), true
+	case json.Number:
+		parsed, err := typed.Int64()
+		if err == nil {
+			return parsed, true
+		}
+		asFloat, err := typed.Float64()
+		if err == nil {
+			return int64(asFloat), true
+		}
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		if err == nil {
+			return int64(parsed), true
+		}
+	}
+	return 0, false
+}
+
+func numberFloat64(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case float64:
+		return typed, true
+	case json.Number:
+		parsed, err := typed.Float64()
+		return parsed, err == nil
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		return parsed, err == nil
+	}
+	return 0, false
 }
 
 func (s *persistentSession) Stop(ctx context.Context) error {

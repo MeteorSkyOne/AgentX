@@ -279,6 +279,7 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 				}
 				if evt.Usage != nil {
 					usage = evt.Usage
+					activeRun.setContextUsage(evt.Usage.Context)
 				}
 				switch evt.Type {
 				case agentruntime.EventDelta:
@@ -322,7 +323,7 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 						FirstTokenAt:      firstTokenAt,
 						CompletedAt:       completedAt,
 						Usage:             usage,
-					}), team)
+					}), usage, team)
 					if err != nil {
 						sendResult(domain.Message{}, err)
 						_ = session.Close(context.WithoutCancel(ctx))
@@ -353,6 +354,7 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 						Usage:             usage,
 					}))
 					a.setCanceledAgentSession(ctx, agent.ID, userMessage, session.CurrentSessionID())
+					a.persistAgentSessionContextUsage(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, usage)
 					a.publishAgentRunCanceledWithContext(userMessage, runID, agent.ID, opts.Team)
 					sendResult(domain.Message{}, errAgentRunCanceled)
 					_ = session.Close(context.WithoutCancel(ctx))
@@ -406,6 +408,7 @@ func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage doma
 						Usage:             usage,
 					}))
 					a.setFailedAgentSession(ctx, agent.ID, userMessage, session.CurrentSessionID())
+					a.persistAgentSessionContextUsage(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, usage)
 					a.publishAgentRunFailedWithContext(userMessage, runID, agent.ID, opts.Team, err)
 					sendResult(domain.Message{}, err)
 					_ = session.Close(context.WithoutCancel(ctx))
@@ -574,7 +577,7 @@ func (a *App) previousProviderSessionID(ctx context.Context, agentID string, mes
 	return session.ProviderSessionID, nil
 }
 
-func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, agent domain.Agent, runID string, providerSessionID string, body string, thinking string, process []domain.ProcessItem, metric domain.AgentRunMetric, team *domain.TeamMetadata) (domain.Message, error) {
+func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, agent domain.Agent, runID string, providerSessionID string, body string, thinking string, process []domain.ProcessItem, metric domain.AgentRunMetric, usage *agentruntime.Usage, team *domain.TeamMetadata) (domain.Message, error) {
 	createdAt := time.Now().UTC()
 	if !createdAt.After(userMessage.CreatedAt) {
 		createdAt = userMessage.CreatedAt.Add(time.Nanosecond)
@@ -639,6 +642,12 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 		a.publishAgentRunFailedWithContext(userMessage, runID, agent.ID, team, err)
 		return domain.Message{}, err
 	}
+	if err := a.setAgentSessionContextUsage(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, usage); err != nil {
+		metric.Status = "failed"
+		a.recordAgentRunMetric(ctx, metric)
+		a.publishAgentRunFailedWithContext(userMessage, runID, agent.ID, team, err)
+		return domain.Message{}, err
+	}
 	a.recordAgentRunMetric(ctx, metric)
 	a.publishConversationEvent(domain.Event{
 		Type:             domain.EventAgentRunCompleted,
@@ -670,6 +679,17 @@ func (a *App) setFailedAgentSession(ctx context.Context, agentID string, message
 
 func (a *App) setCanceledAgentSession(ctx context.Context, agentID string, message domain.Message, providerSessionID string) {
 	_ = a.store.Sessions().SetAgentSession(ctx, agentID, message.ConversationType, message.ConversationID, providerSessionID, "canceled")
+}
+
+func (a *App) persistAgentSessionContextUsage(ctx context.Context, agentID string, conversationType domain.ConversationType, conversationID string, usage *agentruntime.Usage) {
+	_ = a.setAgentSessionContextUsage(ctx, agentID, conversationType, conversationID, usage)
+}
+
+func (a *App) setAgentSessionContextUsage(ctx context.Context, agentID string, conversationType domain.ConversationType, conversationID string, usage *agentruntime.Usage) error {
+	if usage == nil || usage.Context == nil {
+		return nil
+	}
+	return a.store.Sessions().SetAgentSessionContextUsage(ctx, agentID, conversationType, conversationID, contextUsageToDomain(usage.Context))
 }
 
 type agentRunMetricScope struct {

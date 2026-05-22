@@ -146,13 +146,27 @@ type Agent struct {
 }
 
 type AgentSession struct {
-	AgentID           string           `json:"agent_id"`
-	ConversationType  ConversationType `json:"conversation_type"`
-	ConversationID    string           `json:"conversation_id"`
-	ProviderSessionID string           `json:"provider_session_id"`
-	Status            string           `json:"status"`
-	ContextStartedAt  *time.Time       `json:"context_started_at,omitempty"`
-	UpdatedAt         time.Time        `json:"updated_at"`
+	AgentID               string           `json:"agent_id"`
+	ConversationType      ConversationType `json:"conversation_type"`
+	ConversationID        string           `json:"conversation_id"`
+	ProviderSessionID     string           `json:"provider_session_id"`
+	Status                string           `json:"status"`
+	ContextStartedAt      *time.Time       `json:"context_started_at,omitempty"`
+	ContextUsage          *ContextUsage    `json:"context_usage,omitempty"`
+	ContextUsageUpdatedAt *time.Time       `json:"context_usage_updated_at,omitempty"`
+	UpdatedAt             time.Time        `json:"updated_at"`
+}
+
+type ContextUsage struct {
+	TotalTokens           *int64   `json:"total_tokens,omitempty"`
+	InputTokens           *int64   `json:"input_tokens,omitempty"`
+	CachedInputTokens     *int64   `json:"cached_input_tokens,omitempty"`
+	OutputTokens          *int64   `json:"output_tokens,omitempty"`
+	ReasoningOutputTokens *int64   `json:"reasoning_output_tokens,omitempty"`
+	ContextWindowTokens   *int64   `json:"context_window_tokens,omitempty"`
+	UsedPercent           *float64 `json:"used_percent,omitempty"`
+	Model                 string   `json:"model,omitempty"`
+	Source                string   `json:"source,omitempty"`
 }
 
 type Workspace struct {

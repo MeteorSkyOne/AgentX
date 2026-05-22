@@ -97,6 +97,15 @@ describe("Composer slash command autocomplete", () => {
     expect(screen.getByText("/cancel")).toBeTruthy();
   });
 
+  it("shows the static /status command", () => {
+    const textarea = renderComposer({ skills: [] });
+
+    setTextareaValue(textarea, "/sta", 4);
+
+    expect(screen.getByText("/status")).toBeTruthy();
+    expect(screen.getByText("Show runtime status")).toBeTruthy();
+  });
+
   it("shows dynamic skills after the API data loads", async () => {
     const textarea = renderComposer({
       skills: [

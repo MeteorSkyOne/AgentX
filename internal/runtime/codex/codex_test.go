@@ -252,6 +252,29 @@ func TestLineHandlerParsesCodexUsageEvents(t *testing.T) {
 	}
 
 	handler = newLineHandler("fallback")
+	events, err = handler.HandleLine([]byte(`{"type":"token_count.info","info":{"total_token_usage":{"input_tokens":700,"cached_input_tokens":200,"output_tokens":20,"reasoning_output_tokens":5,"total_tokens":725},"model_context_window":4000,"model":"gpt-test"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("events = %#v", events)
+	}
+	events, err = handler.HandleLine([]byte(`{"type":"turn.completed"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage = events[0].Usage
+	if usage == nil || usage.Context == nil {
+		t.Fatalf("usage context = %#v", usage)
+	}
+	if ptrValue(usage.Context.TotalTokens) != 725 || ptrValue(usage.Context.ContextWindowTokens) != 4000 || usage.Context.Model != "gpt-test" || usage.Context.Source != "token_count.info" {
+		t.Fatalf("context usage = %#v", usage.Context)
+	}
+	if usage.Context.UsedPercent == nil || *usage.Context.UsedPercent < 18.1 || *usage.Context.UsedPercent > 18.2 {
+		t.Fatalf("used percent = %#v", usage.Context.UsedPercent)
+	}
+
+	handler = newLineHandler("fallback")
 	events, err = handler.HandleLine([]byte(`{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":7,"total_tokens":12,"total_cost_usd":0.001}}`))
 	if err != nil {
 		t.Fatal(err)

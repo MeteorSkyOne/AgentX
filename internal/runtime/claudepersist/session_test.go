@@ -136,6 +136,53 @@ func TestPersistentSessionProcessDeath(t *testing.T) {
 	}
 }
 
+func TestPersistentSessionContextUsageControlRequest(t *testing.T) {
+	pool := procpool.New(procpool.Options{IdleTimeout: 1 * time.Hour})
+	defer pool.Shutdown(context.Background())
+
+	proc, _, err := pool.GetOrCreate("test-key", func(ctx context.Context) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", `echo '{"type":"system","session_id":"sess-context"}'
+while IFS= read -r line; do
+  case "$line" in
+    *get_context_usage*)
+      request_id=$(printf '%s\n' "$line" | sed -n 's/.*"request_id":"\([^"]*\)".*/\1/p')
+      echo '{"type":"control_response","response":{"subtype":"success","request_id":"'"$request_id"'","response":{"totalTokens":76420,"rawMaxTokens":200000,"percentage":38.21,"model":"claude-test"}}}'
+      ;;
+    *)
+      echo '{"type":"assistant","message":{"content":[{"type":"text","text":"after context"}]}}'
+      echo '{"type":"result","result":"after context","subtype":"success","session_id":"sess-context"}'
+      ;;
+  esac
+done`)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rt := &Runtime{
+		opts: Options{Command: "sh", PermissionMode: "acceptEdits"},
+		pool: pool,
+	}
+	sess := newPersistentSession(proc, "test-key", rt)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := sess.waitForSystemEvent(ctx); err != nil {
+		t.Fatal(err)
+	}
+	usage, err := sess.ContextUsage(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ptrValue(usage.TotalTokens) != 76420 || ptrValue(usage.ContextWindowTokens) != 200000 || usage.UsedPercent == nil || *usage.UsedPercent != 38.21 {
+		t.Fatalf("usage = %#v", usage)
+	}
+	if usage.Model != "claude-test" || usage.Source != "claude_get_context_usage" {
+		t.Fatalf("usage metadata = %#v", usage)
+	}
+}
+
 func TestStartSessionReturnsStderrWhenProcessDiesDuringInitialization(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "claude")
@@ -262,4 +309,11 @@ func TestHandleLineKeepsOverwrittenAssistantTextAsProcess(t *testing.T) {
 	if len(evt.Process) != 1 || evt.Process[0].Type != "thinking" || evt.Process[0].Text != "I will inspect the files first." {
 		t.Fatalf("process = %#v", evt.Process)
 	}
+}
+
+func ptrValue(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
