@@ -46,13 +46,23 @@ func (r *Runtime) StartSession(ctx context.Context, req runtime.StartSessionRequ
 		return nil, err
 	}
 
+	modeOverride := strings.TrimSpace(req.PermissionMode) != ""
 	key := sessionKey(req)
+
+	if modeOverride {
+		if existing, ok := r.pool.Get(key); ok {
+			r.pool.Detach(existing)
+			existing.Kill()
+		}
+	}
+
 	proc, isNew, err := r.pool.GetOrCreate(key, r.processStartFunc(req))
 	if err != nil {
 		return nil, err
 	}
 
 	sess := newPersistentSession(proc, key, r)
+	sess.detachOnClose = modeOverride
 	if isNew {
 		if err := sess.waitForSystemEvent(ctx); err != nil {
 			r.pool.Detach(proc)

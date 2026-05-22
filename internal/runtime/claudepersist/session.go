@@ -32,6 +32,7 @@ type persistentSession struct {
 	alive               bool
 	started             bool
 	turnHeld            bool
+	detachOnClose       bool
 	done                chan struct{}
 	closeOnce           sync.Once
 	pendingInput        chan inputAnswer
@@ -151,10 +152,15 @@ func (s *persistentSession) Close(ctx context.Context) error {
 	s.alive = false
 	turnHeld := s.turnHeld
 	s.turnHeld = false
+	detach := s.detachOnClose
 	s.mu.Unlock()
 
 	if turnHeld {
 		s.process.ReleaseTurn()
+	}
+	if detach {
+		s.rt.pool.Detach(s.process)
+		s.process.Kill()
 	}
 	s.closeEventStream()
 	return nil
