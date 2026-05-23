@@ -270,40 +270,22 @@ func (a *App) CreateThread(ctx context.Context, userID string, channelID string,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	message := domain.Message{
-		ID:               id.New("msg"),
-		OrganizationID:   channel.OrganizationID,
-		ConversationType: domain.ConversationThread,
-		ConversationID:   thread.ID,
-		SenderType:       domain.SenderUser,
-		SenderID:         userID,
-		Kind:             domain.MessageText,
-		Body:             body,
-		CreatedAt:        now,
-	}
 
 	if err := a.store.Tx(ctx, func(tx store.Tx) error {
-		if err := tx.Threads().Create(ctx, thread); err != nil {
-			return err
-		}
-		return tx.Messages().Create(ctx, message)
+		return tx.Threads().Create(ctx, thread)
 	}); err != nil {
 		return domain.Thread{}, domain.Message{}, err
 	}
 
-	a.publishConversationEvent(domain.Event{
-		Type:             domain.EventMessageCreated,
-		OrganizationID:   message.OrganizationID,
-		ConversationType: message.ConversationType,
-		ConversationID:   message.ConversationID,
-		Payload:          domain.MessageCreatedPayload{Message: message},
+	message, err := a.SendMessage(ctx, SendMessageRequest{
+		UserID:           userID,
+		OrganizationID:   channel.OrganizationID,
+		ConversationType: domain.ConversationThread,
+		ConversationID:   thread.ID,
+		Body:             body,
 	})
-
-	scope, err := a.conversationScope(ctx, domain.ConversationThread, thread.ID)
-	if err == nil {
-		if agents, resolveErr := a.conversationAgents(ctx, scope); resolveErr == nil {
-			a.dispatchAgentRunsForMessage(context.WithoutCancel(ctx), message, scope, agents)
-		}
+	if err != nil {
+		return domain.Thread{}, domain.Message{}, err
 	}
 
 	return thread, message, nil

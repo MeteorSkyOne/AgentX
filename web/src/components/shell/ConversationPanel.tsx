@@ -108,6 +108,8 @@ export function ConversationPanel({
     return (
       <ThreadForum
         threads={threads}
+        conversation={composerConversation}
+        mentionAgents={boundAgents.map((item) => item.agent)}
         onSelectThread={onSelectThread}
         onCreateThread={onCreateThread}
         onUpdateThread={onUpdateThread}
