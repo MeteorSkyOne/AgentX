@@ -43,6 +43,7 @@ import {
   workspace,
   workspaceFile,
   workspaceGitDiff,
+  workspaceGitHistory,
   workspaceGitStatus,
   workspaceSearch,
   workspaceTree,
@@ -68,6 +69,8 @@ import type {
   UserPreferences,
   WorkspaceEntryType,
   WorkspaceGitDiff,
+  WorkspaceGitHistory,
+  WorkspaceGitHistoryMode,
   WorkspaceGitScope,
   WorkspaceGitStatus,
   WorkspaceSearchMode,
@@ -1083,9 +1086,23 @@ export default function App() {
     workspaceID: string,
     scope: WorkspaceGitScope,
     target?: string,
-    compare?: string
+    compare?: string,
+    commit?: string
   ): Promise<WorkspaceGitStatus> {
-    return workspaceGitStatus(workspaceID, scope, target, compare);
+    return workspaceGitStatus(workspaceID, scope, target, compare, commit);
+  }
+
+  async function handleLoadWorkspaceGitHistory(
+    workspaceID: string,
+    options: {
+      mode: WorkspaceGitHistoryMode;
+      path?: string;
+      q?: string;
+      limit?: number;
+      offset?: number;
+    }
+  ): Promise<WorkspaceGitHistory> {
+    return workspaceGitHistory(workspaceID, options);
   }
 
   async function handleLoadWorkspaceGitDiff(
@@ -1093,9 +1110,10 @@ export default function App() {
     scope: WorkspaceGitScope,
     path: string,
     target?: string,
-    compare?: string
+    compare?: string,
+    commit?: string
   ): Promise<WorkspaceGitDiff> {
-    return workspaceGitDiff(workspaceID, scope, path, target, compare);
+    return workspaceGitDiff(workspaceID, scope, path, target, compare, commit);
   }
 
   const handleToggleTheme = useCallback(() => {
@@ -1190,6 +1208,7 @@ export default function App() {
       onMoveWorkspaceEntry={handleMoveWorkspaceEntry}
       onDeleteWorkspaceEntry={handleDeleteWorkspaceEntry}
       onLoadWorkspaceGitStatus={handleLoadWorkspaceGitStatus}
+      onLoadWorkspaceGitHistory={handleLoadWorkspaceGitHistory}
       onLoadWorkspaceGitDiff={handleLoadWorkspaceGitDiff}
       onUpdateMessage={handleUpdateMessage}
       onDeleteMessage={handleDeleteMessage}

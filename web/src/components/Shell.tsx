@@ -181,6 +181,7 @@ export function Shell({
   onMoveWorkspaceEntry,
   onDeleteWorkspaceEntry,
   onLoadWorkspaceGitStatus,
+  onLoadWorkspaceGitHistory,
   onLoadWorkspaceGitDiff,
   onUpdateMessage,
   onDeleteMessage,
@@ -315,6 +316,7 @@ export function Shell({
     onMoveEntry: onMoveWorkspaceEntry,
     onDeleteEntry: onDeleteWorkspaceEntry,
     onLoadGitStatus: onLoadWorkspaceGitStatus,
+    onLoadGitHistory: onLoadWorkspaceGitHistory,
     onLoadGitDiff: onLoadWorkspaceGitDiff,
   });
   const projectWorkspaceIDRef = useRef(projectWorkspace?.id);

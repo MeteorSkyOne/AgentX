@@ -358,7 +358,8 @@ export interface TerminalFrame {
   truncated?: boolean;
 }
 
-export type WorkspaceGitScope = "working_tree" | "branch";
+export type WorkspaceGitScope = "working_tree" | "branch" | "commit";
+export type WorkspaceGitHistoryMode = "repository" | "file";
 
 export interface WorkspaceGitChange {
   path: string;
@@ -383,6 +384,7 @@ export interface WorkspaceGitStatus {
   base?: string;
   target?: string;
   compare?: string;
+  commit?: string;
   targets?: WorkspaceGitTarget[];
   message?: string;
   changes: WorkspaceGitChange[];
@@ -394,11 +396,34 @@ export interface WorkspaceGitDiff {
   base?: string;
   target?: string;
   compare?: string;
+  commit?: string;
   path: string;
   old_path?: string;
   status: WorkspaceGitChange["status"];
   original: string;
   modified: string;
+}
+
+export interface WorkspaceGitCommit {
+  sha: string;
+  short_sha: string;
+  subject: string;
+  author_name: string;
+  author_email: string;
+  authored_at: string;
+}
+
+export interface WorkspaceGitHistory {
+  available: boolean;
+  branch?: string;
+  mode: WorkspaceGitHistoryMode;
+  path?: string;
+  query?: string;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  message?: string;
+  commits: WorkspaceGitCommit[];
 }
 
 export type WorkspaceSearchMode = "files" | "content";

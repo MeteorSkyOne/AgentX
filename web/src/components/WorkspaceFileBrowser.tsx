@@ -15,6 +15,7 @@ import {
   FolderOpen,
   GitBranch,
   GitCompare,
+  History,
   Regex,
   RefreshCw,
   Save,
@@ -27,7 +28,10 @@ import {
 import type {
   WorkspaceEntryType,
   WorkspaceGitChange,
+  WorkspaceGitCommit,
   WorkspaceGitDiff,
+  WorkspaceGitHistory,
+  WorkspaceGitHistoryMode,
   WorkspaceGitScope,
   WorkspaceGitStatus,
   WorkspaceSearchMode,
@@ -100,14 +104,26 @@ export interface WorkspaceFileBrowserActions {
     workspaceID: string,
     scope: WorkspaceGitScope,
     target?: string,
-    compare?: string
+    compare?: string,
+    commit?: string
   ) => Promise<WorkspaceGitStatus>;
+  onLoadGitHistory?: (
+    workspaceID: string,
+    options: {
+      mode: WorkspaceGitHistoryMode;
+      path?: string;
+      q?: string;
+      limit?: number;
+      offset?: number;
+    }
+  ) => Promise<WorkspaceGitHistory>;
   onLoadGitDiff?: (
     workspaceID: string,
     scope: WorkspaceGitScope,
     path: string,
     target?: string,
-    compare?: string
+    compare?: string,
+    commit?: string
   ) => Promise<WorkspaceGitDiff>;
 }
 
@@ -179,6 +195,12 @@ export interface WorkspaceFileBrowserController {
   gitScope: WorkspaceGitScope;
   gitTarget: string;
   gitCompare: string;
+  gitHistoryMode: WorkspaceGitHistoryMode;
+  gitHistoryQuery: string;
+  gitHistory?: WorkspaceGitHistory;
+  gitHistoryLoading: boolean;
+  gitHistoryError: string | null;
+  gitSelectedCommit: string;
   gitStatus?: WorkspaceGitStatus;
   gitStatusLoading: boolean;
   gitStatusError: string | null;
@@ -218,12 +240,16 @@ export interface WorkspaceFileBrowserController {
   setGitScope: (scope: WorkspaceGitScope) => void;
   setGitTarget: (target: string) => void;
   setGitCompare: (compare: string) => void;
+  setGitHistoryMode: (mode: WorkspaceGitHistoryMode) => void;
+  setGitHistoryQuery: (query: string) => void;
   loadTree: (options?: { quiet?: boolean }) => Promise<void>;
   loadDirectory: (path: string, options?: { quiet?: boolean; force?: boolean }) => Promise<void>;
   loadSearch: (options?: { quiet?: boolean }) => Promise<void>;
   clearSearch: () => void;
   loadFile: (path?: string, options?: WorkspaceFileOpenOptions) => Promise<void>;
-  loadGitStatus: (options?: { quiet?: boolean; scope?: WorkspaceGitScope; target?: string; compare?: string }) => Promise<void>;
+  loadGitStatus: (options?: { quiet?: boolean; scope?: WorkspaceGitScope; target?: string; compare?: string; commit?: string }) => Promise<void>;
+  loadGitHistory: (options?: { quiet?: boolean; mode?: WorkspaceGitHistoryMode; offset?: number; append?: boolean }) => Promise<void>;
+  selectGitCommit: (commit: WorkspaceGitCommit) => Promise<void>;
   loadGitDiff: (path: string) => Promise<void>;
   saveFile: () => Promise<void>;
   fetchFileBlob: (path?: string, options?: { download?: boolean }) => Promise<Blob>;
@@ -254,6 +280,7 @@ export function useWorkspaceFileBrowser({
   onMoveEntry,
   onDeleteEntry,
   onLoadGitStatus,
+  onLoadGitHistory,
   onLoadGitDiff,
 }: Omit<WorkspaceFileBrowserProps, "theme"> & { autoLoadTree?: boolean }): WorkspaceFileBrowserController {
   const [tabs, setTabs] = useState<WorkspaceFileTab[]>([]);
@@ -300,6 +327,12 @@ export function useWorkspaceFileBrowser({
   const [gitScope, setGitScopeState] = useState<WorkspaceGitScope>("working_tree");
   const [gitTarget, setGitTargetState] = useState("");
   const [gitCompare, setGitCompareState] = useState("");
+  const [gitHistoryMode, setGitHistoryModeState] = useState<WorkspaceGitHistoryMode>("repository");
+  const [gitHistoryQuery, setGitHistoryQueryState] = useState("");
+  const [gitHistory, setGitHistory] = useState<WorkspaceGitHistory>();
+  const [gitHistoryLoading, setGitHistoryLoading] = useState(false);
+  const [gitHistoryError, setGitHistoryError] = useState<string | null>(null);
+  const [gitSelectedCommit, setGitSelectedCommit] = useState("");
   const [gitStatus, setGitStatus] = useState<WorkspaceGitStatus>();
   const [gitStatusLoading, setGitStatusLoading] = useState(false);
   const [gitStatusError, setGitStatusError] = useState<string | null>(null);
@@ -310,6 +343,7 @@ export function useWorkspaceFileBrowser({
   const workspaceTreeRequestRef = useRef(0);
   const directoryRequestRef = useRef<Record<string, number>>({});
   const searchRequestRef = useRef(0);
+  const gitHistoryRequestRef = useRef(0);
   const gitStatusRequestRef = useRef(0);
   const gitDiffRequestRef = useRef(0);
 
@@ -699,11 +733,19 @@ export function useWorkspaceFileBrowser({
   );
 
   const loadGitStatus = useCallback(
-    async (options: { quiet?: boolean; scope?: WorkspaceGitScope; target?: string; compare?: string } = {}) => {
+    async (options: { quiet?: boolean; scope?: WorkspaceGitScope; target?: string; compare?: string; commit?: string } = {}) => {
       const targetScope = options.scope ?? gitScope;
       const targetBranch = options.target ?? gitTarget;
       const compareBranch = options.compare ?? gitCompare;
+      const targetCommit = options.commit ?? gitSelectedCommit;
       if (!workspaceID || !onLoadGitStatus) return;
+      if (targetScope === "commit" && !targetCommit) {
+        gitStatusRequestRef.current += 1;
+        setGitStatus(undefined);
+        setGitStatusLoading(false);
+        setGitStatusError(null);
+        return;
+      }
       const requestID = ++gitStatusRequestRef.current;
       setGitStatusLoading(true);
       setGitStatusError(null);
@@ -712,7 +754,8 @@ export function useWorkspaceFileBrowser({
           workspaceID,
           targetScope,
           targetScope === "branch" ? targetBranch : undefined,
-          targetScope === "branch" ? compareBranch : undefined
+          targetScope === "branch" ? compareBranch : undefined,
+          targetScope === "commit" ? targetCommit : undefined
         );
         if (gitStatusRequestRef.current !== requestID) return;
         setGitStatus(status);
@@ -733,7 +776,78 @@ export function useWorkspaceFileBrowser({
         }
       }
     },
-    [gitCompare, gitScope, gitTarget, onLoadGitStatus, workspaceID]
+    [gitCompare, gitScope, gitSelectedCommit, gitTarget, onLoadGitStatus, workspaceID]
+  );
+
+  const loadGitHistory = useCallback(
+    async (options: { quiet?: boolean; mode?: WorkspaceGitHistoryMode; offset?: number; append?: boolean } = {}) => {
+      const mode = options.mode ?? gitHistoryMode;
+      const path = mode === "file" ? normalizeWorkspaceTreePath(trimmedPath) : "";
+      const query = gitHistoryQuery.trim();
+      if (!workspaceID || !onLoadGitHistory) return;
+      if (mode === "file" && !path) {
+        gitHistoryRequestRef.current += 1;
+        setGitHistory({
+          available: true,
+          mode,
+          path: "",
+          limit: 50,
+          offset: 0,
+          has_more: false,
+          message: "Open a file to view its history.",
+          commits: [],
+        });
+        setGitHistoryLoading(false);
+        setGitHistoryError(null);
+        return;
+      }
+      const requestID = ++gitHistoryRequestRef.current;
+      const offset = options.offset ?? 0;
+      setGitHistoryLoading(true);
+      setGitHistoryError(null);
+      try {
+        const history = await onLoadGitHistory(workspaceID, {
+          mode,
+          path: mode === "file" ? path : undefined,
+          q: query || undefined,
+          limit: 50,
+          offset,
+        });
+        if (gitHistoryRequestRef.current !== requestID) return;
+        setGitHistory((current) => {
+          if (!options.append) return history;
+          return {
+            ...history,
+            commits: [...(current?.commits ?? []), ...(history.commits ?? [])],
+          };
+        });
+        if (!options.quiet) {
+          setWorkspaceStatus(history.available ? "History loaded" : history.message ?? "Git history unavailable");
+        }
+      } catch (err) {
+        if (gitHistoryRequestRef.current !== requestID) return;
+        const message = err instanceof Error ? err.message : "History load failed";
+        if (!options.append) setGitHistory(undefined);
+        setGitHistoryError(message);
+        if (!options.quiet) setWorkspaceStatus(message);
+      } finally {
+        if (gitHistoryRequestRef.current === requestID) {
+          setGitHistoryLoading(false);
+        }
+      }
+    },
+    [gitHistoryMode, gitHistoryQuery, onLoadGitHistory, trimmedPath, workspaceID]
+  );
+
+  const selectGitCommit = useCallback(
+    async (commit: WorkspaceGitCommit) => {
+      setGitSelectedCommit(commit.sha);
+      setGitDiff(undefined);
+      setGitDiffError(null);
+      setGitSelectedPath("");
+      await loadGitStatus({ quiet: true, scope: "commit", commit: commit.sha });
+    },
+    [loadGitStatus]
   );
 
   const loadGitDiff = useCallback(
@@ -752,7 +866,8 @@ export function useWorkspaceFileBrowser({
           gitScope,
           targetPath,
           gitScope === "branch" ? gitTarget : undefined,
-          gitScope === "branch" ? gitCompare : undefined
+          gitScope === "branch" ? gitCompare : undefined,
+          gitScope === "commit" ? gitSelectedCommit : undefined
         );
         if (gitDiffRequestRef.current !== requestID) return;
         setGitDiff(diff);
@@ -769,17 +884,21 @@ export function useWorkspaceFileBrowser({
         }
       }
     },
-    [gitCompare, gitScope, gitTarget, onLoadGitDiff, workspaceID]
+    [gitCompare, gitScope, gitSelectedCommit, gitTarget, onLoadGitDiff, workspaceID]
   );
 
   const setWorkspacePaneView = useCallback(
     (view: WorkspacePaneView) => {
       setWorkspacePaneViewState(view);
       if (view === "changes") {
-        void loadGitStatus({ quiet: true });
+        if (gitScope === "commit") {
+          void loadGitHistory({ quiet: true });
+        } else {
+          void loadGitStatus({ quiet: true });
+        }
       }
     },
-    [loadGitStatus]
+    [gitScope, loadGitHistory, loadGitStatus]
   );
 
   const setGitScope = useCallback(
@@ -789,10 +908,14 @@ export function useWorkspaceFileBrowser({
       setGitDiffError(null);
       setGitSelectedPath("");
       if (workspacePaneView === "changes") {
-        void loadGitStatus({ quiet: true, scope, target: gitTarget, compare: gitCompare });
+        if (scope === "commit") {
+          void loadGitHistory({ quiet: true });
+        } else {
+          void loadGitStatus({ quiet: true, scope, target: gitTarget, compare: gitCompare });
+        }
       }
     },
-    [gitCompare, gitTarget, loadGitStatus, workspacePaneView]
+    [gitCompare, gitTarget, loadGitHistory, loadGitStatus, workspacePaneView]
   );
 
   const setGitTarget = useCallback(
@@ -819,6 +942,41 @@ export function useWorkspaceFileBrowser({
       }
     },
     [gitScope, gitTarget, loadGitStatus, workspacePaneView]
+  );
+
+  const setGitHistoryMode = useCallback(
+    (mode: WorkspaceGitHistoryMode) => {
+      gitHistoryRequestRef.current += 1;
+      setGitHistoryModeState(mode);
+      setGitHistory(undefined);
+      setGitHistoryLoading(false);
+      setGitHistoryError(null);
+      setGitSelectedCommit("");
+      setGitStatus(undefined);
+      setGitDiff(undefined);
+      setGitDiffError(null);
+      setGitSelectedPath("");
+      if (workspacePaneView === "changes" && gitScope === "commit") {
+        void loadGitHistory({ quiet: true, mode });
+      }
+    },
+    [gitScope, loadGitHistory, workspacePaneView]
+  );
+
+  const setGitHistoryQuery = useCallback(
+    (query: string) => {
+      gitHistoryRequestRef.current += 1;
+      setGitHistoryQueryState(query);
+      setGitHistory(undefined);
+      setGitHistoryLoading(false);
+      setGitHistoryError(null);
+      setGitSelectedCommit("");
+      setGitStatus(undefined);
+      setGitDiff(undefined);
+      setGitDiffError(null);
+      setGitSelectedPath("");
+    },
+    []
   );
 
   const saveFile = useCallback(async () => {
@@ -1059,6 +1217,7 @@ export function useWorkspaceFileBrowser({
     directoryRequestRef.current = {};
     searchRequestRef.current += 1;
     tabFileRequestRef.current = {};
+    gitHistoryRequestRef.current += 1;
     gitStatusRequestRef.current += 1;
     gitDiffRequestRef.current += 1;
     setTabs([]);
@@ -1087,6 +1246,12 @@ export function useWorkspaceFileBrowser({
     setGitScopeState("working_tree");
     setGitTargetState("");
     setGitCompareState("");
+    setGitHistoryModeState("repository");
+    setGitHistoryQueryState("");
+    setGitHistory(undefined);
+    setGitHistoryLoading(false);
+    setGitHistoryError(null);
+    setGitSelectedCommit("");
     setGitStatus(undefined);
     setGitStatusLoading(false);
     setGitStatusError(null);
@@ -1136,6 +1301,12 @@ export function useWorkspaceFileBrowser({
     gitScope,
     gitTarget,
     gitCompare,
+    gitHistoryMode,
+    gitHistoryQuery,
+    gitHistory,
+    gitHistoryLoading,
+    gitHistoryError,
+    gitSelectedCommit,
     gitStatus,
     gitStatusLoading,
     gitStatusError,
@@ -1175,12 +1346,16 @@ export function useWorkspaceFileBrowser({
     setGitScope,
     setGitTarget,
     setGitCompare,
+    setGitHistoryMode,
+    setGitHistoryQuery,
     loadTree,
     loadDirectory,
     loadSearch,
     clearSearch,
     loadFile,
     loadGitStatus,
+    loadGitHistory,
+    selectGitCommit,
     loadGitDiff,
     saveFile,
     fetchFileBlob,
@@ -1828,11 +2003,16 @@ function WorkspaceGitChangesList({
   className?: string;
   onChangeSelected?: () => void;
 }) {
-  const status = controller.gitStatus?.scope === controller.gitScope ? controller.gitStatus : undefined;
+  const status =
+    controller.gitStatus?.scope === controller.gitScope &&
+    (controller.gitScope !== "commit" || controller.gitStatus.commit === controller.gitSelectedCommit)
+      ? controller.gitStatus
+      : undefined;
   const changes = status?.changes ?? [];
   const branchTargets = status?.targets ?? [];
   const baseBranch = branchTargets.length > 0 ? controller.gitTarget || status?.target || status?.base || "" : "";
   const compareBranch = branchTargets.length > 0 ? controller.gitCompare || status?.compare || status?.branch || "" : "";
+  const showCommitHistory = controller.gitScope === "commit";
 
   return (
     <div className={cn("flex min-h-0 flex-col overflow-hidden rounded-md border border-border bg-background/50", className)}>
@@ -1847,6 +2027,7 @@ function WorkspaceGitChangesList({
           >
             <option value="working_tree">Working tree</option>
             <option value="branch">Branch</option>
+            <option value="commit">Commit</option>
           </Select>
           <Button
             type="button"
@@ -1901,11 +2082,43 @@ function WorkspaceGitChangesList({
             </Select>
           </div>
         )}
+        {showCommitHistory && (
+          <div className="grid grid-cols-2 gap-1.5">
+            <Button
+              type="button"
+              size="sm"
+              variant={controller.gitHistoryMode === "repository" ? "secondary" : "ghost"}
+              aria-pressed={controller.gitHistoryMode === "repository"}
+              className="h-8 gap-1.5 text-xs"
+              onClick={() => controller.setGitHistoryMode("repository")}
+            >
+              <History className="h-3.5 w-3.5" />
+              Repository
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={controller.gitHistoryMode === "file" ? "secondary" : "ghost"}
+              aria-pressed={controller.gitHistoryMode === "file"}
+              className="h-8 gap-1.5 text-xs"
+              onClick={() => controller.setGitHistoryMode("file")}
+            >
+              <FileText className="h-3.5 w-3.5" />
+              Current file
+            </Button>
+          </div>
+        )}
       </div>
       {status?.available && (
         <div className="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5 text-[11px] text-muted-foreground">
           <GitBranch className="h-3 w-3 shrink-0" />
-          {controller.gitScope === "branch" && (status.target || status.base) ? (
+          {controller.gitScope === "commit" && status.commit ? (
+            <>
+              <span className="truncate">{shortCommitSHA(status.commit)}</span>
+              <span className="shrink-0">vs</span>
+              <span className="truncate">{status.base ? shortCommitSHA(status.base) : "empty tree"}</span>
+            </>
+          ) : controller.gitScope === "branch" && (status.target || status.base) ? (
             <>
               <span className="truncate">{status.target || status.base}</span>
               <span className="shrink-0">vs</span>
@@ -1916,11 +2129,16 @@ function WorkspaceGitChangesList({
           )}
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-hidden">
+      {showCommitHistory && (
+        <WorkspaceGitCommitHistory controller={controller} />
+      )}
+      <div className={cn("min-h-0 overflow-hidden", showCommitHistory ? "flex-[1.2]" : "flex-1")}>
         {controller.gitStatusError ? (
           <p className="px-3 py-2 text-xs text-destructive">{controller.gitStatusError}</p>
         ) : controller.gitStatusLoading && !status ? (
           <p className="px-3 py-2 text-xs text-muted-foreground">Loading...</p>
+        ) : showCommitHistory && !controller.gitSelectedCommit ? (
+          <p className="px-3 py-2 text-xs text-muted-foreground">Select a commit to view changed files.</p>
         ) : status && !status.available ? (
           <p className="px-3 py-2 text-xs text-muted-foreground">{status.message || "Git changes are unavailable."}</p>
         ) : !status ? (
@@ -1943,6 +2161,120 @@ function WorkspaceGitChangesList({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function WorkspaceGitCommitHistory({
+  controller,
+}: {
+  controller: WorkspaceFileBrowserController;
+}) {
+  const history = controller.gitHistory;
+  const commits = history?.commits ?? [];
+  const query = controller.gitHistoryQuery.trim();
+
+  useEffect(() => {
+    if (controller.gitScope !== "commit") return;
+    const timeout = window.setTimeout(() => {
+      void controller.loadGitHistory({ quiet: true });
+    }, query ? workspaceSearchDebounceMs : 0);
+    return () => window.clearTimeout(timeout);
+  }, [controller.gitScope, controller.gitHistoryMode, controller.gitHistoryQuery, controller.trimmedPath]);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col border-b border-border">
+      <div className="flex shrink-0 flex-col gap-1.5 border-b border-border p-2">
+        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <History className="h-3 w-3 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">
+            {controller.gitHistoryMode === "file"
+              ? controller.trimmedPath || "Current file"
+              : history?.branch || "HEAD"}
+          </span>
+          {history?.has_more && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-[11px]"
+              disabled={controller.gitHistoryLoading}
+              onClick={() => void controller.loadGitHistory({
+                quiet: true,
+                offset: commits.length,
+                append: true,
+              })}
+            >
+              More
+            </Button>
+          )}
+        </div>
+        <Input
+          value={controller.gitHistoryQuery}
+          onChange={(event) => controller.setGitHistoryQuery(event.target.value)}
+          placeholder="Search commits"
+          aria-label="Search commits"
+          className="h-8 text-xs"
+        />
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto p-2" role="list" aria-label="Git commit history">
+        {controller.gitHistoryError ? (
+          <p className="px-1 py-1 text-xs text-destructive">{controller.gitHistoryError}</p>
+        ) : controller.gitHistoryLoading && !history ? (
+          <p className="px-1 py-1 text-xs text-muted-foreground">Loading...</p>
+        ) : history && !history.available ? (
+          <p className="px-1 py-1 text-xs text-muted-foreground">{history.message || "Git history is unavailable."}</p>
+        ) : history?.message && commits.length === 0 ? (
+          <p className="px-1 py-1 text-xs text-muted-foreground">{history.message}</p>
+        ) : commits.length === 0 ? (
+          <p className="px-1 py-1 text-xs text-muted-foreground">{query ? "No matching commits." : "No commits."}</p>
+        ) : (
+          commits.map((commit) => (
+            <WorkspaceGitCommitRow
+              key={commit.sha}
+              commit={commit}
+              selected={controller.gitSelectedCommit === commit.sha}
+              onSelect={() => void controller.selectGitCommit(commit)}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WorkspaceGitCommitRow({
+  commit,
+  selected,
+  onSelect,
+}: {
+  commit: WorkspaceGitCommit;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <div role="listitem" aria-label={`${commit.short_sha} ${commit.subject}`}>
+      <button
+        type="button"
+        className={cn(
+          "flex min-h-10 w-full items-start gap-2 rounded px-1.5 py-1.5 text-left text-xs transition-colors",
+          selected
+            ? "bg-accent text-foreground"
+            : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+        )}
+        onClick={onSelect}
+      >
+        <span className="mt-0.5 shrink-0 font-mono text-[10px] text-muted-foreground">
+          {commit.short_sha}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-medium text-foreground">{commit.subject || "(no subject)"}</span>
+          <span className="block truncate text-[11px] text-muted-foreground">
+            {commit.author_name}
+            {commit.authored_at ? ` - ${formatGitCommitDate(commit.authored_at)}` : ""}
+          </span>
+        </span>
+      </button>
     </div>
   );
 }
@@ -2635,7 +2967,24 @@ function GitDiffMessage({
 }
 
 function gitScopeLabel(scope: WorkspaceGitScope): string {
-  return scope === "branch" ? "Branch" : "Working tree";
+  if (scope === "branch") return "Branch";
+  if (scope === "commit") return "Commit";
+  return "Working tree";
+}
+
+function shortCommitSHA(sha: string): string {
+  return sha.slice(0, 12);
+}
+
+function formatGitCommitDate(value: string): string {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(timestamp));
 }
 
 function WorkspaceFileToolbar({
@@ -2885,6 +3234,7 @@ export function WorkspaceFileBrowser({
   onMoveEntry,
   onDeleteEntry,
   onLoadGitStatus,
+  onLoadGitHistory,
   onLoadGitDiff,
 }: WorkspaceFileBrowserProps) {
   const [fileDeleteConfirmOpen, setFileDeleteConfirmOpen] = useState(false);
@@ -2906,6 +3256,7 @@ export function WorkspaceFileBrowser({
     onMoveEntry,
     onDeleteEntry,
     onLoadGitStatus,
+    onLoadGitHistory,
     onLoadGitDiff,
   });
 

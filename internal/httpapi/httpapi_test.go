@@ -1012,6 +1012,7 @@ func TestHTTPWorkspaceGitStatusAndDiff(t *testing.T) {
 	writeHTTPSkill(t, filepath.Join(workspace.Path, "same.txt"), "same base\n")
 	runHTTPGit(t, workspace.Path, "add", ".")
 	runHTTPGit(t, workspace.Path, "commit", "-m", "initial")
+	initialSHA := runHTTPGitOutput(t, workspace.Path, "rev-parse", "HEAD")
 	runHTTPGit(t, workspace.Path, "checkout", "-b", "release")
 	writeHTTPSkill(t, filepath.Join(workspace.Path, "shared.txt"), "shared release\n")
 	writeHTTPSkill(t, filepath.Join(workspace.Path, "same.txt"), "same changed\n")
@@ -1024,6 +1025,7 @@ func TestHTTPWorkspaceGitStatusAndDiff(t *testing.T) {
 	writeHTTPSkill(t, filepath.Join(workspace.Path, "same.txt"), "same changed\n")
 	runHTTPGit(t, workspace.Path, "add", "branch.txt", "shared.txt", "same.txt")
 	runHTTPGit(t, workspace.Path, "commit", "-m", "branch change")
+	featureSHA := runHTTPGitOutput(t, workspace.Path, "rev-parse", "HEAD")
 
 	writeHTTPSkill(t, filepath.Join(workspace.Path, "README.md"), "hello working\n")
 	writeHTTPSkill(t, filepath.Join(workspace.Path, "crlf.txt"), "one\r\nTWO\r\nthree\r\n")
@@ -1113,6 +1115,63 @@ func TestHTTPWorkspaceGitStatusAndDiff(t *testing.T) {
 		t.Fatalf("branch diff = %#v", branchDiff)
 	}
 
+	var repoHistory workspaceGitHistoryResponse
+	getJSON(t, ts.URL+"/api/workspaces/"+workspace.ID+"/git/history?mode=repository&limit=1", bootstrap.SessionToken, http.StatusOK, &repoHistory)
+	if !repoHistory.Available || repoHistory.Mode != workspaceGitHistoryRepository || len(repoHistory.Commits) != 1 || !repoHistory.HasMore {
+		t.Fatalf("repository history = %#v, want one commit with more results", repoHistory)
+	}
+	if repoHistory.Commits[0].SHA != featureSHA || repoHistory.Commits[0].Subject != "branch change" {
+		t.Fatalf("repository history first commit = %#v, want feature commit", repoHistory.Commits[0])
+	}
+	var shaHistory workspaceGitHistoryResponse
+	getJSON(t, ts.URL+"/api/workspaces/"+workspace.ID+"/git/history?mode=repository&q="+url.QueryEscape(featureSHA[:12]), bootstrap.SessionToken, http.StatusOK, &shaHistory)
+	if !shaHistory.Available || shaHistory.Query != featureSHA[:12] || len(shaHistory.Commits) != 1 || shaHistory.Commits[0].SHA != featureSHA {
+		t.Fatalf("sha history = %#v, want feature commit", shaHistory)
+	}
+	var textHistory workspaceGitHistoryResponse
+	getJSON(t, ts.URL+"/api/workspaces/"+workspace.ID+"/git/history?mode=repository&q="+url.QueryEscape("initial"), bootstrap.SessionToken, http.StatusOK, &textHistory)
+	if !textHistory.Available || textHistory.Query != "initial" || len(textHistory.Commits) != 1 || textHistory.Commits[0].SHA != initialSHA {
+		t.Fatalf("text history = %#v, want initial commit", textHistory)
+	}
+	var missingHistory workspaceGitHistoryResponse
+	getJSON(t, ts.URL+"/api/workspaces/"+workspace.ID+"/git/history?mode=repository&q="+url.QueryEscape("webbbb"), bootstrap.SessionToken, http.StatusOK, &missingHistory)
+	if !missingHistory.Available || missingHistory.Query != "webbbb" || len(missingHistory.Commits) != 0 || missingHistory.HasMore {
+		t.Fatalf("missing history = %#v, want no matching commits", missingHistory)
+	}
+	var fileHistory workspaceGitHistoryResponse
+	getJSON(t, ts.URL+"/api/workspaces/"+workspace.ID+"/git/history?mode=file&path=branch.txt", bootstrap.SessionToken, http.StatusOK, &fileHistory)
+	if !fileHistory.Available || fileHistory.Mode != workspaceGitHistoryFile || fileHistory.Path != "branch.txt" || len(fileHistory.Commits) != 1 {
+		t.Fatalf("file history = %#v, want branch.txt feature commit only", fileHistory)
+	}
+	if fileHistory.Commits[0].SHA != featureSHA {
+		t.Fatalf("file history first commit = %#v, want %s", fileHistory.Commits[0], featureSHA)
+	}
+	getJSON(t, ts.URL+"/api/workspaces/"+workspace.ID+"/git/history?mode=file&path=../secret", bootstrap.SessionToken, http.StatusBadRequest, nil)
+
+	var commitStatus workspaceGitStatusResponse
+	getJSON(t, statusURL+"?scope=commit&commit="+url.QueryEscape(featureSHA), bootstrap.SessionToken, http.StatusOK, &commitStatus)
+	if !commitStatus.Available || commitStatus.Scope != workspaceGitScopeCommit || commitStatus.Commit != featureSHA || commitStatus.Base != initialSHA {
+		t.Fatalf("commit status = %#v, want feature vs initial", commitStatus)
+	}
+	if changeStatus(commitStatus.Changes, "branch.txt") != "added" || changeStatus(commitStatus.Changes, "shared.txt") != "modified" {
+		t.Fatalf("commit changes = %#v, want branch.txt added and shared.txt modified", commitStatus.Changes)
+	}
+	var commitDiff workspaceGitDiffResponse
+	getJSON(t, ts.URL+"/api/workspaces/"+workspace.ID+"/git/diff?scope=commit&commit="+url.QueryEscape(featureSHA)+"&path=branch.txt", bootstrap.SessionToken, http.StatusOK, &commitDiff)
+	if commitDiff.Original != "" || commitDiff.Modified != "branch change\n" || commitDiff.Commit != featureSHA || commitDiff.Base != initialSHA {
+		t.Fatalf("commit diff = %#v", commitDiff)
+	}
+	var rootCommitDiff workspaceGitDiffResponse
+	getJSON(t, ts.URL+"/api/workspaces/"+workspace.ID+"/git/diff?scope=commit&commit="+url.QueryEscape(initialSHA)+"&path=README.md", bootstrap.SessionToken, http.StatusOK, &rootCommitDiff)
+	if rootCommitDiff.Original != "" || rootCommitDiff.Modified != "hello\n" || rootCommitDiff.Base != "" {
+		t.Fatalf("root commit diff = %#v", rootCommitDiff)
+	}
+	var missingCommit workspaceGitStatusResponse
+	getJSON(t, statusURL+"?scope=commit&commit=missing", bootstrap.SessionToken, http.StatusOK, &missingCommit)
+	if missingCommit.Available || missingCommit.Message == "" {
+		t.Fatalf("missing commit status = %#v, want unavailable with message", missingCommit)
+	}
+	getJSON(t, ts.URL+"/api/workspaces/"+workspace.ID+"/git/diff?scope=commit&commit=missing&path=README.md", bootstrap.SessionToken, http.StatusBadRequest, nil)
 	getJSON(t, ts.URL+"/api/workspaces/"+workspace.ID+"/git/diff?scope=working_tree&path=../secret", bootstrap.SessionToken, http.StatusBadRequest, nil)
 }
 
@@ -1173,6 +1232,17 @@ func runHTTPGit(t *testing.T, dir string, args ...string) {
 	if err != nil {
 		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(output))
 	}
+}
+
+func runHTTPGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(output))
+	}
+	return strings.TrimSpace(string(output))
 }
 
 func changeStatus(changes []workspaceGitChange, path string) string {

@@ -32,6 +32,8 @@ import type {
   WorkspaceEntryType,
   WorkspaceFile,
   WorkspaceGitDiff,
+  WorkspaceGitHistory,
+  WorkspaceGitHistoryMode,
   WorkspaceGitScope,
   WorkspaceGitStatus,
   WorkspaceSearchMode,
@@ -628,7 +630,8 @@ export function workspaceGitStatus(
   workspaceID: string,
   scope: WorkspaceGitScope,
   target?: string,
-  compare?: string
+  compare?: string,
+  commit?: string
 ): Promise<WorkspaceGitStatus> {
   const params = new URLSearchParams({ scope });
   if (target?.trim()) {
@@ -637,8 +640,39 @@ export function workspaceGitStatus(
   if (compare?.trim()) {
     params.set("compare", compare.trim());
   }
+  if (commit?.trim()) {
+    params.set("commit", commit.trim());
+  }
   return request<WorkspaceGitStatus>(
     `/api/workspaces/${encodeURIComponent(workspaceID)}/git/status?${params.toString()}`
+  );
+}
+
+export function workspaceGitHistory(
+  workspaceID: string,
+  options: {
+    mode: WorkspaceGitHistoryMode;
+    path?: string;
+    q?: string;
+    limit?: number;
+    offset?: number;
+  }
+): Promise<WorkspaceGitHistory> {
+  const params = new URLSearchParams({ mode: options.mode });
+  if (options.path?.trim()) {
+    params.set("path", options.path.trim());
+  }
+  if (options.q?.trim()) {
+    params.set("q", options.q.trim());
+  }
+  if (options.limit) {
+    params.set("limit", String(options.limit));
+  }
+  if (options.offset) {
+    params.set("offset", String(options.offset));
+  }
+  return request<WorkspaceGitHistory>(
+    `/api/workspaces/${encodeURIComponent(workspaceID)}/git/history?${params.toString()}`
   );
 }
 
@@ -647,7 +681,8 @@ export function workspaceGitDiff(
   scope: WorkspaceGitScope,
   path: string,
   target?: string,
-  compare?: string
+  compare?: string,
+  commit?: string
 ): Promise<WorkspaceGitDiff> {
   const params = new URLSearchParams({ scope, path });
   if (target?.trim()) {
@@ -655,6 +690,9 @@ export function workspaceGitDiff(
   }
   if (compare?.trim()) {
     params.set("compare", compare.trim());
+  }
+  if (commit?.trim()) {
+    params.set("commit", commit.trim());
   }
   return request<WorkspaceGitDiff>(
     `/api/workspaces/${encodeURIComponent(workspaceID)}/git/diff?${params.toString()}`

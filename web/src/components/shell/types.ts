@@ -19,6 +19,8 @@ import type {
   Workspace,
   WorkspaceEntryType,
   WorkspaceGitDiff,
+  WorkspaceGitHistory,
+  WorkspaceGitHistoryMode,
   WorkspaceGitScope,
   WorkspaceGitStatus,
   WorkspaceSearchMode,
@@ -183,14 +185,26 @@ export interface ShellProps {
     workspaceID: string,
     scope: WorkspaceGitScope,
     target?: string,
-    compare?: string
+    compare?: string,
+    commit?: string
   ) => Promise<WorkspaceGitStatus>;
+  onLoadWorkspaceGitHistory: (
+    workspaceID: string,
+    options: {
+      mode: WorkspaceGitHistoryMode;
+      path?: string;
+      q?: string;
+      limit?: number;
+      offset?: number;
+    }
+  ) => Promise<WorkspaceGitHistory>;
   onLoadWorkspaceGitDiff: (
     workspaceID: string,
     scope: WorkspaceGitScope,
     path: string,
     target?: string,
-    compare?: string
+    compare?: string,
+    commit?: string
   ) => Promise<WorkspaceGitDiff>;
   onUpdateMessage: (messageID: string, body: string) => Promise<Message>;
   onDeleteMessage: (message: Message) => Promise<void>;

@@ -84,6 +84,7 @@ func NewRouter(a *app.App, bus *eventbus.Bus) http.Handler {
 			r.Patch("/workspaces/{workspaceID}/entries", s.handleMoveWorkspaceEntry)
 			r.Delete("/workspaces/{workspaceID}/entries", s.handleDeleteWorkspaceEntry)
 			r.Get("/workspaces/{workspaceID}/git/status", s.handleWorkspaceGitStatus)
+			r.Get("/workspaces/{workspaceID}/git/history", s.handleWorkspaceGitHistory)
 			r.Get("/workspaces/{workspaceID}/git/diff", s.handleWorkspaceGitDiff)
 			r.Get("/workspaces/{workspaceID}/terminals", s.handleWorkspaceTerminals)
 			r.Patch("/workspaces/{workspaceID}/terminals/{terminalID}", s.handleRenameWorkspaceTerminal)

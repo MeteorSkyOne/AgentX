@@ -3,6 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { WorkspaceGitHistory } from "@/api/types";
 import {
   WorkspaceFileEditorPane,
   WorkspaceFileTreePane,
@@ -193,6 +194,113 @@ describe("WorkspaceFileEditorPane markdown controls", () => {
     fireEvent.click(screen.getByRole("button", { name: /src\/main.go/i }));
 
     expect(loadGitDiff).toHaveBeenCalledWith("src/main.go");
+  });
+
+  it("renders commit history and commit changed files in the changes pane", () => {
+    const selectGitCommit = vi.fn(async () => undefined);
+    const setGitHistoryMode = vi.fn();
+    const setGitHistoryQuery = vi.fn();
+    const loadGitDiff = vi.fn(async () => undefined);
+    const commitSHA = "abc1234567890abcdef";
+
+    render(
+      <WorkspaceFileTreePaneHarness
+        controller={controllerFixture({
+          gitEnabled: true,
+          workspacePaneView: "changes",
+          gitScope: "commit",
+          gitHistoryMode: "repository",
+          gitSelectedCommit: commitSHA,
+          gitHistory: {
+            available: true,
+            branch: "feature",
+            mode: "repository",
+            limit: 50,
+            offset: 0,
+            has_more: false,
+            commits: [
+              {
+                sha: commitSHA,
+                short_sha: "abc1234",
+                subject: "add history",
+                author_name: "Test User",
+                author_email: "test@example.com",
+                authored_at: "2026-05-23T10:00:00Z",
+              },
+            ],
+          },
+          gitStatus: {
+            available: true,
+            scope: "commit",
+            branch: "feature",
+            commit: commitSHA,
+            base: "def4567890123abcdef",
+            changes: [
+              { path: "src/history.ts", status: "modified" },
+            ],
+          },
+          selectGitCommit,
+          setGitHistoryMode,
+          setGitHistoryQuery,
+          loadGitDiff,
+        })}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Changes" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Repository" }).getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Current file" }));
+    expect(setGitHistoryMode).toHaveBeenCalledWith("file");
+    fireEvent.change(screen.getByRole("textbox", { name: "Search commits" }), {
+      target: { value: "abc1234" },
+    });
+    expect(setGitHistoryQuery).toHaveBeenCalledWith("abc1234");
+
+    fireEvent.click(screen.getByText("add history").closest("button")!);
+    expect(selectGitCommit).toHaveBeenCalledWith(expect.objectContaining({ sha: commitSHA }));
+
+    fireEvent.click(screen.getByText("src/history.ts").closest("button")!);
+    expect(loadGitDiff).toHaveBeenCalledWith("src/history.ts");
+  });
+
+  it("does not show stale commit history after the search query changes", async () => {
+    const pending: Array<(value: WorkspaceGitHistory) => void> = [];
+    const onLoadGitHistory: NonNullable<Parameters<typeof useWorkspaceFileBrowser>[0]["onLoadGitHistory"]> = vi.fn(
+      () => new Promise<WorkspaceGitHistory>((resolve) => pending.push(resolve))
+    );
+
+    render(<HistoryRaceHarness onLoadGitHistory={onLoadGitHistory} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Load history" }));
+    await waitFor(() => expect(onLoadGitHistory).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Search webbbb" }));
+    expect(screen.getByTestId("history-query").textContent).toBe("webbbb");
+
+    await act(async () => {
+      pending[0]?.({
+        available: true,
+        branch: "feature",
+        mode: "repository",
+        limit: 50,
+        offset: 0,
+        has_more: false,
+        commits: [
+          {
+            sha: "abc1234567890abcdef",
+            short_sha: "abc1234",
+            subject: "old visible commit",
+            author_name: "Test User",
+            author_email: "test@example.com",
+            authored_at: "2026-05-23T10:00:00Z",
+          },
+        ],
+      });
+    });
+
+    expect(screen.queryByText("old visible commit")).toBeNull();
+    expect(screen.getByTestId("history-count").textContent).toBe("none");
   });
 
   it("runs workspace search from the project files pane", async () => {
@@ -402,6 +510,52 @@ function PdfLoadHarness({
   );
 }
 
+function HistoryRaceHarness({
+  onLoadGitHistory,
+}: {
+  onLoadGitHistory: NonNullable<Parameters<typeof useWorkspaceFileBrowser>[0]["onLoadGitHistory"]>;
+}) {
+  const controller = useWorkspaceFileBrowser({
+    workspaceID: "w1",
+    workspacePath: "/workspace/AgentX",
+    autoLoadTree: false,
+    onLoadTree: async () => workspaceTreeFixture(),
+    onReadFile: async () => "",
+    onWriteFile: async () => undefined,
+    onDeleteFile: async () => undefined,
+    onLoadGitStatus: async () => ({
+      available: true,
+      scope: "commit",
+      changes: [],
+    }),
+    onLoadGitHistory,
+    onLoadGitDiff: async () => ({
+      scope: "commit",
+      path: "README.md",
+      status: "modified",
+      original: "",
+      modified: "",
+    }),
+  });
+  return (
+    <div>
+      <button type="button" onClick={() => void controller.loadGitHistory()}>
+        Load history
+      </button>
+      <button type="button" onClick={() => controller.setGitHistoryQuery("webbbb")}>
+        Search webbbb
+      </button>
+      <div data-testid="history-query">{controller.gitHistoryQuery}</div>
+      <div data-testid="history-count">
+        {controller.gitHistory ? String(controller.gitHistory.commits.length) : "none"}
+      </div>
+      {controller.gitHistory?.commits.map((commit) => (
+        <div key={commit.sha}>{commit.subject}</div>
+      ))}
+    </div>
+  );
+}
+
 function SearchHarness({
   onSearchWorkspace,
 }: {
@@ -471,6 +625,12 @@ function controllerFixture(
     gitScope: "working_tree",
     gitTarget: "",
     gitCompare: "",
+    gitHistoryMode: "repository",
+    gitHistoryQuery: "",
+    gitHistory: undefined,
+    gitHistoryLoading: false,
+    gitHistoryError: null,
+    gitSelectedCommit: "",
     gitStatus: undefined,
     gitStatusLoading: false,
     gitStatusError: null,
@@ -509,12 +669,16 @@ function controllerFixture(
     setGitScope: vi.fn(),
     setGitTarget: vi.fn(),
     setGitCompare: vi.fn(),
+    setGitHistoryMode: vi.fn(),
+    setGitHistoryQuery: vi.fn(),
     loadTree: vi.fn(async () => undefined),
     loadDirectory: vi.fn(async () => undefined),
     loadSearch: vi.fn(async () => undefined),
     clearSearch: vi.fn(),
     loadFile: vi.fn(async () => undefined),
     loadGitStatus: vi.fn(async () => undefined),
+    loadGitHistory: vi.fn(async () => undefined),
+    selectGitCommit: vi.fn(async () => undefined),
     loadGitDiff: vi.fn(async () => undefined),
     saveFile: vi.fn(async () => undefined),
     fetchFileBlob: vi.fn(async () => new Blob(["file"])),
