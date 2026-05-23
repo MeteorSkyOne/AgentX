@@ -1,4 +1,4 @@
-import { createContext, Fragment, lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, Fragment, lazy, memo, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent, WheelEvent } from "react";
 import {
   Bot,
@@ -139,10 +139,10 @@ export function MessagePane({
   const shouldStickToBottomRef = useRef(true);
   const previousConversationKeyRef = useRef<string | undefined>(conversationKey);
   const [isAtBottom, setIsAtBottom] = useState(true);
-  const agentByBotID = new Map(agents.map((item) => [item.agent.bot_user_id, item.agent]));
-  const agentByID = new Map(agents.map((item) => [item.agent.id, item.agent]));
-  const messagesByID = new Map(messages.map((message) => [message.id, message]));
-  const messageItems = groupTeamDiscussionMessages(messages);
+  const agentByBotID = useMemo(() => new Map(agents.map((item) => [item.agent.bot_user_id, item.agent])), [agents]);
+  const agentByID = useMemo(() => new Map(agents.map((item) => [item.agent.id, item.agent])), [agents]);
+  const messagesByID = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
+  const messageItems = useMemo(() => groupTeamDiscussionMessages(messages), [messages]);
   const mentionLabels = useMemo(() => buildMentionLabels(agents), [agents]);
 
   useLayoutEffect(() => {
@@ -371,7 +371,7 @@ function displayMentionLabels(text: string, mentionLabels?: MentionLabels): stri
   });
 }
 
-function MessageMarkdown({
+const MessageMarkdown = memo(function MessageMarkdown({
   text,
   workspacePath,
   onOpenWorkspacePath,
@@ -392,7 +392,7 @@ function MessageMarkdown({
       />
     </Suspense>
   );
-}
+});
 
 function MarkdownFallback({ text }: { text: string }) {
   const mentionLabels = useContext(MentionLabelsContext);
@@ -564,12 +564,12 @@ interface MessageItemProps {
   onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
 }
 
-function MessageItem(props: MessageItemProps) {
+const MessageItem = memo(function MessageItem(props: MessageItemProps) {
   if (isContextSeparatorMessage(props.message)) {
     return <ContextSeparator message={props.message} />;
   }
   return <ConversationMessageItem {...props} />;
-}
+});
 
 function ConversationMessageItem({
   message,
@@ -1601,7 +1601,7 @@ function ProcessBlock({
   messageID?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const displayItems = groupProcessFragments(mergeToolProcessItems(items));
+  const displayItems = useMemo(() => groupProcessFragments(mergeToolProcessItems(items)), [items]);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground py-1">

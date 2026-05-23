@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { Composer } from "../Composer";
 import { MessagePane } from "../MessagePane";
 import type { Channel, ConversationAgentContext, Message, Thread, UserPreferences } from "../../api/types";
@@ -75,16 +75,17 @@ export function ConversationPanel({
   const replyTarget =
     replyTargetState?.conversationKey === conversationKey ? replyTargetState.message : null;
 
-  function clearReplyTarget() {
+  const clearReplyTarget = useCallback(() => {
     setReplyTargetState(null);
-  }
+  }, []);
 
-  function selectReplyTarget(message: Message) {
-    if (!conversationKey) {
-      return;
-    }
-    setReplyTargetState({ conversationKey, message });
-  }
+  const selectReplyTarget = useCallback((message: Message) => {
+    setReplyTargetState((current) => {
+      const key = composerConversation ? `${composerConversation.type}:${composerConversation.id}` : "";
+      if (!key) return current;
+      return { conversationKey: key, message };
+    });
+  }, [composerConversation]);
 
   useEffect(() => {
     clearReplyTarget();
@@ -103,6 +104,30 @@ export function ConversationPanel({
       setReplyTargetState({ conversationKey, message: currentTarget });
     }
   }, [conversationKey, messages, replyTarget, replyTarget?.id]);
+
+  const mentionAgents = useMemo(
+    () => boundAgents.map((item) => item.agent),
+    [boundAgents]
+  );
+
+  const typingAgents = useMemo(
+    () =>
+      streaming
+        .filter((s) => !s.error)
+        .map((s) => {
+          const agent = boundAgents.find((b) => b.agent.id === s.agentID);
+          return { name: agent?.agent.name ?? "Agent" };
+        }),
+    [streaming, boundAgents]
+  );
+
+  const handleSent = useCallback(
+    (message: Message) => {
+      clearReplyTarget();
+      onMessageSent(message);
+    },
+    [clearReplyTarget, onMessageSent]
+  );
 
   if (selectedChannel?.type === "thread" && !activeThread) {
     return (
@@ -139,25 +164,19 @@ export function ConversationPanel({
         workspacePath={workspacePath}
         onOpenWorkspacePath={onOpenWorkspacePath}
       />
-      <Composer
+      <MemoizedComposer
         conversation={composerConversation}
-        mentionAgents={boundAgents.map((item) => item.agent)}
+        mentionAgents={mentionAgents}
         replyToMessage={replyTarget}
         onCancelReplyTo={clearReplyTarget}
-        typingAgents={streaming
-          .filter((s) => !s.error)
-          .map((s) => {
-            const agent = boundAgents.find((b) => b.agent.id === s.agentID);
-            return { name: agent?.agent.name ?? "Agent" };
-          })}
+        typingAgents={typingAgents}
         queuedPrompts={queuedPrompts}
         onSteerQueuedPrompt={onSteerQueuedPrompt}
         onDeleteQueuedPrompt={onDeleteQueuedPrompt}
-        onSent={(message) => {
-          clearReplyTarget();
-          onMessageSent(message);
-        }}
+        onSent={handleSent}
       />
     </>
   );
 }
+
+const MemoizedComposer = memo(Composer);
