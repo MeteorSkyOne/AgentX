@@ -16,6 +16,11 @@ import (
 	"github.com/meteorsky/agentx/internal/runtime/procpool"
 )
 
+var (
+	claudeResultSettleDelay = 750 * time.Millisecond
+	claudeResultMaxWait     = 10 * time.Minute
+)
+
 type inputAnswer struct {
 	questionID string
 	answer     string
@@ -380,13 +385,19 @@ func (s *persistentSession) readEvents(ctx context.Context) {
 		s.closeEventStream()
 	}()
 
-	var textBuf strings.Builder
-	var pendingTextBuf strings.Builder
-	var stageTextBuf strings.Builder
+	state := newClaudeTurnState()
 	for {
+		settleC := state.settleC()
+		maxWaitC := state.maxWaitC()
 		select {
 		case <-ctx.Done():
 			s.emit(runtime.Event{Type: runtime.EventFailed, Error: ctx.Err().Error()})
+			return
+		case <-settleC:
+			s.emit(state.completionEvent())
+			return
+		case <-maxWaitC:
+			s.emit(state.completionEvent())
 			return
 		case <-s.process.Done():
 			errText := s.processExitText("persistent process exited")
@@ -394,14 +405,16 @@ func (s *persistentSession) readEvents(ctx context.Context) {
 			return
 		case line, ok := <-s.process.StdoutLines():
 			if !ok {
-				if text := textBuf.String(); text != "" {
+				if state.pendingCompletion != nil {
+					s.emit(state.completionEvent())
+				} else if text := state.text(); text != "" {
 					s.emit(runtime.Event{Type: runtime.EventCompleted, Text: text})
 				} else {
 					s.emit(runtime.Event{Type: runtime.EventFailed, Error: "stdout closed"})
 				}
 				return
 			}
-			terminal, inputReq := s.handleLine(line, &textBuf, &pendingTextBuf, &stageTextBuf)
+			terminal, inputReq := s.handleLine(line, state)
 			if inputReq != nil {
 				if s.waitForInputResponse(ctx, inputReq) {
 					return
@@ -411,16 +424,17 @@ func (s *persistentSession) readEvents(ctx context.Context) {
 			if terminal {
 				return
 			}
+			state.updateCompletionTimers()
 		}
 	}
 }
 
-func (s *persistentSession) handleLine(line []byte, textBuf *strings.Builder, pendingTextBuf *strings.Builder, stageTextBuf *strings.Builder) (bool, *runtime.InputRequest) {
+func (s *persistentSession) handleLine(line []byte, state *claudeTurnState) (bool, *runtime.InputRequest) {
 	var payload map[string]any
 	if err := json.Unmarshal(line, &payload); err != nil {
 		text := strings.TrimSpace(string(line))
 		if text != "" {
-			textBuf.WriteString(text)
+			state.appendText(text)
 			s.emit(runtime.Event{Type: runtime.EventDelta, Text: text})
 		}
 		return false, nil
@@ -436,27 +450,29 @@ func (s *persistentSession) handleLine(line []byte, textBuf *strings.Builder, pe
 	case "system":
 		return false, nil
 
-	case "assistant":
+	case "assistant", "user":
+		payloadType := claude.StringValue(payload, "type")
 		text, thinking, process := claude.AssistantContent(payload)
+		if payloadType != "assistant" {
+			text = ""
+		}
 		if text == "" && thinking == "" && len(process) == 0 {
 			return false, nil
 		}
 		if text != "" {
-			if textBuf.Len() > 0 {
-				textBuf.WriteByte('\n')
-			}
-			textBuf.WriteString(text)
+			state.appendText(text)
 		}
 		var clearText bool
 		if thinking != "" || len(process) > 0 {
-			if promoted := promotePendingImmediate(pendingTextBuf); promoted != "" {
+			if promoted := state.promotePendingImmediate(); promoted != "" {
 				process = append([]runtime.ProcessItem{{Type: "thinking", Text: promoted}}, process...)
 				clearText = true
 			}
 		}
 		if text != "" {
-			appendStageText(pendingTextBuf, text)
+			state.appendPendingText(text)
 		}
+		state.trackProcess(process)
 		s.emit(runtime.Event{Type: runtime.EventDelta, Text: text, Thinking: thinking, Process: process, ClearText: clearText})
 		return false, nil
 
@@ -468,15 +484,15 @@ func (s *persistentSession) handleLine(line []byte, textBuf *strings.Builder, pe
 		}
 		text := claude.StringValue(payload, "result")
 		if text == "" {
-			text = textBuf.String()
+			text = state.text()
 		}
 		evt := runtime.Event{Type: runtime.EventCompleted, Text: text, Usage: claude.ClaudeUsage(payload)}
-		if stage := stageThinkingForResult(text, pendingTextBuf, stageTextBuf); stage != "" {
+		if stage := state.stageThinkingForResult(text); stage != "" {
 			evt.Thinking = stage
 			evt.Process = []runtime.ProcessItem{{Type: "thinking", Text: stage}}
 		}
-		s.emit(evt)
-		return true, nil
+		state.deferCompletion(evt)
+		return false, nil
 
 	case "control_request":
 		if inputReq := s.handleControlRequest(payload); inputReq != nil {
@@ -492,21 +508,51 @@ func (s *persistentSession) handleLine(line []byte, textBuf *strings.Builder, pe
 	}
 }
 
-func appendStageText(buf *strings.Builder, text string) {
-	if strings.TrimSpace(text) == "" {
-		return
-	}
-	if buf.Len() > 0 {
-		buf.WriteByte('\n')
-	}
-	buf.WriteString(text)
+type claudeTurnState struct {
+	textBuf        strings.Builder
+	pendingTextBuf strings.Builder
+	stageTextBuf   strings.Builder
+
+	openTools         map[string]struct{}
+	pendingCompletion *runtime.Event
+	completionText    string
+	settleTimer       *time.Timer
+	maxWaitTimer      *time.Timer
 }
 
-func stageThinkingForResult(result string, pendingTextBuf *strings.Builder, stageTextBuf *strings.Builder) string {
-	if strings.TrimSpace(result) != "" && strings.TrimSpace(pendingTextBuf.String()) != "" && !sameNormalizedText(pendingTextBuf.String(), result) {
-		promotePendingStageText(pendingTextBuf, stageTextBuf)
+func newClaudeTurnState() *claudeTurnState {
+	return &claudeTurnState{openTools: map[string]struct{}{}}
+}
+
+func (s *claudeTurnState) text() string {
+	return s.textBuf.String()
+}
+
+func (s *claudeTurnState) appendText(text string) {
+	if s.textBuf.Len() > 0 {
+		s.textBuf.WriteByte('\n')
 	}
-	stage := strings.TrimSpace(stageTextBuf.String())
+	s.textBuf.WriteString(text)
+}
+
+func (s *claudeTurnState) appendPendingText(text string) {
+	appendStageText(&s.pendingTextBuf, text)
+}
+
+func (s *claudeTurnState) promotePendingImmediate() string {
+	text := strings.TrimSpace(s.pendingTextBuf.String())
+	if text == "" {
+		return ""
+	}
+	s.pendingTextBuf.Reset()
+	return text
+}
+
+func (s *claudeTurnState) stageThinkingForResult(result string) string {
+	if strings.TrimSpace(result) != "" && strings.TrimSpace(s.pendingTextBuf.String()) != "" && !sameNormalizedText(s.pendingTextBuf.String(), result) {
+		s.promotePendingStageText()
+	}
+	stage := strings.TrimSpace(s.stageTextBuf.String())
 	if stage == "" {
 		return ""
 	}
@@ -516,22 +562,109 @@ func stageThinkingForResult(result string, pendingTextBuf *strings.Builder, stag
 	return stage
 }
 
-func promotePendingStageText(pendingTextBuf *strings.Builder, stageTextBuf *strings.Builder) {
-	text := strings.TrimSpace(pendingTextBuf.String())
+func (s *claudeTurnState) promotePendingStageText() {
+	text := strings.TrimSpace(s.pendingTextBuf.String())
 	if text == "" {
 		return
 	}
-	appendStageText(stageTextBuf, text)
-	pendingTextBuf.Reset()
+	appendStageText(&s.stageTextBuf, text)
+	s.pendingTextBuf.Reset()
 }
 
-func promotePendingImmediate(pendingTextBuf *strings.Builder) string {
-	text := strings.TrimSpace(pendingTextBuf.String())
-	if text == "" {
-		return ""
+func (s *claudeTurnState) trackProcess(process []runtime.ProcessItem) {
+	for _, item := range process {
+		switch item.Type {
+		case "tool_call":
+			if item.ToolCallID != "" {
+				s.openTools[item.ToolCallID] = struct{}{}
+			}
+		case "tool_result":
+			if item.ToolCallID != "" {
+				delete(s.openTools, item.ToolCallID)
+			}
+		}
 	}
-	pendingTextBuf.Reset()
-	return text
+}
+
+func (s *claudeTurnState) hasOpenTools() bool {
+	return len(s.openTools) > 0
+}
+
+func (s *claudeTurnState) deferCompletion(evt runtime.Event) {
+	s.pendingCompletion = &evt
+	s.completionText = s.text()
+	if s.maxWaitTimer == nil {
+		s.maxWaitTimer = time.NewTimer(claudeResultMaxWait)
+	}
+}
+
+func (s *claudeTurnState) updateCompletionTimers() {
+	if s.pendingCompletion == nil || s.hasOpenTools() {
+		s.stopSettleTimer()
+		return
+	}
+	if s.settleTimer == nil {
+		s.settleTimer = time.NewTimer(claudeResultSettleDelay)
+		return
+	}
+	if !s.settleTimer.Stop() {
+		select {
+		case <-s.settleTimer.C:
+		default:
+		}
+	}
+	s.settleTimer.Reset(claudeResultSettleDelay)
+}
+
+func (s *claudeTurnState) settleC() <-chan time.Time {
+	if s.settleTimer == nil {
+		return nil
+	}
+	return s.settleTimer.C
+}
+
+func (s *claudeTurnState) maxWaitC() <-chan time.Time {
+	if s.maxWaitTimer == nil {
+		return nil
+	}
+	return s.maxWaitTimer.C
+}
+
+func (s *claudeTurnState) completionEvent() runtime.Event {
+	evt := runtime.Event{Type: runtime.EventCompleted, Text: s.text()}
+	if s.pendingCompletion != nil {
+		evt = *s.pendingCompletion
+		if text := strings.TrimSpace(s.text()); text != "" && !sameNormalizedText(text, s.completionText) {
+			evt.Text = s.text()
+		}
+	}
+	s.stopSettleTimer()
+	if s.maxWaitTimer != nil {
+		s.maxWaitTimer.Stop()
+	}
+	return evt
+}
+
+func (s *claudeTurnState) stopSettleTimer() {
+	if s.settleTimer == nil {
+		return
+	}
+	if !s.settleTimer.Stop() {
+		select {
+		case <-s.settleTimer.C:
+		default:
+		}
+	}
+}
+
+func appendStageText(buf *strings.Builder, text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	if buf.Len() > 0 {
+		buf.WriteByte('\n')
+	}
+	buf.WriteString(text)
 }
 
 func sameNormalizedText(left string, right string) bool {

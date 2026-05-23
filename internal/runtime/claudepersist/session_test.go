@@ -282,11 +282,9 @@ func TestEmitAfterCloseEventStreamDoesNotPanic(t *testing.T) {
 
 func TestHandleLineKeepsOverwrittenAssistantTextAsProcess(t *testing.T) {
 	sess := &persistentSession{events: make(chan runtime.Event, 4)}
-	var textBuf strings.Builder
-	var pendingTextBuf strings.Builder
-	var stageTextBuf strings.Builder
+	state := newClaudeTurnState()
 
-	terminal, inputReq := sess.handleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"I will inspect the files first."}]}}`), &textBuf, &pendingTextBuf, &stageTextBuf)
+	terminal, inputReq := sess.handleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"I will inspect the files first."}]}}`), state)
 	if terminal || inputReq != nil {
 		t.Fatalf("assistant terminal=%v inputReq=%#v", terminal, inputReq)
 	}
@@ -295,11 +293,11 @@ func TestHandleLineKeepsOverwrittenAssistantTextAsProcess(t *testing.T) {
 		t.Fatalf("delta = %#v", evt)
 	}
 
-	terminal, inputReq = sess.handleLine([]byte(`{"type":"result","result":"Final answer.","subtype":"success","session_id":"s1"}`), &textBuf, &pendingTextBuf, &stageTextBuf)
-	if !terminal || inputReq != nil {
+	terminal, inputReq = sess.handleLine([]byte(`{"type":"result","result":"Final answer.","subtype":"success","session_id":"s1"}`), state)
+	if terminal || inputReq != nil {
 		t.Fatalf("result terminal=%v inputReq=%#v", terminal, inputReq)
 	}
-	evt = <-sess.events
+	evt = state.completionEvent()
 	if evt.Type != runtime.EventCompleted || evt.Text != "Final answer." {
 		t.Fatalf("completed = %#v", evt)
 	}
@@ -308,6 +306,126 @@ func TestHandleLineKeepsOverwrittenAssistantTextAsProcess(t *testing.T) {
 	}
 	if len(evt.Process) != 1 || evt.Process[0].Type != "thinking" || evt.Process[0].Text != "I will inspect the files first." {
 		t.Fatalf("process = %#v", evt.Process)
+	}
+}
+
+func TestPersistentSessionWaitsForQuietPeriodAfterResult(t *testing.T) {
+	previousSettleDelay := claudeResultSettleDelay
+	claudeResultSettleDelay = 20 * time.Millisecond
+	defer func() {
+		claudeResultSettleDelay = previousSettleDelay
+	}()
+
+	pool := procpool.New(procpool.Options{IdleTimeout: 1 * time.Hour})
+	defer pool.Shutdown(context.Background())
+
+	proc, _, err := pool.GetOrCreate("test-key", func(ctx context.Context) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", `echo '{"type":"system","session_id":"sess-late-assistant"}'
+while IFS= read -r line; do
+  echo '{"type":"assistant","message":{"content":[{"type":"text","text":"Partial report."}]}}'
+  echo '{"type":"result","result":"Partial report.","subtype":"success","session_id":"sess-late-assistant"}'
+  sleep 0.01
+  echo '{"type":"assistant","message":{"content":[{"type":"text","text":"Late report."}]}}'
+done`)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rt := &Runtime{
+		opts: Options{Command: "sh", PermissionMode: "acceptEdits"},
+		pool: pool,
+	}
+	sess := newPersistentSession(proc, "test-key", rt)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := sess.waitForSystemEvent(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Send(ctx, runtime.Input{Prompt: "run report"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var completed runtime.Event
+	for evt := range sess.Events() {
+		if evt.Type == runtime.EventCompleted {
+			completed = evt
+		}
+	}
+
+	if completed.Type != runtime.EventCompleted {
+		t.Fatalf("completed = %#v", completed)
+	}
+	if !strings.Contains(completed.Text, "Partial report") || !strings.Contains(completed.Text, "Late report") {
+		t.Fatalf("completed text = %q", completed.Text)
+	}
+}
+
+func TestPersistentSessionWaitsForLateToolResultAfterResult(t *testing.T) {
+	previousSettleDelay := claudeResultSettleDelay
+	claudeResultSettleDelay = 20 * time.Millisecond
+	defer func() {
+		claudeResultSettleDelay = previousSettleDelay
+	}()
+
+	pool := procpool.New(procpool.Options{IdleTimeout: 1 * time.Hour})
+	defer pool.Shutdown(context.Background())
+
+	proc, _, err := pool.GetOrCreate("test-key", func(ctx context.Context) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", `echo '{"type":"system","session_id":"sess-late-tool"}'
+while IFS= read -r line; do
+  echo '{"type":"assistant","message":{"content":[{"type":"text","text":"Two agents finished; third is still running."},{"type":"tool_use","id":"toolu_task_3","name":"Task","input":{"description":"scan projects"}}]}}'
+  echo '{"type":"result","result":"Two agents finished; third is still running.","subtype":"success","session_id":"sess-late-tool"}'
+  sleep 0.02
+  echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_task_3","content":"NoKV, AgentX, cc-connect, modern-cpp","is_error":false}]}}'
+  echo '{"type":"assistant","message":{"content":[{"type":"text","text":"Agent 3 scanned ~/code projects."}]}}'
+done`)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rt := &Runtime{
+		opts: Options{Command: "sh", PermissionMode: "acceptEdits"},
+		pool: pool,
+	}
+	sess := newPersistentSession(proc, "test-key", rt)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := sess.waitForSystemEvent(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Send(ctx, runtime.Input{Prompt: "run subagents"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var completed runtime.Event
+	var sawToolResult bool
+	for evt := range sess.Events() {
+		if evt.Type == runtime.EventDelta {
+			for _, item := range evt.Process {
+				if item.Type == "tool_result" && item.ToolCallID == "toolu_task_3" {
+					sawToolResult = true
+				}
+			}
+		}
+		if evt.Type == runtime.EventCompleted {
+			completed = evt
+		}
+	}
+
+	if !sawToolResult {
+		t.Fatal("late tool result was not emitted")
+	}
+	if completed.Type != runtime.EventCompleted {
+		t.Fatalf("completed = %#v", completed)
+	}
+	if !strings.Contains(completed.Text, "Two agents finished") || !strings.Contains(completed.Text, "Agent 3 scanned") {
+		t.Fatalf("completed text = %q", completed.Text)
 	}
 }
 
