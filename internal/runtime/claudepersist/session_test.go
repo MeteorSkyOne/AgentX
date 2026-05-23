@@ -280,7 +280,7 @@ func TestEmitAfterCloseEventStreamDoesNotPanic(t *testing.T) {
 	}
 }
 
-func TestHandleLineKeepsIntermediateTextInMainBlock(t *testing.T) {
+func TestHandleLineInsertsProcessBreakMarker(t *testing.T) {
 	sess := &persistentSession{events: make(chan runtime.Event, 4)}
 	state := newClaudeTurnState()
 
@@ -301,42 +301,74 @@ func TestHandleLineKeepsIntermediateTextInMainBlock(t *testing.T) {
 	if evt.Type != runtime.EventCompleted {
 		t.Fatalf("completed = %#v", evt)
 	}
-	want := "I will inspect the files first.\n\n---\n\nFinal answer."
-	if evt.Text != want {
-		t.Fatalf("completed text = %q, want %q", evt.Text, want)
+	if !strings.Contains(evt.Text, "<!-- process-break:") {
+		t.Fatalf("completed text should contain process-break marker, got %q", evt.Text)
 	}
-	if evt.Thinking != "" {
-		t.Fatalf("thinking = %q, want empty (text stays in main block)", evt.Thinking)
-	}
-	if len(evt.Process) != 0 {
-		t.Fatalf("process = %#v, want empty", evt.Process)
+	if !strings.Contains(evt.Text, "I will inspect the files first.") || !strings.Contains(evt.Text, "Final answer.") {
+		t.Fatalf("completed text should contain both segments, got %q", evt.Text)
 	}
 }
 
-func TestHandleLineAddsDelimiterAfterToolActivity(t *testing.T) {
+func TestHandleLineProcessBreakAfterToolActivity(t *testing.T) {
 	sess := &persistentSession{events: make(chan runtime.Event, 10)}
 	state := newClaudeTurnState()
 
+	// First message: text + tool_use (2 process items: thinking + tool_call)
 	sess.handleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"Starting."},{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"a.go"}}]}}`), state)
 	evt := <-sess.events
 	if evt.Text != "Starting." {
 		t.Fatalf("first delta text = %q", evt.Text)
 	}
 
-	sess.handleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"Done reading."}]}}`), state)
+	// Second message: thinking + text after tool activity
+	sess.handleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"I found the issue."},{"type":"text","text":"Done reading."}]}}`), state)
 	evt = <-sess.events
-	if !strings.HasPrefix(evt.Text, "\n\n---\n\n") {
-		t.Fatalf("second delta should start with delimiter, got %q", evt.Text)
+	if !strings.Contains(evt.Text, "<!-- process-break:") {
+		t.Fatalf("second delta should have process-break marker, got %q", evt.Text)
 	}
 	if !strings.Contains(evt.Text, "Done reading.") {
 		t.Fatalf("second delta missing text, got %q", evt.Text)
 	}
 
-	// Text without intervening tools should not have delimiter
+	// Text without intervening tools should not have marker
 	sess.handleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"More text."}]}}`), state)
 	evt = <-sess.events
-	if strings.Contains(evt.Text, "---") {
-		t.Fatalf("third delta should not have delimiter, got %q", evt.Text)
+	if strings.Contains(evt.Text, "process-break") {
+		t.Fatalf("third delta should not have process-break, got %q", evt.Text)
+	}
+}
+
+func TestHandleLineDeduplicatesRepeatedThinking(t *testing.T) {
+	sess := &persistentSession{events: make(chan runtime.Event, 10)}
+	state := newClaudeTurnState()
+
+	// First message: thinking + text + tool_use
+	sess.handleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"Let me check the file."},{"type":"text","text":"Starting."},{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"a.go"}}]}}`), state)
+	evt := <-sess.events
+	if evt.Thinking != "Let me check the file." {
+		t.Fatalf("first thinking = %q", evt.Thinking)
+	}
+
+	// Second message: same thinking repeated (Claude resends full message state)
+	sess.handleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"Let me check the file."},{"type":"text","text":"Found it."}]}}`), state)
+	evt = <-sess.events
+	if evt.Thinking != "" {
+		t.Fatalf("duplicate thinking should be suppressed, got %q", evt.Thinking)
+	}
+	for _, item := range evt.Process {
+		if item.Type == "thinking" {
+			t.Fatalf("duplicate thinking process item should be filtered, got %#v", evt.Process)
+		}
+	}
+	if !strings.Contains(evt.Text, "Found it.") {
+		t.Fatalf("text should still be present, got %q", evt.Text)
+	}
+
+	// New thinking content should not be suppressed
+	sess.handleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"Now I understand the issue."},{"type":"text","text":"The fix is simple."}]}}`), state)
+	evt = <-sess.events
+	if evt.Thinking != "Now I understand the issue." {
+		t.Fatalf("new thinking should not be suppressed, got %q", evt.Thinking)
 	}
 }
 

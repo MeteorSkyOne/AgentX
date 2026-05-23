@@ -1,4 +1,4 @@
-import { createContext, lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, Fragment, lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent, WheelEvent } from "react";
 import {
   Bot,
@@ -744,7 +744,6 @@ function ConversationMessageItem({
             </div>
           )}
         </div>
-        {process.length > 0 && <ProcessBlock items={process} defaultOpen={false} messageID={message.id} />}
         {message.reply_to && (
           <MessageReferencePreview
             reference={message.reply_to}
@@ -785,15 +784,14 @@ function ConversationMessageItem({
         ) : (
           <>
             {error && <p className="text-sm text-destructive">{error}</p>}
-            {message.body.trim() !== "" && (
-              <div className={messageBodyClassName} data-testid="message-body">
-                <MessageMarkdown
-                  text={message.body}
-                  workspacePath={workspacePath}
-                  onOpenWorkspacePath={onOpenWorkspacePath}
-                />
-              </div>
-            )}
+            <InterleavedMessageBody
+              text={message.body}
+              processItems={process}
+              messageID={message.id}
+              workspacePath={workspacePath}
+              onOpenWorkspacePath={onOpenWorkspacePath}
+              className={messageBodyClassName}
+            />
             <MessageAttachments attachments={message.attachments ?? []} theme={theme} />
             {footerMetricsParts.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
@@ -1502,14 +1500,14 @@ function StreamingItem({
           )}
           <span className="text-xs text-muted-foreground animate-pulse">streaming...</span>
         </div>
-        {process.length > 0 && <ProcessBlock items={process} />}
-        <div className={messageBodyClassName} data-testid="message-body">
-          <MessageMarkdown
-            text={item.error ?? item.text}
-            workspacePath={workspacePath}
-            onOpenWorkspacePath={onOpenWorkspacePath}
-          />
-        </div>
+        <InterleavedMessageBody
+          text={item.error ?? item.text}
+          processItems={process}
+          workspacePath={workspacePath}
+          onOpenWorkspacePath={onOpenWorkspacePath}
+          className={messageBodyClassName}
+          defaultProcessOpen
+        />
         {(workingLabel || subagents.length > 0) && (
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-[11px] font-medium text-muted-foreground">
@@ -2052,6 +2050,102 @@ function toolFragmentNames(items: DisplayProcessItem[]): string {
     return names.join(", ");
   }
   return `${names.slice(0, 3).join(", ")} +${names.length - 3}`;
+}
+
+interface TextProcessSegment {
+  text: string;
+  processItems: ProcessItem[];
+}
+
+const processBreakPattern = /<!-- process-break:(\d+) -->/g;
+
+function splitByProcessBreaks(text: string, allProcessItems: ProcessItem[]): TextProcessSegment[] | null {
+  const matches = [...text.matchAll(processBreakPattern)];
+  if (matches.length === 0) return null;
+
+  const segments: TextProcessSegment[] = [];
+  let lastTextEnd = 0;
+  let lastProcessEnd = 0;
+
+  for (const match of matches) {
+    const matchStart = match.index;
+    const matchEnd = matchStart + match[0].length;
+    const processCount = parseInt(match[1], 10);
+
+    const rawText = text.slice(lastTextEnd, matchStart);
+    const trimmed = rawText.replace(/^\n+|\n+$/g, "");
+    segments.push({
+      text: trimmed,
+      processItems: allProcessItems.slice(lastProcessEnd, processCount),
+    });
+
+    lastTextEnd = matchEnd;
+    lastProcessEnd = processCount;
+  }
+
+  const trailing = text.slice(lastTextEnd).replace(/^\n+|\n+$/g, "");
+  segments.push({
+    text: trailing,
+    processItems: allProcessItems.slice(lastProcessEnd),
+  });
+
+  return segments;
+}
+
+function InterleavedMessageBody({
+  text,
+  processItems,
+  messageID,
+  workspacePath,
+  onOpenWorkspacePath,
+  className,
+  defaultProcessOpen = false,
+}: {
+  text: string;
+  processItems: ProcessItem[];
+  messageID?: string;
+  workspacePath?: string;
+  onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
+  className?: string;
+  defaultProcessOpen?: boolean;
+}) {
+  const segments = splitByProcessBreaks(text, processItems);
+
+  if (!segments) {
+    return (
+      <>
+        {processItems.length > 0 && (
+          <ProcessBlock items={processItems} defaultOpen={defaultProcessOpen} messageID={messageID} />
+        )}
+        {text.trim() !== "" && (
+          <div className={className} data-testid="message-body">
+            <MessageMarkdown text={text} workspacePath={workspacePath} onOpenWorkspacePath={onOpenWorkspacePath} />
+          </div>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {segments.map((segment, i) => (
+        <Fragment key={i}>
+          {segment.text.trim() !== "" && (
+            <div className={className} data-testid="message-body">
+              <MessageMarkdown
+                text={segment.text}
+                workspacePath={workspacePath}
+                onOpenWorkspacePath={onOpenWorkspacePath}
+              />
+            </div>
+          )}
+          {segment.processItems.length > 0 && (
+            <ProcessBlock items={segment.processItems} defaultOpen={defaultProcessOpen} messageID={messageID} />
+          )}
+        </Fragment>
+      ))}
+    </>
+  );
 }
 
 function processFromMetadata(metadata: Message["metadata"]): ProcessItem[] {

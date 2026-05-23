@@ -7,6 +7,7 @@ import {
 } from "react";
 import Markdown, { defaultUrlTransform, type Components, type UrlTransform } from "react-markdown";
 import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import {
@@ -324,7 +325,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   return (
     <Markdown
       remarkPlugins={[remarkGfm, remarkMath]}
-      rehypePlugins={[rehypeKatex]}
+      rehypePlugins={[rehypeKatex, rehypeRaw]}
       components={components}
       urlTransform={markdownUrlTransform}
     >

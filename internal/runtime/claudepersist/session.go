@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -459,18 +460,31 @@ func (s *persistentSession) handleLine(line []byte, state *claudeTurnState) (boo
 		if text == "" && thinking == "" && len(process) == 0 {
 			return false, nil
 		}
+		if thinking != "" && thinking == state.lastThinkingText {
+			thinking = ""
+			filtered := process[:0]
+			for _, item := range process {
+				if item.Type != "thinking" {
+					filtered = append(filtered, item)
+				}
+			}
+			process = filtered
+		}
+		if thinking != "" {
+			state.lastThinkingText = thinking
+		}
+		state.processItemCount += len(process)
 		if text != "" {
-			needsDelimiter := state.sawToolsSinceText && state.textBuf.Len() > 0
-			if needsDelimiter {
-				state.textBuf.WriteString("\n\n---\n\n")
+			needsBreak := state.sawToolsSinceText && state.textBuf.Len() > 0
+			if needsBreak {
+				marker := fmt.Sprintf("\n\n<!-- process-break:%d -->\n\n", state.processItemCount)
+				state.textBuf.WriteString(marker)
+				text = marker + text
 			} else if state.textBuf.Len() > 0 {
 				state.textBuf.WriteByte('\n')
 			}
 			state.textBuf.WriteString(text)
 			state.sawToolsSinceText = false
-			if needsDelimiter {
-				text = "\n\n---\n\n" + text
-			}
 		}
 		state.trackProcess(process)
 		s.emit(runtime.Event{Type: runtime.EventDelta, Text: text, Thinking: thinking, Process: process})
@@ -513,6 +527,8 @@ type claudeTurnState struct {
 
 	openTools         map[string]struct{}
 	sawToolsSinceText bool
+	lastThinkingText  string
+	processItemCount  int
 	pendingCompletion *runtime.Event
 	completionText    string
 	settleTimer       *time.Timer
@@ -605,7 +621,12 @@ func (s *claudeTurnState) completionEvent() runtime.Event {
 		result := strings.TrimSpace(evt.Text)
 		switch {
 		case accumulated != "" && result != "" && !sameNormalizedText(accumulated, result):
-			evt.Text = accumulated + "\n\n---\n\n" + result
+			if strings.Contains(accumulated, result) {
+				evt.Text = accumulated
+			} else {
+				marker := fmt.Sprintf("\n\n<!-- process-break:%d -->\n\n", s.processItemCount)
+				evt.Text = accumulated + marker + result
+			}
 		case accumulated != "" && result == "":
 			evt.Text = accumulated
 		case accumulated != "" && sameNormalizedText(accumulated, result):
