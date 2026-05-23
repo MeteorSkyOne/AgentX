@@ -131,6 +131,7 @@ export function ConversationPanel({
         onLoadOlder={onLoadOlderMessages}
         onRespondToQuestion={onRespondToQuestion}
         onReplyMessage={selectReplyTarget}
+        conversationKey={conversationKey}
         workspacePath={workspacePath}
         onOpenWorkspacePath={onOpenWorkspacePath}
       />

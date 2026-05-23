@@ -233,6 +233,89 @@ describe("MessagePane message timing", () => {
 });
 
 describe("MessagePane process details", () => {
+  it("does not scroll to the bottom when a stream updates while the reader is browsing earlier messages", async () => {
+    const { container, rerender } = await renderMessagePane({
+      messages: [message({ id: "msg-1", body: "older message" })],
+      streaming: [{ runID: "run-1", agentID: "agent-1", text: "working" }],
+      onOpenWorkspacePath: () => undefined,
+    });
+    const scrollIntoView = vi.mocked(Element.prototype.scrollIntoView);
+    scrollIntoView.mockClear();
+
+    setViewportScroll(container, {
+      scrollHeight: 1000,
+      clientHeight: 300,
+      scrollTop: 200,
+    });
+
+    await rerender({
+      streaming: [
+        {
+          runID: "run-1",
+          agentID: "agent-1",
+          text: "working",
+          thinking: "new reasoning",
+        },
+      ],
+    });
+
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("keeps following stream updates when the reader is already at the bottom", async () => {
+    const { container, rerender } = await renderMessagePane({
+      messages: [message({ id: "msg-1", body: "older message" })],
+      streaming: [{ runID: "run-1", agentID: "agent-1", text: "working" }],
+      onOpenWorkspacePath: () => undefined,
+    });
+    const scrollIntoView = vi.mocked(Element.prototype.scrollIntoView);
+    scrollIntoView.mockClear();
+
+    setViewportScroll(container, {
+      scrollHeight: 1000,
+      clientHeight: 300,
+      scrollTop: 700,
+    });
+
+    await rerender({
+      streaming: [
+        {
+          runID: "run-1",
+          agentID: "agent-1",
+          text: "working",
+          thinking: "new reasoning",
+        },
+      ],
+    });
+
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a scroll-to-bottom button when the reader is away from the bottom", async () => {
+    const { container } = await renderMessagePane({
+      messages: [message({ id: "msg-1", body: "older message" })],
+      streaming: [{ runID: "run-1", agentID: "agent-1", text: "working" }],
+      onOpenWorkspacePath: () => undefined,
+    });
+    const scrollIntoView = vi.mocked(Element.prototype.scrollIntoView);
+    scrollIntoView.mockClear();
+
+    setViewportScroll(container, {
+      scrollHeight: 1000,
+      clientHeight: 300,
+      scrollTop: 200,
+    });
+
+    const button = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Scroll to bottom"]'
+    );
+    expect(button).toBeTruthy();
+
+    click(button!);
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "end", behavior: "smooth" });
+  });
+
   it("loads persisted tool details only when a tool row is opened", async () => {
     const fetchProcess = vi.mocked(fetchMessageProcessItem);
     fetchProcess.mockResolvedValueOnce({
@@ -478,41 +561,88 @@ async function renderMessagePane({
     startedAt?: string;
     endedAt?: string;
     text: string;
+    thinking?: string;
     error?: string;
     process?: ProcessItem[];
   }>;
   preferences?: UserPreferences;
   onOpenWorkspacePath: (target: WorkspacePathTarget) => void;
-}): Promise<{ container: HTMLDivElement }> {
+}): Promise<{
+  container: HTMLDivElement;
+  rerender: (
+    overrides: Partial<{
+      messages: Message[];
+      streaming: Array<{
+        runID: string;
+        agentID?: string;
+        startedAt?: string;
+        endedAt?: string;
+        text: string;
+        thinking?: string;
+        error?: string;
+        process?: ProcessItem[];
+      }>;
+      preferences: UserPreferences;
+      onOpenWorkspacePath: (target: WorkspacePathTarget) => void;
+    }>
+  ) => Promise<void>;
+}> {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   mountedRoots.push({ root, container });
+  let current = { messages, streaming, preferences, onOpenWorkspacePath };
 
-  await act(async () => {
-    root.render(
-      createElement(MessagePane, {
-        messages,
-        isLoading: false,
-        isLoadingOlder: false,
-        hasOlderMessages: false,
-        streaming,
-        agents: [agentContext()],
-        preferences,
-        theme: "light",
-        onUpdateMessage: async (_messageID: string, body: string) => message({ body }),
-        onDeleteMessage: async () => undefined,
-        onReplyMessage: () => undefined,
-        onLoadOlder: () => false,
-        workspacePath: "/workspace/AgentX",
-        onOpenWorkspacePath,
-      })
-    );
-    await vi.dynamicImportSettled();
-    await Promise.resolve();
+  async function render() {
+    await act(async () => {
+      root.render(
+        createElement(MessagePane, {
+          messages: current.messages,
+          isLoading: false,
+          isLoadingOlder: false,
+          hasOlderMessages: false,
+          streaming: current.streaming,
+          agents: [agentContext()],
+          preferences: current.preferences,
+          theme: "light",
+          onUpdateMessage: async (_messageID: string, body: string) => message({ body }),
+          onDeleteMessage: async () => undefined,
+          onReplyMessage: () => undefined,
+          onLoadOlder: () => false,
+          workspacePath: "/workspace/AgentX",
+          onOpenWorkspacePath: current.onOpenWorkspacePath,
+        })
+      );
+      await vi.dynamicImportSettled();
+      await Promise.resolve();
+    });
+  }
+
+  await render();
+
+  return {
+    container,
+    rerender: async (overrides) => {
+      current = { ...current, ...overrides };
+      await render();
+    },
+  };
+}
+
+function setViewportScroll(
+  container: HTMLElement,
+  metrics: { scrollHeight: number; clientHeight: number; scrollTop: number }
+) {
+  const viewport = container.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]');
+  expect(viewport).toBeTruthy();
+  Object.defineProperties(viewport, {
+    scrollHeight: { configurable: true, value: metrics.scrollHeight },
+    clientHeight: { configurable: true, value: metrics.clientHeight },
+    scrollTop: { configurable: true, writable: true, value: metrics.scrollTop },
   });
-
-  return { container };
+  act(() => {
+    viewport!.dispatchEvent(new Event("scroll", { bubbles: true, cancelable: true }));
+  });
 }
 
 function markdownButtons(container: HTMLElement): HTMLButtonElement[] {

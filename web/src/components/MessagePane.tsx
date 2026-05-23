@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  ChevronsDown,
   CircleAlert,
   Copy,
   Download,
@@ -64,6 +65,7 @@ const messageBodyClassName =
   "prose prose-sm min-w-0 w-full max-w-full overflow-x-auto break-words select-text dark:prose-invert";
 const MentionLabelsContext = createContext<MentionLabels | undefined>(undefined);
 const MENTION_TEXT_RE = /@([A-Za-z0-9][A-Za-z0-9_-]*)/g;
+const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 80;
 
 interface StreamingMessage {
   runID: string;
@@ -92,6 +94,7 @@ interface MessagePaneProps {
   onReplyMessage: (message: Message) => void;
   onLoadOlder: () => boolean;
   onRespondToQuestion?: (questionID: string, answer: string) => Promise<void>;
+  conversationKey?: string;
   workspacePath?: string;
   onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
 }
@@ -126,12 +129,16 @@ export function MessagePane({
   onReplyMessage,
   onLoadOlder,
   onRespondToQuestion,
+  conversationKey,
   workspacePath,
   onOpenWorkspacePath,
 }: MessagePaneProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const olderAnchorMessageIDRef = useRef<string | null>(null);
+  const shouldStickToBottomRef = useRef(true);
+  const previousConversationKeyRef = useRef<string | undefined>(conversationKey);
+  const [isAtBottom, setIsAtBottom] = useState(true);
   const agentByBotID = new Map(agents.map((item) => [item.agent.bot_user_id, item.agent]));
   const agentByID = new Map(agents.map((item) => [item.agent.id, item.agent]));
   const messagesByID = new Map(messages.map((message) => [message.id, message]));
@@ -139,6 +146,14 @@ export function MessagePane({
   const mentionLabels = useMemo(() => buildMentionLabels(agents), [agents]);
 
   useLayoutEffect(() => {
+    const conversationChanged = previousConversationKeyRef.current !== conversationKey;
+    if (conversationChanged) {
+      previousConversationKeyRef.current = conversationKey;
+      olderAnchorMessageIDRef.current = null;
+      shouldStickToBottomRef.current = true;
+      setIsAtBottom(true);
+    }
+
     const anchorID = olderAnchorMessageIDRef.current;
     if (anchorID) {
       const viewport = viewportRef.current;
@@ -151,13 +166,24 @@ export function MessagePane({
       }
       return;
     }
-    bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [messages, streaming, isLoadingOlder]);
+
+    if (shouldStickToBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ block: "end" });
+      setIsAtBottom(true);
+    }
+  }, [messages, streaming, isLoadingOlder, conversationKey]);
 
   function handleScroll() {
     const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    const nearBottom = isNearViewportBottom(viewport);
+    shouldStickToBottomRef.current = nearBottom;
+    setIsAtBottom(nearBottom);
+
     if (
-      !viewport ||
       viewport.scrollTop > 80 ||
       isLoading ||
       isLoadingOlder ||
@@ -171,6 +197,12 @@ export function MessagePane({
     if (!onLoadOlder()) {
       olderAnchorMessageIDRef.current = null;
     }
+  }
+
+  function scrollToBottom() {
+    shouldStickToBottomRef.current = true;
+    setIsAtBottom(true);
+    bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }
 
   function jumpToMessage(messageID: string) {
@@ -200,28 +232,57 @@ export function MessagePane({
 
   return (
     <MentionLabelsContext.Provider value={mentionLabels}>
-      <ScrollArea
-        className="min-h-0 min-w-0 flex-1"
-        aria-label="Messages"
-        viewportRef={viewportRef}
-        viewportClassName="[&>div]:!block [&>div]:!min-w-0 [&>div]:!w-full [&>div]:!max-w-full"
-        onViewportScroll={handleScroll}
-      >
-        <section className="min-w-0 max-w-full p-3 md:p-4">
-          <div className="min-w-0 max-w-full space-y-4">
-            {isLoadingOlder && (
-              <div className="py-2 text-center text-xs text-muted-foreground">
-                Loading older messages...
-              </div>
-            )}
-            {messageItems.map((item) => {
-              if (item.type === "team") {
+      <div className="relative min-h-0 min-w-0 flex-1">
+        <ScrollArea
+          className="h-full min-h-0 min-w-0"
+          aria-label="Messages"
+          viewportRef={viewportRef}
+          viewportClassName="[&>div]:!block [&>div]:!min-w-0 [&>div]:!w-full [&>div]:!max-w-full"
+          onViewportScroll={handleScroll}
+        >
+          <section className="min-w-0 max-w-full p-3 md:p-4">
+            <div className="min-w-0 max-w-full space-y-4">
+              {isLoadingOlder && (
+                <div className="py-2 text-center text-xs text-muted-foreground">
+                  Loading older messages...
+                </div>
+              )}
+              {messageItems.map((item) => {
+                if (item.type === "team") {
+                  return (
+                    <TeamDiscussionItem
+                      key={`team:${item.sessionID}`}
+                      messages={item.messages}
+                      agentByBotID={agentByBotID}
+                      messagesByID={messagesByID}
+                      preferences={preferences}
+                      onUpdateMessage={onUpdateMessage}
+                      onDeleteMessage={onDeleteMessage}
+                      onReplyMessage={onReplyMessage}
+                      onJumpToReplyMessage={jumpToMessage}
+                      theme={theme}
+                      workspacePath={workspacePath}
+                      onOpenWorkspacePath={onOpenWorkspacePath}
+                    />
+                  );
+                }
+                const message = item.message;
+                const agent = agentByBotID.get(message.sender_id);
+                const replyAgent =
+                  message.reply_to?.sender_type === "bot"
+                    ? agentByBotID.get(message.reply_to.sender_id ?? "")
+                    : undefined;
                 return (
-                  <TeamDiscussionItem
-                    key={`team:${item.sessionID}`}
-                    messages={item.messages}
-                    agentByBotID={agentByBotID}
-                    messagesByID={messagesByID}
+                  <MessageItem
+                    key={message.id}
+                    message={message}
+                    agentName={agent?.name}
+                    agentKind={agent?.kind}
+                    agentID={agent?.id}
+                    replyAgentName={replyAgent?.name}
+                    replyTargetLoaded={Boolean(
+                      message.reply_to && messagesByID.has(message.reply_to.message_id)
+                    )}
                     preferences={preferences}
                     onUpdateMessage={onUpdateMessage}
                     onDeleteMessage={onDeleteMessage}
@@ -232,66 +293,57 @@ export function MessagePane({
                     onOpenWorkspacePath={onOpenWorkspacePath}
                   />
                 );
-              }
-              const message = item.message;
-              const agent = agentByBotID.get(message.sender_id);
-              const replyAgent =
-                message.reply_to?.sender_type === "bot"
-                  ? agentByBotID.get(message.reply_to.sender_id ?? "")
-                  : undefined;
-              return (
-                <MessageItem
-                  key={message.id}
-                  message={message}
-                  agentName={agent?.name}
-                  agentKind={agent?.kind}
-                  agentID={agent?.id}
-                  replyAgentName={replyAgent?.name}
-                  replyTargetLoaded={Boolean(
-                    message.reply_to && messagesByID.has(message.reply_to.message_id)
-                  )}
-                  preferences={preferences}
-                  onUpdateMessage={onUpdateMessage}
-                  onDeleteMessage={onDeleteMessage}
-                  onReplyMessage={onReplyMessage}
-                  onJumpToReplyMessage={jumpToMessage}
-                  theme={theme}
-                  workspacePath={workspacePath}
-                  onOpenWorkspacePath={onOpenWorkspacePath}
-                />
-              );
-            })}
-            {streaming.map((item) => {
-              const agent = agentByID.get(item.agentID ?? "");
-              return (
-                <StreamingItem
-                  key={item.runID}
-                  item={item}
-                  agentName={agent?.name}
-                  agentKind={agent?.kind}
-                  agentID={agent?.id}
+              })}
+              {streaming.map((item) => {
+                const agent = agentByID.get(item.agentID ?? "");
+                return (
+                  <StreamingItem
+                    key={item.runID}
+                    item={item}
+                    agentName={agent?.name}
+                    agentKind={agent?.kind}
+                    agentID={agent?.id}
+                    hideAvatar={preferences.hide_avatars}
+                    workspacePath={workspacePath}
+                    onOpenWorkspacePath={onOpenWorkspacePath}
+                  />
+                );
+              })}
+              {pendingQuestion && onRespondToQuestion && (
+                <QuestionPrompt
+                  question={pendingQuestion}
+                  agentName={agentByID.get(pendingQuestion.agentID)?.name}
+                  agentKind={agentByID.get(pendingQuestion.agentID)?.kind}
+                  agentID={pendingQuestion.agentID}
                   hideAvatar={preferences.hide_avatars}
-                  workspacePath={workspacePath}
-                  onOpenWorkspacePath={onOpenWorkspacePath}
+                  onSubmit={(answer) => onRespondToQuestion(pendingQuestion.questionID, answer)}
                 />
-              );
-            })}
-            {pendingQuestion && onRespondToQuestion && (
-              <QuestionPrompt
-                question={pendingQuestion}
-                agentName={agentByID.get(pendingQuestion.agentID)?.name}
-                agentKind={agentByID.get(pendingQuestion.agentID)?.kind}
-                agentID={pendingQuestion.agentID}
-                hideAvatar={preferences.hide_avatars}
-                onSubmit={(answer) => onRespondToQuestion(pendingQuestion.questionID, answer)}
-              />
-            )}
-            <div ref={bottomRef} />
-          </div>
-        </section>
-      </ScrollArea>
+              )}
+              <div ref={bottomRef} />
+            </div>
+          </section>
+        </ScrollArea>
+        {!isAtBottom && (
+          <Button
+            type="button"
+            size="icon"
+            variant="secondary"
+            className="absolute right-4 bottom-4 z-10 h-9 w-9 rounded-full border border-border shadow-md"
+            title="Scroll to bottom"
+            aria-label="Scroll to bottom"
+            onClick={scrollToBottom}
+          >
+            <ChevronsDown className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
     </MentionLabelsContext.Provider>
   );
+}
+
+function isNearViewportBottom(viewport: HTMLElement): boolean {
+  const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+  return distanceFromBottom <= AUTO_SCROLL_BOTTOM_THRESHOLD_PX;
 }
 
 function cssEscape(value: string): string {
