@@ -30,6 +30,7 @@ interface ComposerProps {
   replyToMessage?: Message | null;
   onCancelReplyTo?: () => void;
   onSteerQueuedPrompt?: (queueID: string) => Promise<void>;
+  onDeleteQueuedPrompt?: (queueID: string) => Promise<void>;
   onSent: (message: Message) => void;
 }
 
@@ -41,6 +42,7 @@ export function Composer({
   replyToMessage,
   onCancelReplyTo,
   onSteerQueuedPrompt,
+  onDeleteQueuedPrompt,
   onSent
 }: ComposerProps) {
   const [body, setBody] = useState("");
@@ -49,6 +51,7 @@ export function Composer({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [steeringQueueIDs, setSteeringQueueIDs] = useState<Set<string>>(() => new Set());
+  const [deletingQueueIDs, setDeletingQueueIDs] = useState<Set<string>>(() => new Set());
   const [caret, setCaret] = useState(0);
   const [commandIndex, setCommandIndex] = useState(0);
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -358,6 +361,21 @@ export function Composer({
     }
   }
 
+  async function handleDeleteQueuedPrompt(queueID: string) {
+    if (!onDeleteQueuedPrompt) return;
+    setDeletingQueueIDs((current) => new Set(current).add(queueID));
+    try {
+      await onDeleteQueuedPrompt(queueID);
+    } catch (err) {
+      setDeletingQueueIDs((current) => {
+        const next = new Set(current);
+        next.delete(queueID);
+        return next;
+      });
+      setError(err instanceof Error ? err.message : "Delete failed");
+    }
+  }
+
   return (
     <div
       className="shrink-0 border-t border-border bg-background/95 px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-4"
@@ -384,6 +402,7 @@ export function Composer({
                 {queuedPrompts.map((item) => {
                   const agent = mentionAgents.find((candidate) => candidate.id === item.agentID);
                   const steering = steeringQueueIDs.has(item.queueID);
+                  const deleting = deletingQueueIDs.has(item.queueID);
                   return (
                     <div
                       key={item.queueID}
@@ -405,6 +424,20 @@ export function Composer({
                           onClick={() => void handleSteerQueuedPrompt(item.queueID)}
                         >
                           <ArrowUp className="h-3.5 w-3.5" />
+                        </Button>
+                      ) : null}
+                      {onDeleteQueuedPrompt ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+                          title="Remove from queue"
+                          aria-label="Remove from queue"
+                          disabled={deleting || steering}
+                          onClick={() => void handleDeleteQueuedPrompt(item.queueID)}
+                        >
+                          <X className="h-3.5 w-3.5" />
                         </Button>
                       ) : null}
                     </div>

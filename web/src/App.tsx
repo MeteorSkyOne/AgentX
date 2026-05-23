@@ -47,7 +47,8 @@ import {
   workspaceSearch,
   workspaceTree,
   respondToInputRequest,
-  steerQueuedPrompt
+  steerQueuedPrompt,
+  deleteQueuedPrompt
 } from "./api/client";
 import type {
   Agent,
@@ -943,6 +944,11 @@ export default function App() {
     await steerQueuedPrompt(activeConversation.type, activeConversation.id, queueID);
   }
 
+  async function handleDeleteQueuedPrompt(queueID: string) {
+    if (!activeConversation) return;
+    await deleteQueuedPrompt(activeConversation.type, activeConversation.id, queueID);
+  }
+
   async function handleSaveChannelAgents(
     bindings: Array<{ agent_id: string; run_workspace_id?: string }>
   ) {
@@ -1144,6 +1150,7 @@ export default function App() {
       queuedPrompts={queuedPrompts}
       onRespondToQuestion={handleRespondToQuestion}
       onSteerQueuedPrompt={handleSteerQueuedPrompt}
+      onDeleteQueuedPrompt={handleDeleteQueuedPrompt}
       connectionStatus={connectionStatus}
       notificationSettings={notificationSettingsQuery.data}
       notificationSettingsLoading={notificationSettingsQuery.isLoading}

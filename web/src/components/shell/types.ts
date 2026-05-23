@@ -197,6 +197,7 @@ export interface ShellProps {
   onLoadOlderMessages: () => boolean;
   onRespondToQuestion?: (questionID: string, answer: string) => Promise<void>;
   onSteerQueuedPrompt?: (queueID: string) => Promise<void>;
+  onDeleteQueuedPrompt?: (queueID: string) => Promise<void>;
   onMessageSent: (message: Message) => void;
   onToggleTheme: () => void;
   onLogout: () => void;

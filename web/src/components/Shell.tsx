@@ -187,6 +187,7 @@ export function Shell({
   onLoadOlderMessages,
   onRespondToQuestion,
   onSteerQueuedPrompt,
+  onDeleteQueuedPrompt,
   onMessageSent,
   onToggleTheme,
   onLogout
@@ -1149,6 +1150,7 @@ export function Shell({
               onLoadOlderMessages={onLoadOlderMessages}
               onRespondToQuestion={onRespondToQuestion}
               onSteerQueuedPrompt={onSteerQueuedPrompt}
+              onDeleteQueuedPrompt={onDeleteQueuedPrompt}
               onMessageSent={onMessageSent}
               workspacePath={projectWorkspace?.path}
               onOpenWorkspacePath={openWorkspacePath}
@@ -1838,6 +1840,7 @@ export function Shell({
                     onLoadOlderMessages={onLoadOlderMessages}
                     onRespondToQuestion={onRespondToQuestion}
                     onSteerQueuedPrompt={onSteerQueuedPrompt}
+              onDeleteQueuedPrompt={onDeleteQueuedPrompt}
                     onMessageSent={onMessageSent}
                     workspacePath={projectWorkspace?.path}
                     onOpenWorkspacePath={openWorkspacePath}

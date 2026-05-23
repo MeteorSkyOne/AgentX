@@ -31,6 +31,7 @@ export function ConversationPanel({
   onLoadOlderMessages,
   onRespondToQuestion,
   onSteerQueuedPrompt,
+  onDeleteQueuedPrompt,
   onMessageSent,
   workspacePath,
   onOpenWorkspacePath,
@@ -58,6 +59,7 @@ export function ConversationPanel({
   onLoadOlderMessages: ShellProps["onLoadOlderMessages"];
   onRespondToQuestion?: (questionID: string, answer: string) => Promise<void>;
   onSteerQueuedPrompt?: (queueID: string) => Promise<void>;
+  onDeleteQueuedPrompt?: (queueID: string) => Promise<void>;
   onMessageSent: ShellProps["onMessageSent"];
   workspacePath?: string;
   onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
@@ -148,6 +150,7 @@ export function ConversationPanel({
           })}
         queuedPrompts={queuedPrompts}
         onSteerQueuedPrompt={onSteerQueuedPrompt}
+        onDeleteQueuedPrompt={onDeleteQueuedPrompt}
         onSent={(message) => {
           clearReplyTarget();
           onMessageSent(message);

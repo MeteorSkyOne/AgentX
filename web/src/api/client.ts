@@ -791,6 +791,19 @@ export function steerQueuedPrompt(
   );
 }
 
+export function deleteQueuedPrompt(
+  type: ConversationType,
+  id: string,
+  queueID: string
+): Promise<void> {
+  return request<void>(
+    `/api/conversations/${encodeURIComponent(type)}/${encodeURIComponent(id)}/message-queue/${encodeURIComponent(queueID)}`,
+    {
+      method: "DELETE"
+    }
+  );
+}
+
 export function fetchMessageProcessItem(
   messageID: string,
   index: number

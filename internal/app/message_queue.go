@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -122,6 +123,35 @@ func (a *App) clearQueuedAgentPrompts(key messageQueueKey, status string) int {
 		a.publishAgentPromptQueueRemoved(item, status)
 	}
 	return len(items)
+}
+
+func (a *App) DeleteQueuedPrompt(ctx context.Context, conversationType domain.ConversationType, conversationID string, queueID string) error {
+	queueID = strings.TrimSpace(queueID)
+	if queueID == "" {
+		return ErrQueuedPromptNotFound
+	}
+
+	a.messageQueueMu.Lock()
+	item := a.messageQueueByID[queueID]
+	if item == nil || item.Key.conversationType != conversationType || item.Key.conversationID != conversationID {
+		a.messageQueueMu.Unlock()
+		return ErrQueuedPromptNotFound
+	}
+	if item.Steering {
+		a.messageQueueMu.Unlock()
+		return ErrQueuedPromptNotFound
+	}
+	messageID := item.Message.ID
+	a.messageQueueMu.Unlock()
+
+	if !a.removeQueuedPromptByID(queueID, "canceled") {
+		return ErrQueuedPromptNotFound
+	}
+
+	if err := a.DeleteMessage(ctx, messageID); err != nil {
+		slog.Warn("failed to delete message for canceled queued prompt", "message_id", messageID, "error", err)
+	}
+	return nil
 }
 
 func (a *App) SteerQueuedPrompt(ctx context.Context, conversationType domain.ConversationType, conversationID string, queueID string) error {
