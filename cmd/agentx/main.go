@@ -136,9 +136,14 @@ func main() {
 		slog.Error("start scheduled tasks", "error", err)
 		os.Exit(1)
 	}
-	defer a.StopScheduledTasks()
 	a.StartTerminalManager(ctx)
-	defer a.StopTerminalManager()
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := a.Shutdown(shutdownCtx); err != nil {
+			slog.Warn("app shutdown error", "error", err)
+		}
+	}()
 	if err := printSetupTokenIfNeeded(ctx, os.Stdout, st.Users(), cfg.AdminToken); err != nil {
 		slog.Error("check setup status", "error", err)
 		os.Exit(1)

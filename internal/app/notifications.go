@@ -138,19 +138,42 @@ func (a *App) notifyAgentMessageCreated(ctx context.Context, title string, messa
 	if isTeamDiscussionMessage(message) {
 		return
 	}
-	go func() {
-		if err := a.deliverAgentMessageWebhook(ctx, title, message); err != nil {
+	deliverCtx := withoutCancelOrBackground(ctx)
+	deliver := func() {
+		if err := a.deliverAgentMessageWebhook(deliverCtx, title, message); err != nil {
 			log.Printf("agentx webhook delivery failed org=%s message=%s: %v", message.OrganizationID, message.ID, err)
 		}
-	}()
+	}
+	if a.startBackground("agent-message-webhook", func(context.Context) {
+		deliver()
+	}) {
+		return
+	}
+	log.Printf("agentx webhook delivery running inline during shutdown org=%s message=%s", message.OrganizationID, message.ID)
+	deliver()
+}
+
+func withoutCancelOrBackground(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return context.WithoutCancel(ctx)
 }
 
 func (a *App) notifyAgentInputRequest(ctx context.Context, title string, orgID string, conversationType domain.ConversationType, conversationID string, input domain.AgentInputRequestPayload) {
-	go func() {
-		if err := a.deliverAgentInputRequestWebhook(ctx, title, orgID, conversationType, conversationID, input); err != nil {
+	deliverCtx := withoutCancelOrBackground(ctx)
+	deliver := func() {
+		if err := a.deliverAgentInputRequestWebhook(deliverCtx, title, orgID, conversationType, conversationID, input); err != nil {
 			log.Printf("agentx webhook delivery failed org=%s input_request=%s: %v", orgID, input.QuestionID, err)
 		}
-	}()
+	}
+	if a.startBackground("agent-input-webhook", func(context.Context) {
+		deliver()
+	}) {
+		return
+	}
+	log.Printf("agentx webhook delivery running inline during shutdown org=%s input_request=%s", orgID, input.QuestionID)
+	deliver()
 }
 
 func isTeamDiscussionMessage(message domain.Message) bool {

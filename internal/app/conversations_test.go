@@ -145,6 +145,56 @@ func TestScheduledAgentPromptCreatesSystemMessageAndRunsAgent(t *testing.T) {
 	}
 }
 
+func TestCronScheduledTaskRecordsFailedRunWhenShuttingDown(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	task, err := app.CreateScheduledTask(ctx, ScheduledTaskCreateRequest{
+		UserID:           bootstrap.User.ID,
+		ProjectID:        bootstrap.Project.ID,
+		Name:             "Ping agent",
+		Kind:             domain.ScheduledTaskKindAgentPrompt,
+		Enabled:          false,
+		Schedule:         "@daily",
+		Timezone:         "UTC",
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		AgentID:          bootstrap.Agent.ID,
+		WorkspaceID:      bootstrap.ProjectWorkspace.ID,
+		Prompt:           "scheduled ping",
+		TimeoutSeconds:   60,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	shutdownAppForTest(t, app)
+	scheduledFor := time.Now().UTC()
+	app.startScheduledTaskFromCron(task.ID, scheduledFor)
+
+	runs, err := app.ScheduledTaskRuns(ctx, task.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runs len = %d, want 1: %#v", len(runs), runs)
+	}
+	run := runs[0]
+	if run.Status != domain.ScheduledTaskRunStatusFailed || run.Error != errAppShuttingDown.Error() {
+		t.Fatalf("run status/error = %s/%q, want failed/%q", run.Status, run.Error, errAppShuttingDown.Error())
+	}
+	if run.Trigger != domain.ScheduledTaskTriggerScheduled || run.ScheduledFor == nil || !run.ScheduledFor.Equal(scheduledFor) {
+		t.Fatalf("run schedule fields = trigger %s scheduled_for %v", run.Trigger, run.ScheduledFor)
+	}
+	task, err = app.ScheduledTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.LastRunID != run.ID || task.LastRunStatus != string(domain.ScheduledTaskRunStatusFailed) {
+		t.Fatalf("task last run = %q/%q, want %q/%q", task.LastRunID, task.LastRunStatus, run.ID, domain.ScheduledTaskRunStatusFailed)
+	}
+}
+
 func TestScheduledShellTaskRequiresGlobalEnable(t *testing.T) {
 	ctx := context.Background()
 	app, _, bootstrap := newConversationTestApp(t, ctx)
@@ -290,6 +340,7 @@ func TestSendAttachmentOnlyMessagePersistsAndPassesFilesToRuntime(t *testing.T) 
 			"capture": capture,
 		},
 	})
+	defer shutdownAppForTest(t, application)
 	bootstrap, err := application.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
@@ -561,6 +612,7 @@ func TestAgentRunStreamsAndPersistsProcessMetadata(t *testing.T) {
 			}},
 		},
 	})
+	defer shutdownAppForTest(t, app)
 	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
@@ -683,6 +735,7 @@ func TestAgentRunPersistsFailedMetric(t *testing.T) {
 			}},
 		},
 	})
+	defer shutdownAppForTest(t, app)
 	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
@@ -803,6 +856,7 @@ func TestAgentMessageWebhookPostsSignedPayload(t *testing.T) {
 			}},
 		},
 	})
+	defer shutdownAppForTest(t, app)
 	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
@@ -899,6 +953,7 @@ func TestAgentInputRequestSendsWebhook(t *testing.T) {
 			}}},
 		},
 	})
+	defer shutdownAppForTest(t, app)
 	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
@@ -1127,6 +1182,7 @@ func TestWebhookTimeoutDoesNotBreakBotMessageCreation(t *testing.T) {
 	ctx := context.Background()
 	started := make(chan struct{}, 1)
 
+	dataDir := t.TempDir()
 	st, err := sqlitestore.Open(ctx, ":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -1135,7 +1191,7 @@ func TestWebhookTimeoutDoesNotBreakBotMessageCreation(t *testing.T) {
 	bus := eventbus.New()
 	app := New(st, bus, Options{
 		AdminToken:        "secret",
-		DataDir:           t.TempDir(),
+		DataDir:           dataDir,
 		WebhookHTTPClient: &http.Client{Transport: blockingWebhookTransport{started: started}},
 		WebhookTimeout:    10 * time.Millisecond,
 		Runtimes: map[string]agentruntime.Runtime{
@@ -1144,6 +1200,13 @@ func TestWebhookTimeoutDoesNotBreakBotMessageCreation(t *testing.T) {
 			}},
 		},
 	})
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := app.Shutdown(shutdownCtx); err != nil {
+			t.Fatal(err)
+		}
+	}()
 	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
@@ -1183,6 +1246,57 @@ func TestWebhookTimeoutDoesNotBreakBotMessageCreation(t *testing.T) {
 		}
 		return false
 	})
+}
+
+func TestWebhookNotificationRunsInlineDuringShutdown(t *testing.T) {
+	ctx := context.Background()
+	requests := make(chan webhookRequest, 1)
+	webhookServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		requests <- webhookRequest{header: r.Header.Clone(), requestURI: r.RequestURI, body: body}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer webhookServer.Close()
+
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+	if _, err := app.UpdateNotificationSettings(ctx, bootstrap.Organization.ID, NotificationSettingsUpdateRequest{
+		WebhookEnabled: true,
+		WebhookURL:     webhookServer.URL + "/${title}/${body}",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	shutdownAppForTest(t, app)
+
+	message := domain.Message{
+		ID:               "msg_inline_webhook",
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		SenderType:       domain.SenderBot,
+		SenderID:         bootstrap.Agent.BotUserID,
+		Kind:             domain.MessageText,
+		Body:             "shutdown reply",
+		CreatedAt:        time.Now().UTC(),
+	}
+	app.notifyAgentMessageCreated(ctx, "Fake Agent", message)
+
+	var got webhookRequest
+	select {
+	case got = <-requests:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for inline webhook request")
+	}
+	if got.header.Get("X-AgentX-Event") != AgentMessageCreatedWebhookEvent {
+		t.Fatalf("X-AgentX-Event = %q", got.header.Get("X-AgentX-Event"))
+	}
+	if !strings.Contains(got.requestURI, "/Fake%20Agent/shutdown%20reply") {
+		t.Fatalf("requestURI = %q, want encoded title/body placeholders", got.requestURI)
+	}
 }
 
 func TestSendMessageRejectsEmptyBody(t *testing.T) {
@@ -1745,6 +1859,7 @@ func TestDirectedMessageIsIncludedInLaterAgentContext(t *testing.T) {
 			"capture": capture,
 		},
 	})
+	defer shutdownAppForTest(t, app)
 	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
@@ -1813,6 +1928,56 @@ func TestDirectedMessageIsIncludedInLaterAgentContext(t *testing.T) {
 	}
 	if !strings.Contains(firstAgentContext, "@agent_two directed") {
 		t.Fatalf("first agent context = %q, want directed message", firstAgentContext)
+	}
+}
+
+func TestAgentRuntimeContextExcludesSystemMessages(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+	capture := &capturingRuntime{sends: make(chan capturedInput, 4)}
+	app.opts.Runtimes[domain.AgentKindFake] = capture
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "prior user context",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	readCapturedInput(t, capture.sends)
+
+	systemBody := "system message should not be in runtime context"
+	if err := app.store.Messages().Create(ctx, domain.Message{
+		ID:               "msg_system_runtime_context",
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		SenderType:       domain.SenderSystem,
+		SenderID:         "system",
+		Kind:             domain.MessageText,
+		Body:             systemBody,
+		CreatedAt:        time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "current user request",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	input := readCapturedInput(t, capture.sends)
+	if !strings.Contains(input.input.Context, "prior user context") {
+		t.Fatalf("context = %q, want prior user message", input.input.Context)
+	}
+	if strings.Contains(input.input.Context, systemBody) || strings.Contains(input.input.Context, "system:") {
+		t.Fatalf("context = %q, want system messages excluded", input.input.Context)
 	}
 }
 
@@ -2218,6 +2383,118 @@ func TestSlashStopInitiatesStopBeforeReturning(t *testing.T) {
 	}
 }
 
+func TestSlashStopCleanupKeepsGraceWindowDuringShutdown(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+	blocking := newBlockingStopRuntime()
+	app.opts.Runtimes[domain.AgentKindFake] = blocking
+	released := false
+	defer func() {
+		if !released {
+			close(blocking.releaseStop)
+		}
+	}()
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "keep running",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blocking.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for blocking runtime start")
+	}
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/stop",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blocking.stopStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for runtime Stop")
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	err := app.Shutdown(shutdownCtx)
+	cancel()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("shutdown error = %v, want deadline exceeded while Stop keeps grace window", err)
+	}
+
+	close(blocking.releaseStop)
+	released = true
+	shutdownCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := app.Shutdown(shutdownCtx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAppShutdownStopsActiveAgentRunWithGraceWindow(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+	blocking := newBlockingStopRuntime()
+	app.opts.Runtimes[domain.AgentKindFake] = blocking
+	released := false
+	defer func() {
+		if !released {
+			close(blocking.releaseStop)
+		}
+	}()
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "keep running",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blocking.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for blocking runtime start")
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		done <- app.Shutdown(shutdownCtx)
+	}()
+	select {
+	case <-blocking.stopStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for shutdown to start runtime Stop")
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("shutdown returned before runtime Stop was released: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(blocking.releaseStop)
+	released = true
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for shutdown after releasing runtime Stop")
+	}
+}
+
 func TestSlashCancelInterruptsActiveAgentRun(t *testing.T) {
 	ctx := context.Background()
 	app, bus, bootstrap := newConversationTestApp(t, ctx)
@@ -2404,6 +2681,50 @@ func TestSlashCancelQueuesBeforeRuntimeSessionStarts(t *testing.T) {
 	}
 }
 
+func TestSendMessageQueuesPromptBeforeRuntimeSessionStarts(t *testing.T) {
+	ctx := context.Background()
+	app, bus, bootstrap := newConversationTestApp(t, ctx)
+	blocking := newStartBlockingInterruptRuntime()
+	app.opts.Runtimes[domain.AgentKindFake] = blocking
+
+	events, unsubscribe := bus.Subscribe(ctx, eventbus.Filter{
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+	})
+	defer unsubscribe()
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "first",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blocking.startEntered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first StartSession")
+	}
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "second",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	queued := requirePromptQueuedEvent(t, events)
+	if queued.MessageID == "" || queued.AgentID != bootstrap.Agent.ID || queued.Body != "second" {
+		t.Fatalf("queued payload = %#v", queued)
+	}
+}
+
 func TestSendMessageQueuesPromptWhileAgentRunActive(t *testing.T) {
 	ctx := context.Background()
 	app, bus, bootstrap := newConversationTestApp(t, ctx)
@@ -2461,6 +2782,42 @@ func TestSendMessageQueuesPromptWhileAgentRunActive(t *testing.T) {
 	input := secondSession.sentInput(t)
 	if input.Prompt != "second" {
 		t.Fatalf("queued run prompt = %q, want second", input.Prompt)
+	}
+}
+
+func TestAppShutdownWaitsForActiveAgentRun(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+	blocking := newBlockingRuntime()
+	app.opts.Runtimes[domain.AgentKindFake] = blocking
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "keep running",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blocking.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for runtime send")
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := app.Shutdown(shutdownCtx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blocking.closed:
+	default:
+		t.Fatal("runtime session was not closed during shutdown")
+	}
+	if _, err := app.ListMessages(ctx, domain.ConversationChannel, bootstrap.Channel.ID, 20); err != nil {
+		t.Fatalf("store should remain usable after app shutdown before store close: %v", err)
 	}
 }
 
@@ -2889,6 +3246,7 @@ func TestSlashSkillInvocationBuildsPromptAndTargetsAgent(t *testing.T) {
 			domain.AgentKindCodex: capture,
 		},
 	})
+	defer shutdownAppForTest(t, app)
 	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
@@ -2981,6 +3339,7 @@ func TestSlashSkillUnknownAndBuiltinPrecedence(t *testing.T) {
 			domain.AgentKindCodex: capture,
 		},
 	})
+	defer shutdownAppForTest(t, app)
 	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
@@ -3041,6 +3400,7 @@ func TestSlashNewResetsProviderSessionAndFiltersOldContext(t *testing.T) {
 			"capture": capture,
 		},
 	})
+	defer shutdownAppForTest(t, app)
 	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
@@ -3135,6 +3495,7 @@ func TestRunAgentRetriesWithoutResumeWhenProviderSessionIsStale(t *testing.T) {
 			"retry-stale": rt,
 		},
 	})
+	defer shutdownAppForTest(t, app)
 	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
@@ -3192,6 +3553,7 @@ func TestSlashPlanUsesClaudePlanPermissionAndStripsTarget(t *testing.T) {
 			domain.AgentKindClaude: capture,
 		},
 	})
+	defer shutdownAppForTest(t, app)
 	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
@@ -3250,6 +3612,7 @@ func TestAgentPromptIncludesReplyReferenceOutsideRecentContext(t *testing.T) {
 			domain.AgentKindFake: capture,
 		},
 	})
+	defer shutdownAppForTest(t, app)
 	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
@@ -3489,6 +3852,7 @@ JSON
 			}}},
 		},
 	})
+	defer shutdownAppForTest(t, app)
 	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
@@ -3551,6 +3915,7 @@ JSON
 			domain.AgentKindClaudePersistent: rt,
 		},
 	})
+	defer shutdownAppForTest(t, app)
 	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
@@ -3772,6 +4137,7 @@ func TestRunAgentRecordsFailedSessionAfterBindingWhenAgentLookupFails(t *testing
 func newConversationTestApp(t *testing.T, ctx context.Context) (*App, *eventbus.Bus, BootstrapResult) {
 	t.Helper()
 
+	dataDir := t.TempDir()
 	st, err := sqlitestore.Open(ctx, ":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -3783,12 +4149,24 @@ func newConversationTestApp(t *testing.T, ctx context.Context) (*App, *eventbus.
 	})
 
 	bus := eventbus.New()
-	app := New(st, bus, Options{AdminToken: "secret", DataDir: t.TempDir()})
+	app := New(st, bus, Options{AdminToken: "secret", DataDir: dataDir})
+	t.Cleanup(func() {
+		shutdownAppForTest(t, app)
+	})
 	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return app, bus, bootstrap
+}
+
+func shutdownAppForTest(t *testing.T, app *App) {
+	t.Helper()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := app.Shutdown(shutdownCtx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 type agentLookupFailureStore struct {

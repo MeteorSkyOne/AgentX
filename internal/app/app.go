@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -37,6 +38,8 @@ type Options struct {
 	ScheduledShellEnabled bool
 	Terminal              TerminalOptions
 }
+
+var errAppShuttingDown = errors.New("app is shutting down")
 
 type pendingQuestionKey struct {
 	conversationType domain.ConversationType
@@ -109,6 +112,11 @@ type App struct {
 	messageQueueByID   map[string]*queuedAgentPrompt
 	scheduledRunsMu    sync.Mutex
 	scheduledRuns      map[string]struct{}
+	backgroundMu       sync.Mutex
+	backgroundCtx      context.Context
+	backgroundCancel   context.CancelFunc
+	backgroundWG       sync.WaitGroup
+	shuttingDown       bool
 }
 
 func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
@@ -117,6 +125,7 @@ func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
 			domain.AgentKindFake: fake.New(),
 		}
 	}
+	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
 	return &App{
 		store:          st,
 		bus:            bus,
@@ -134,6 +143,76 @@ func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
 		messageQueue:     make(map[messageQueueKey][]*queuedAgentPrompt),
 		messageQueueByID: make(map[string]*queuedAgentPrompt),
 		scheduledRuns:    make(map[string]struct{}),
+		backgroundCtx:    backgroundCtx,
+		backgroundCancel: backgroundCancel,
+	}
+}
+
+func (a *App) beginBackground() (context.Context, func(), bool) {
+	a.backgroundMu.Lock()
+	if a.shuttingDown {
+		a.backgroundMu.Unlock()
+		return nil, nil, false
+	}
+	ctx := a.backgroundCtx
+	a.backgroundWG.Add(1)
+	a.backgroundMu.Unlock()
+
+	done := func() {
+		a.backgroundWG.Done()
+	}
+	return ctx, done, true
+}
+
+func (a *App) startBackground(name string, fn func(context.Context)) bool {
+	ctx, done, ok := a.beginBackground()
+	if !ok {
+		return false
+	}
+	go func() {
+		defer done()
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				slog.Error("background task panic", "task", name, "panic", recovered)
+			}
+		}()
+		fn(ctx)
+	}()
+	return true
+}
+
+func (a *App) isShuttingDown() bool {
+	a.backgroundMu.Lock()
+	defer a.backgroundMu.Unlock()
+	return a.shuttingDown
+}
+
+func (a *App) Shutdown(ctx context.Context) error {
+	a.backgroundMu.Lock()
+	if !a.shuttingDown {
+		a.shuttingDown = true
+		if a.backgroundCancel != nil {
+			a.backgroundCancel()
+		}
+	}
+	a.backgroundMu.Unlock()
+
+	a.StopScheduledTasks()
+	a.StopTerminalManager()
+	a.cancelAllActiveAgentRuns(ctx, errAppShuttingDown)
+	a.clearAllQueuedAgentPrompts("failed")
+
+	done := make(chan struct{})
+	go func() {
+		a.backgroundWG.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -203,7 +282,10 @@ func (a *App) setActiveAgentRunSession(ctx context.Context, key activeRunKey, ru
 	}
 	a.activeRunsMu.Unlock()
 	if interrupt != nil {
-		go interruptAgentRunSession(context.WithoutCancel(ctx), interrupt)
+		interruptCtx := context.WithoutCancel(ctx)
+		a.startBackground("agent-run-interrupt", func(context.Context) {
+			interruptAgentRunSession(interruptCtx, interrupt)
+		})
 	}
 }
 
@@ -249,7 +331,11 @@ func (a *App) stopActiveAgentRuns(ctx context.Context, key activeRunKey) int {
 		if run.session == nil {
 			continue
 		}
-		go stopAgentRunSession(context.WithoutCancel(ctx), run.session)
+		session := run.session
+		stopCtx := context.WithoutCancel(ctx)
+		a.startBackground("agent-run-stop", func(context.Context) {
+			stopAgentRunSession(stopCtx, session)
+		})
 	}
 	return len(stopping)
 }
@@ -296,10 +382,69 @@ func (a *App) cancelActiveAgentRuns(ctx context.Context, key activeRunKey) cance
 		return result
 	}
 	a.removePendingQuestions(key.conversationType, key.conversationID)
+	interruptCtx := context.WithoutCancel(ctx)
 	for _, session := range canceling {
-		go interruptAgentRunSession(context.WithoutCancel(ctx), session)
+		session := session
+		a.startBackground("agent-run-interrupt", func(context.Context) {
+			interruptAgentRunSession(interruptCtx, session)
+		})
 	}
 	return result
+}
+
+func (a *App) cancelAllActiveAgentRuns(ctx context.Context, cause error) {
+	stopping := make([]agentruntime.Session, 0)
+	a.activeRunsMu.Lock()
+	for _, keyedRuns := range a.activeRuns {
+		for _, run := range keyedRuns {
+			run.mu.Lock()
+			if run.cancel != nil {
+				run.cancel(cause)
+			}
+			run.cancelRequested = true
+			run.pendingQuestion = nil
+			if run.session != nil {
+				stopping = append(stopping, run.session)
+				if initiator, ok := run.session.(agentruntime.StopInitiator); ok {
+					initiator.InitiateStop()
+				}
+			}
+			run.mu.Unlock()
+		}
+	}
+	a.activeRunsMu.Unlock()
+
+	a.pendingQuestionsMu.Lock()
+	for key := range a.pendingQuestions {
+		delete(a.pendingQuestions, key)
+	}
+	a.pendingQuestionsMu.Unlock()
+
+	stopAgentRunSessions(ctx, stopping)
+}
+
+func stopAgentRunSessions(ctx context.Context, sessions []agentruntime.Session) {
+	if len(sessions) == 0 {
+		return
+	}
+	var wg sync.WaitGroup
+	wg.Add(len(sessions))
+	for _, session := range sessions {
+		session := session
+		go func() {
+			defer wg.Done()
+			stopAgentRunSession(ctx, session)
+		}()
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }
 
 func stopAgentRunSession(ctx context.Context, session agentruntime.Session) {

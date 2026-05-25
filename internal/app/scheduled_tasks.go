@@ -215,7 +215,12 @@ func (a *App) RunScheduledTaskNow(ctx context.Context, taskID string) (domain.Sc
 	if err != nil || !ok {
 		return run, err
 	}
-	go a.executeScheduledTaskRun(context.Background(), task, run)
+	if !a.startBackground("scheduled-task-run", func(bgCtx context.Context) {
+		a.executeScheduledTaskRun(bgCtx, task, run)
+	}) {
+		a.failScheduledTaskRunStart(ctx, task, run, errAppShuttingDown)
+		return run, errAppShuttingDown
+	}
 	return run, nil
 }
 
@@ -341,6 +346,37 @@ func (a *App) runScheduledTask(ctx context.Context, taskID string, trigger domai
 	a.executeScheduledTaskRun(ctx, task, run)
 }
 
+func (a *App) startScheduledTaskFromCron(taskID string, scheduledFor time.Time) {
+	if a.startBackground("scheduled-task-run", func(bgCtx context.Context) {
+		a.runScheduledTask(bgCtx, taskID, domain.ScheduledTaskTriggerScheduled, &scheduledFor)
+	}) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	a.recordScheduledTaskStartRejected(ctx, taskID, domain.ScheduledTaskTriggerScheduled, &scheduledFor, errAppShuttingDown)
+}
+
+func (a *App) recordScheduledTaskStartRejected(ctx context.Context, taskID string, trigger domain.ScheduledTaskTrigger, scheduledFor *time.Time, cause error) {
+	task, err := a.store.ScheduledTasks().ByID(ctx, taskID)
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			slog.Error("scheduled task lookup failed after start rejected", "task_id", taskID, "error", err)
+		}
+		return
+	}
+	run, ok, err := a.beginScheduledTaskRun(ctx, task, trigger, scheduledFor)
+	if err != nil {
+		slog.Error("scheduled task rejected run record failed", "task_id", task.ID, "error", err)
+		return
+	}
+	if !ok {
+		return
+	}
+	a.failScheduledTaskRunStart(ctx, task, run, cause)
+	slog.Warn("scheduled task start rejected", "task_id", task.ID, "run_id", run.ID, "error", cause)
+}
+
 func (a *App) beginScheduledTaskRun(ctx context.Context, task domain.ScheduledTask, trigger domain.ScheduledTaskTrigger, scheduledFor *time.Time) (domain.ScheduledTaskRun, bool, error) {
 	now := time.Now().UTC()
 	a.scheduledRunsMu.Lock()
@@ -393,6 +429,13 @@ func (a *App) beginScheduledTaskRun(ctx context.Context, task domain.ScheduledTa
 		return domain.ScheduledTaskRun{}, false, err
 	}
 	return run, true, nil
+}
+
+func (a *App) failScheduledTaskRunStart(ctx context.Context, task domain.ScheduledTask, run domain.ScheduledTaskRun, cause error) {
+	a.clearScheduledTaskRunning(task.ID)
+	run.Status = domain.ScheduledTaskRunStatusFailed
+	run.Error = cause.Error()
+	a.finishScheduledTaskRun(ctx, task, run)
 }
 
 func (a *App) executeScheduledTaskRun(ctx context.Context, task domain.ScheduledTask, run domain.ScheduledTaskRun) {
@@ -611,7 +654,7 @@ func (s *scheduledTaskScheduler) upsert(ctx context.Context, task domain.Schedul
 		scheduleSpec := scheduledTaskScheduleSpec(task)
 		entryID, err := s.cron.AddFunc(scheduleSpec, func() {
 			scheduledFor := time.Now().UTC()
-			s.app.runScheduledTask(context.Background(), task.ID, domain.ScheduledTaskTriggerScheduled, &scheduledFor)
+			s.app.startScheduledTaskFromCron(task.ID, scheduledFor)
 		})
 		if err != nil {
 			return err

@@ -36,6 +36,9 @@ func (a *App) runtimeContextForMessage(ctx context.Context, agentID string, user
 		if message.ID == userMessage.ID {
 			continue
 		}
+		if message.SenderType == domain.SenderSystem {
+			continue
+		}
 		if contextStartedAt != nil && message.CreatedAt.Before(*contextStartedAt) {
 			continue
 		}

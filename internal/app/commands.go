@@ -169,11 +169,22 @@ func (a *App) createCommandRun(ctx context.Context, req SendMessageRequest, targ
 	}
 
 	runID := id.New("run")
-	go a.runAgentForMessageWithTarget(context.WithoutCancel(ctx), message, target, runID, agentRunOptions{
+	bgCtx, done, ok := a.beginBackground()
+	if !ok {
+		a.publishAgentRunFailedWithContext(message, runID, target.Agent.ID, nil, errAppShuttingDown)
+		return message, nil
+	}
+	opts := agentRunOptions{
 		Prompt:         prompt,
 		PermissionMode: permissionMode,
 		OnCompleted:    onCompleted,
-	})
+	}
+	reserved := a.newReservedAgentRun(bgCtx, message, target, runID, opts)
+	a.registerActiveAgentRun(reserved.key, reserved.active)
+	go func() {
+		defer done()
+		a.runReservedAgentForMessageWithTarget(reserved, message, target, opts)
+	}()
 	return message, nil
 }
 

@@ -30,11 +30,31 @@ func (a *App) dispatchAgentRunOrQueue(ctx context.Context, message domain.Messag
 		conversationID:   message.ConversationID,
 		agentID:          target.Agent.ID,
 	}
-	if a.hasActiveAgentRun(activeKey) {
-		a.enqueueAgentPrompt(message, target)
+	bgCtx, done, ok := a.beginBackground()
+	if !ok {
+		a.publishAgentRunFailedWithContext(message, id.New("run"), target.Agent.ID, nil, errAppShuttingDown)
 		return
 	}
-	go a.runAgentForMessage(ctx, message, target)
+
+	runID := id.New("run")
+	reserved := a.newReservedAgentRun(bgCtx, message, target, runID, agentRunOptions{})
+	if !a.reserveActiveAgentRunIfIdle(reserved) {
+		reserved.cancel(nil)
+		done()
+		if !a.enqueueAgentPrompt(message, target) {
+			a.publishAgentRunFailedWithContext(message, runID, target.Agent.ID, nil, errAppShuttingDown)
+			return
+		}
+		if !a.hasActiveAgentRun(activeKey) {
+			a.startNextQueuedPrompt(ctx, messageQueueKeyFromActiveRunKey(activeKey))
+		}
+		return
+	}
+
+	go func() {
+		defer done()
+		a.runReservedAgentForMessageWithTarget(reserved, message, target, agentRunOptions{})
+	}()
 }
 
 func (a *App) hasActiveAgentRun(key activeRunKey) bool {
@@ -43,7 +63,10 @@ func (a *App) hasActiveAgentRun(key activeRunKey) bool {
 	return len(a.activeRuns[key]) > 0
 }
 
-func (a *App) enqueueAgentPrompt(message domain.Message, target ConversationAgentContext) {
+func (a *App) enqueueAgentPrompt(message domain.Message, target ConversationAgentContext) bool {
+	if a.isShuttingDown() {
+		return false
+	}
 	key := messageQueueKey{
 		conversationType: message.ConversationType,
 		conversationID:   message.ConversationID,
@@ -63,9 +86,13 @@ func (a *App) enqueueAgentPrompt(message domain.Message, target ConversationAgen
 	a.messageQueueMu.Unlock()
 
 	a.publishAgentPromptQueued(item)
+	return true
 }
 
 func (a *App) handleAgentRunTerminated(ctx context.Context, key activeRunKey, status string) {
+	if a.isShuttingDown() {
+		return
+	}
 	if a.hasActiveAgentRun(key) {
 		return
 	}
@@ -79,14 +106,38 @@ func (a *App) handleAgentRunTerminated(ctx context.Context, key activeRunKey, st
 }
 
 func (a *App) startNextQueuedPrompt(ctx context.Context, key messageQueueKey) bool {
-	if a.hasActiveAgentRun(activeRunKeyFromMessageQueueKey(key)) {
+	if a.isShuttingDown() {
+		return false
+	}
+	activeKey := activeRunKeyFromMessageQueueKey(key)
+	if a.hasActiveAgentRun(activeKey) {
 		return false
 	}
 	item, ok := a.dequeueNextQueuedPrompt(key, "started")
 	if !ok {
 		return false
 	}
-	go a.runAgentForMessage(ctx, item.Message, item.Target)
+
+	bgCtx, done, started := a.beginBackground()
+	if !started {
+		a.publishAgentRunFailedWithContext(item.Message, id.New("run"), item.Target.Agent.ID, nil, errAppShuttingDown)
+		return false
+	}
+	runID := id.New("run")
+	reserved := a.newReservedAgentRun(bgCtx, item.Message, item.Target, runID, agentRunOptions{})
+	if !a.reserveActiveAgentRunIfIdle(reserved) {
+		reserved.cancel(nil)
+		done()
+		if !a.enqueueAgentPrompt(item.Message, item.Target) {
+			a.publishAgentRunFailedWithContext(item.Message, runID, item.Target.Agent.ID, nil, errAppShuttingDown)
+		}
+		return false
+	}
+
+	go func() {
+		defer done()
+		a.runReservedAgentForMessageWithTarget(reserved, item.Message, item.Target, agentRunOptions{})
+	}()
 	return true
 }
 
@@ -116,6 +167,24 @@ func (a *App) clearQueuedAgentPrompts(key messageQueueKey, status string) int {
 	delete(a.messageQueue, key)
 	for _, item := range items {
 		delete(a.messageQueueByID, item.QueueID)
+	}
+	a.messageQueueMu.Unlock()
+
+	for _, item := range items {
+		a.publishAgentPromptQueueRemoved(item, status)
+	}
+	return len(items)
+}
+
+func (a *App) clearAllQueuedAgentPrompts(status string) int {
+	a.messageQueueMu.Lock()
+	var items []*queuedAgentPrompt
+	for key, queued := range a.messageQueue {
+		items = append(items, queued...)
+		delete(a.messageQueue, key)
+	}
+	for queueID := range a.messageQueueByID {
+		delete(a.messageQueueByID, queueID)
 	}
 	a.messageQueueMu.Unlock()
 

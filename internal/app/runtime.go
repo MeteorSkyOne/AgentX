@@ -32,6 +32,53 @@ type agentRunResult struct {
 	Err     error
 }
 
+type reservedAgentRun struct {
+	runID  string
+	ctx    context.Context
+	cancel context.CancelCauseFunc
+	active *activeAgentRun
+	key    activeRunKey
+}
+
+func (a *App) newReservedAgentRun(ctx context.Context, userMessage domain.Message, target ConversationAgentContext, runID string, opts agentRunOptions) reservedAgentRun {
+	runCtx, cancelRun := context.WithCancelCause(ctx)
+	startedAt := time.Now().UTC()
+	activeKey := activeRunKey{
+		conversationType: userMessage.ConversationType,
+		conversationID:   userMessage.ConversationID,
+		agentID:          target.Agent.ID,
+	}
+	activeRun := &activeAgentRun{
+		runID:            runID,
+		agentID:          target.Agent.ID,
+		organizationID:   userMessage.OrganizationID,
+		conversationType: userMessage.ConversationType,
+		conversationID:   userMessage.ConversationID,
+		startedAt:        startedAt,
+		team:             cloneTeamMetadata(opts.Team),
+		cancel:           cancelRun,
+	}
+	return reservedAgentRun{
+		runID:  runID,
+		ctx:    runCtx,
+		cancel: cancelRun,
+		active: activeRun,
+		key:    activeKey,
+	}
+}
+
+func (a *App) reserveActiveAgentRunIfIdle(reserved reservedAgentRun) bool {
+	a.activeRunsMu.Lock()
+	defer a.activeRunsMu.Unlock()
+	if len(a.activeRuns[reserved.key]) > 0 {
+		return false
+	}
+	runs := make(map[string]*activeAgentRun)
+	runs[reserved.runID] = reserved.active
+	a.activeRuns[reserved.key] = runs
+	return true
+}
+
 func (a *App) runAgentForMessage(ctx context.Context, userMessage domain.Message, targets ...ConversationAgentContext) {
 	runID := id.New("run")
 	defer func() {
@@ -67,27 +114,19 @@ func (a *App) runAgentForMessage(ctx context.Context, userMessage domain.Message
 }
 
 func (a *App) runAgentForMessageWithTarget(ctx context.Context, userMessage domain.Message, target ConversationAgentContext, runID string, opts agentRunOptions) {
-	runCtx, cancelRun := context.WithCancelCause(ctx)
-	ctx = runCtx
-	defer cancelRun(nil)
+	reserved := a.newReservedAgentRun(ctx, userMessage, target, runID, opts)
+	a.registerActiveAgentRun(reserved.key, reserved.active)
+	a.runReservedAgentForMessageWithTarget(reserved, userMessage, target, opts)
+}
 
-	startedAt := time.Now().UTC()
-	activeRun := &activeAgentRun{
-		runID:            runID,
-		agentID:          target.Agent.ID,
-		organizationID:   userMessage.OrganizationID,
-		conversationType: userMessage.ConversationType,
-		conversationID:   userMessage.ConversationID,
-		startedAt:        startedAt,
-		team:             cloneTeamMetadata(opts.Team),
-		cancel:           cancelRun,
-	}
-	activeKey := activeRunKey{
-		conversationType: userMessage.ConversationType,
-		conversationID:   userMessage.ConversationID,
-		agentID:          target.Agent.ID,
-	}
-	a.registerActiveAgentRun(activeKey, activeRun)
+func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, userMessage domain.Message, target ConversationAgentContext, opts agentRunOptions) {
+	ctx := reserved.ctx
+	runID := reserved.runID
+	activeRun := reserved.active
+	activeKey := reserved.key
+	startedAt := activeRun.startedAt
+	defer reserved.cancel(nil)
+
 	terminalStatus := "failed"
 	defer func() {
 		a.removeActiveAgentRun(activeKey, runID)

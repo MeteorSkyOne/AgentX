@@ -140,6 +140,9 @@ func (a *App) SendMessage(ctx context.Context, req SendMessageRequest) (domain.M
 	if body == "" && len(req.Attachments) == 0 {
 		return domain.Message{}, ErrEmptyMessage
 	}
+	if a.isShuttingDown() {
+		return domain.Message{}, errAppShuttingDown
+	}
 	scope, err := a.conversationScope(ctx, req.ConversationType, req.ConversationID)
 	if err != nil {
 		return domain.Message{}, err

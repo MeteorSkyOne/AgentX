@@ -158,7 +158,11 @@ func (a *App) handleDiscussCommand(ctx context.Context, req SendMessageRequest, 
 	if err != nil {
 		return domain.Message{}, err
 	}
-	go a.runAgentTeamForMessage(context.WithoutCancel(ctx), message, scope, targets, targets)
+	if !a.startBackground("agent-team-run", func(bgCtx context.Context) {
+		a.runAgentTeamForMessage(bgCtx, message, scope, targets, targets)
+	}) {
+		return domain.Message{}, errAppShuttingDown
+	}
 	return message, nil
 }
 
