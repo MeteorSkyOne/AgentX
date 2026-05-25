@@ -27,7 +27,11 @@ type jsonRPCError struct {
 }
 
 func (e *jsonRPCError) Error() string {
-	return fmt.Sprintf("jsonrpc error %d: %s", e.Code, e.Message)
+	base := fmt.Sprintf("jsonrpc error %d: %s", e.Code, e.Message)
+	if detail := codexDetailValue(e.Data); detail != "" {
+		return truncateCodexErrorDetail(base + ": data=" + detail)
+	}
+	return base
 }
 
 type pendingRequest struct {

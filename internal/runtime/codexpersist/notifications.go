@@ -64,7 +64,7 @@ func (s *persistentSession) processNotifications(ctx context.Context) {
 			s.emit(runtime.Event{Type: runtime.EventFailed, Error: ctx.Err().Error()})
 			return
 		case <-s.process.Done():
-			s.emit(runtime.Event{Type: runtime.EventFailed, Error: "codex app-server exited"})
+			s.emit(runtime.Event{Type: runtime.EventFailed, Error: codexAppServerExitedError(s.process.Stderr())})
 			return
 		case msg, ok := <-s.rpc.Notifications():
 			if !ok {
@@ -171,10 +171,7 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 		// goal lifecycle notifications — feedback is provided by the turn events
 
 	case "error":
-		errMsg, _ := params["message"].(string)
-		if errMsg == "" {
-			errMsg = "codex app-server error"
-		}
+		errMsg := codexNotificationErrorMessage(msg)
 		s.emit(runtime.Event{Type: runtime.EventFailed, Error: errMsg, StaleSession: isStaleThreadErrorMessage(errMsg)})
 		return true
 

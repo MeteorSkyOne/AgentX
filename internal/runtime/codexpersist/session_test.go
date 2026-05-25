@@ -103,6 +103,95 @@ func TestNotificationErrorMarksThreadNotFoundAsStale(t *testing.T) {
 	}
 }
 
+func TestNotificationErrorIncludesDetailWhenMessageMissing(t *testing.T) {
+	s := &persistentSession{events: make(chan runtime.Event, 1)}
+	state := newNotificationState()
+
+	terminal := s.handleNotification(jsonRPCMessage{
+		Method: "error",
+		Params: map[string]any{
+			"code":   float64(-32000),
+			"detail": "model gpt-test is unavailable",
+			"data": map[string]any{
+				"request_id": "req_123",
+			},
+		},
+	}, state)
+
+	if !terminal {
+		t.Fatalf("notification should be terminal")
+	}
+	evt := <-s.events
+	if evt.Error != `codex app-server error: code=-32000, detail=model gpt-test is unavailable, data={"request_id":"req_123"}` {
+		t.Fatalf("error = %q", evt.Error)
+	}
+}
+
+func TestNotificationErrorIncludesNestedErrorData(t *testing.T) {
+	s := &persistentSession{events: make(chan runtime.Event, 1)}
+	state := newNotificationState()
+
+	terminal := s.handleNotification(jsonRPCMessage{
+		Method: "error",
+		Params: map[string]any{
+			"error": map[string]any{
+				"message": "provider rejected request",
+				"data": map[string]any{
+					"type": "rate_limit",
+				},
+			},
+		},
+	}, state)
+
+	if !terminal {
+		t.Fatalf("notification should be terminal")
+	}
+	evt := <-s.events
+	if evt.Error != `provider rejected request: error_data={"type":"rate_limit"}` {
+		t.Fatalf("error = %q", evt.Error)
+	}
+}
+
+func TestNotificationErrorUsesStringParams(t *testing.T) {
+	s := &persistentSession{events: make(chan runtime.Event, 1)}
+	state := newNotificationState()
+
+	terminal := s.handleNotification(jsonRPCMessage{
+		Method: "error",
+		Params: "provider connection reset",
+	}, state)
+
+	if !terminal {
+		t.Fatalf("notification should be terminal")
+	}
+	evt := <-s.events
+	if evt.Error != "provider connection reset" {
+		t.Fatalf("error = %q", evt.Error)
+	}
+}
+
+func TestJSONRPCErrorIncludesData(t *testing.T) {
+	err := (&jsonRPCError{
+		Code:    -32000,
+		Message: "request failed",
+		Data: map[string]any{
+			"reason": "quota exceeded",
+		},
+	}).Error()
+
+	if err != `jsonrpc error -32000: request failed: data={"reason":"quota exceeded"}` {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestCodexAppServerExitedErrorIncludesStderr(t *testing.T) {
+	err := codexAppServerExitedError("fatal: missing token\n")
+
+	if err != "codex app-server exited: fatal: missing token" {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestTurnCompletedInterruptedEmitsCanceled(t *testing.T) {
 	s := &persistentSession{events: make(chan runtime.Event, 1)}
 	state := newNotificationState()
