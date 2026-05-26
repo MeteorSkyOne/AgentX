@@ -449,6 +449,31 @@ func TestErrorResultIncludesRawPayload(t *testing.T) {
 	}
 }
 
+func TestErrorResultIncludesDetailFields(t *testing.T) {
+	handler := newLineHandler("fallback")
+
+	events, err := handler.HandleLine([]byte(`{"type":"result","subtype":"error","is_error":true,"error":"API Error: The socket connection was closed unexpectedly","code":-32000,"status":"connection_reset","detail":"For more information, pass verbose: true"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != runtime.EventFailed {
+		t.Fatalf("events = %#v", events)
+	}
+	errMsg := events[0].Error
+	if !strings.Contains(errMsg, "API Error: The socket connection was closed unexpectedly") {
+		t.Fatalf("error missing base message: %q", errMsg)
+	}
+	if !strings.Contains(errMsg, "code=-32000") {
+		t.Fatalf("error missing code detail: %q", errMsg)
+	}
+	if !strings.Contains(errMsg, "status=connection_reset") {
+		t.Fatalf("error missing status detail: %q", errMsg)
+	}
+	if !strings.Contains(errMsg, "detail=For more information") {
+		t.Fatalf("error missing detail field: %q", errMsg)
+	}
+}
+
 func TestErrorResultMarksStaleSession(t *testing.T) {
 	handler := newLineHandler("fallback")
 

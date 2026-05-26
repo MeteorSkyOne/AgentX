@@ -2,6 +2,7 @@ package claude
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/meteorsky/agentx/internal/runtime"
@@ -144,21 +145,95 @@ func isErrorResult(payload map[string]any) bool {
 }
 
 func resultError(payload map[string]any) string {
+	var base string
 	for _, key := range []string{"error", "message", "result"} {
 		if text := stringValue(payload, key); text != "" {
-			return text
+			base = text
+			break
 		}
 	}
-	if subtype := stringValue(payload, "subtype"); subtype != "" {
+	if base == "" {
+		if subtype := stringValue(payload, "subtype"); subtype != "" {
+			if raw, err := json.Marshal(payload); err == nil {
+				return subtype + ": " + string(raw)
+			}
+			return subtype
+		}
 		if raw, err := json.Marshal(payload); err == nil {
-			return subtype + ": " + string(raw)
+			return "claude runtime failed: " + string(raw)
 		}
-		return subtype
+		return "claude runtime failed"
 	}
-	if raw, err := json.Marshal(payload); err == nil {
-		return "claude runtime failed: " + string(raw)
+
+	detail := resultErrorDetail(payload)
+	if detail == "" || strings.Contains(base, detail) {
+		return base
 	}
-	return "claude runtime failed"
+	return truncateErrorDetail(base + ": " + detail)
+}
+
+const maxErrorDetailBytes = 4000
+
+func resultErrorDetail(payload map[string]any) string {
+	var parts []string
+	appendField := func(label string, value any) {
+		if text := detailValue(value); text != "" {
+			parts = append(parts, label+"="+text)
+		}
+	}
+
+	appendField("code", payload["code"])
+	appendField("status", payload["status"])
+	appendField("reason", payload["reason"])
+	appendField("detail", payload["detail"])
+	appendField("details", payload["details"])
+	appendField("cause", payload["cause"])
+	appendField("data", payload["data"])
+
+	if nested, ok := payload["error_details"].(map[string]any); ok {
+		appendField("error_code", nested["code"])
+		appendField("error_detail", nested["detail"])
+		appendField("error_data", nested["data"])
+	}
+
+	if len(parts) > 0 {
+		return strings.Join(parts, ", ")
+	}
+	return ""
+}
+
+func detailValue(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		s := strings.TrimSpace(typed)
+		if s == "" {
+			return ""
+		}
+		return s
+	case json.Number:
+		return typed.String()
+	case float64, bool, int, int64:
+		return fmt.Sprint(typed)
+	default:
+		data, err := json.Marshal(typed)
+		if err != nil {
+			return fmt.Sprint(typed)
+		}
+		s := string(data)
+		if s == "null" || s == "{}" || s == "[]" {
+			return ""
+		}
+		return s
+	}
+}
+
+func truncateErrorDetail(text string) string {
+	if len(text) <= maxErrorDetailBytes {
+		return text
+	}
+	return text[:maxErrorDetailBytes] + "...(truncated)"
 }
 
 func isAskUserQuestion(part map[string]any) bool {
