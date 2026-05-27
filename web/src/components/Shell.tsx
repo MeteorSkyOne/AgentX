@@ -62,6 +62,8 @@ export function Shell({
   serverSettings,
   serverSettingsLoading,
   serverSettingsError,
+  toolUpdates,
+  toolUpdatesLoading,
   preferences,
   preferencesLoading,
   theme,
@@ -83,6 +85,9 @@ export function Shell({
   onDeleteAgent,
   onUpdateNotificationSettings,
   onUpdateServerSettings,
+  onUpdateToolUpdateSettings,
+  onCheckToolUpdates,
+  onRunToolUpdate,
   onUpdateUserPreferences,
   onTestNotificationSettings,
   onLoadWorkspaceTree,
@@ -181,6 +186,14 @@ export function Shell({
   const [serverSettingsPending, setServerSettingsPending] = useState(false);
   const [serverSettingsActionError, setServerSettingsActionError] = useState<string | null>(null);
   const [serverSettingsActionStatus, setServerSettingsActionStatus] = useState<string | null>(null);
+  const [toolAutoEnabled, setToolAutoEnabled] = useState(false);
+  const [toolTimeOfDay, setToolTimeOfDay] = useState("04:00");
+  const [toolTimezone, setToolTimezone] = useState("Local");
+  const [toolClaudeEnabled, setToolClaudeEnabled] = useState(true);
+  const [toolCodexEnabled, setToolCodexEnabled] = useState(true);
+  const [toolSettingsPending, setToolSettingsPending] = useState(false);
+  const [toolActionStatus, setToolActionStatus] = useState<string | null>(null);
+  const [toolActionError, setToolActionError] = useState<string | null>(null);
   const [preferencesPending, setPreferencesPending] = useState(false);
   const [preferencesError, setPreferencesError] = useState<string | null>(null);
   const {
@@ -447,6 +460,7 @@ export function Shell({
     setBrowserPermission(browserNotificationPermission());
     syncNotificationDraft();
     syncServerSettingsDraft();
+    syncToolUpdateDraft();
     setAccountSettingsOpen(true);
   }
 
@@ -469,6 +483,17 @@ export function Shell({
     setServerTLSKeyPEM("");
     setServerSettingsActionError(null);
     setServerSettingsActionStatus(null);
+  }
+
+  function syncToolUpdateDraft() {
+    const settings = toolUpdates?.settings;
+    setToolAutoEnabled(settings?.auto_enabled ?? false);
+    setToolTimeOfDay(settings?.time_of_day ?? "04:00");
+    setToolTimezone(settings?.timezone ?? "Local");
+    setToolClaudeEnabled(settings?.claude_enabled ?? true);
+    setToolCodexEnabled(settings?.codex_enabled ?? true);
+    setToolActionError(null);
+    setToolActionStatus(null);
   }
 
   function syncPreferenceDraft() {
@@ -564,6 +589,50 @@ export function Shell({
       setServerSettingsActionError(err instanceof Error ? err.message : "Save server settings failed");
     } finally {
       setServerSettingsPending(false);
+    }
+  }
+
+  async function saveToolUpdateSettings() {
+    setToolActionError(null);
+    setToolActionStatus(null);
+    setToolSettingsPending(true);
+    try {
+      await onUpdateToolUpdateSettings({
+        auto_enabled: toolAutoEnabled,
+        time_of_day: toolTimeOfDay,
+        timezone: toolTimezone.trim() || "Local",
+        claude_enabled: toolClaudeEnabled,
+        codex_enabled: toolCodexEnabled,
+      });
+      setToolActionStatus("Saved");
+    } catch (err) {
+      setToolActionError(err instanceof Error ? err.message : "Save runtime update settings failed");
+    } finally {
+      setToolSettingsPending(false);
+    }
+  }
+
+  async function checkAllToolUpdates() {
+    setToolActionError(null);
+    setToolActionStatus("Checking");
+    try {
+      await onCheckToolUpdates("all");
+      setToolActionStatus("Checked");
+    } catch (err) {
+      setToolActionError(err instanceof Error ? err.message : "Check failed");
+      setToolActionStatus(null);
+    }
+  }
+
+  async function runAllToolUpdates() {
+    setToolActionError(null);
+    setToolActionStatus("Updating");
+    try {
+      await onRunToolUpdate("all");
+      setToolActionStatus("Update started");
+    } catch (err) {
+      setToolActionError(err instanceof Error ? err.message : "Update failed");
+      setToolActionStatus(null);
     }
   }
 
@@ -836,6 +905,10 @@ export function Shell({
           selectedAgent={selectedAgent}
           onUpdateAgent={onUpdateAgent}
           onDeleteAgent={onDeleteAgent}
+          toolUpdates={toolUpdates}
+          toolUpdatesLoading={toolUpdatesLoading}
+          onCheckToolUpdates={onCheckToolUpdates}
+          onRunToolUpdate={onRunToolUpdate}
           onLoadWorkspaceTree={onLoadWorkspaceTree}
           onSearchWorkspace={onSearchWorkspace}
           onReadWorkspaceFile={onReadWorkspaceFile}
@@ -927,6 +1000,10 @@ export function Shell({
           selectedAgent={selectedAgent}
           onUpdateAgent={onUpdateAgent}
           onDeleteAgent={onDeleteAgent}
+          toolUpdates={toolUpdates}
+          toolUpdatesLoading={toolUpdatesLoading}
+          onCheckToolUpdates={onCheckToolUpdates}
+          onRunToolUpdate={onRunToolUpdate}
           onLoadWorkspaceTree={onLoadWorkspaceTree}
           onSearchWorkspace={onSearchWorkspace}
           onReadWorkspaceFile={onReadWorkspaceFile}
@@ -954,6 +1031,24 @@ export function Shell({
         serverSettings={serverSettings}
         serverSettingsLoading={serverSettingsLoading}
         serverSettingsError={serverSettingsError}
+        toolUpdates={toolUpdates}
+        toolUpdatesLoading={toolUpdatesLoading}
+        toolAutoEnabled={toolAutoEnabled}
+        setToolAutoEnabled={setToolAutoEnabled}
+        toolTimeOfDay={toolTimeOfDay}
+        setToolTimeOfDay={setToolTimeOfDay}
+        toolTimezone={toolTimezone}
+        setToolTimezone={setToolTimezone}
+        toolClaudeEnabled={toolClaudeEnabled}
+        setToolClaudeEnabled={setToolClaudeEnabled}
+        toolCodexEnabled={toolCodexEnabled}
+        setToolCodexEnabled={setToolCodexEnabled}
+        toolSettingsPending={toolSettingsPending}
+        toolActionStatus={toolActionStatus}
+        toolActionError={toolActionError}
+        saveToolUpdateSettings={saveToolUpdateSettings}
+        checkAllToolUpdates={checkAllToolUpdates}
+        runAllToolUpdates={runAllToolUpdates}
         preferences={preferences}
         preferencesLoading={preferencesLoading}
         onLogout={onLogout}

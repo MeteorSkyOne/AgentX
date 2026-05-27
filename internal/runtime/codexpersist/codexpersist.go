@@ -66,6 +66,10 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 	return r.pool.Shutdown(ctx)
 }
 
+func (r *Runtime) ResetProcesses(ctx context.Context) error {
+	return r.pool.KillAll(ctx)
+}
+
 func (r *Runtime) processStartFunc(req runtime.StartSessionRequest) procpool.StartFunc {
 	return func(ctx context.Context) *exec.Cmd {
 		args := []string{"app-server", "--listen", "stdio://"}

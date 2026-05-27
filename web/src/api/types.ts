@@ -121,6 +121,35 @@ export interface ServerSettingsUpdatePayload {
   };
 }
 
+export interface ToolUpdateSettings {
+  auto_enabled: boolean;
+  time_of_day: string;
+  timezone: string;
+  claude_enabled: boolean;
+  codex_enabled: boolean;
+}
+
+export interface ToolUpdateStatus {
+  tool: "claude" | "codex";
+  display_name: string;
+  command: string;
+  current_version?: string;
+  latest_version?: string;
+  update_available?: boolean | null;
+  state: string;
+  message?: string;
+  last_checked_at?: string | null;
+  last_updated_at?: string | null;
+  last_error?: string;
+  active_run_count: number;
+  runtime_reset_pending: boolean;
+}
+
+export interface ToolUpdateOverview {
+  settings: ToolUpdateSettings;
+  tools: ToolUpdateStatus[];
+}
+
 export interface UserPreferences {
   show_ttft: boolean;
   show_tps: boolean;

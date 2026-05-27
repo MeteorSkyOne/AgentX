@@ -280,7 +280,7 @@ describe("Shell main views", () => {
     expect(screen.queryByTestId("tasks-panel")).toBeNull();
   });
 
-  it("offers persistent runtimes when creating an agent", () => {
+  it("offers persistent mode when creating provider agents", () => {
     render(<Shell {...shellProps()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
@@ -288,8 +288,9 @@ describe("Shell main views", () => {
     const runtimeSelect = screen.getByRole("combobox", { name: "New agent runtime" });
     const optionValues = Array.from(runtimeSelect.querySelectorAll("option")).map((option) => option.value);
 
-    expect(optionValues).toContain("claude-persistent");
-    expect(optionValues).toContain("codex-persistent");
+    expect(optionValues).toEqual(expect.arrayContaining(["fake", "claude", "codex"]));
+    fireEvent.change(runtimeSelect, { target: { value: "claude" } });
+    expect(screen.getByRole("checkbox", { name: "New agent persistent process" })).toBeTruthy();
   });
 });
 
@@ -376,6 +377,7 @@ function shellProps(): ShellProps {
     notificationSettingsLoading: false,
     serverSettingsLoading: false,
     serverSettingsError: null,
+    toolUpdatesLoading: false,
     preferences: { show_ttft: true, show_tps: true, hide_avatars: false },
     preferencesLoading: false,
     theme: "dark",
@@ -397,6 +399,9 @@ function shellProps(): ShellProps {
     onDeleteAgent: vi.fn(),
     onUpdateNotificationSettings: vi.fn(),
     onUpdateServerSettings: vi.fn(),
+    onUpdateToolUpdateSettings: vi.fn(),
+    onCheckToolUpdates: vi.fn(),
+    onRunToolUpdate: vi.fn(),
     onUpdateUserPreferences: vi.fn(),
     onTestNotificationSettings: vi.fn(),
     onLoadWorkspaceTree: vi.fn(),

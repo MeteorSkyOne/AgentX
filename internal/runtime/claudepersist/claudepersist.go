@@ -71,6 +71,10 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 	return r.pool.Shutdown(ctx)
 }
 
+func (r *Runtime) ResetProcesses(ctx context.Context) error {
+	return r.pool.KillAll(ctx)
+}
+
 func (r *Runtime) basePermissionMode(req runtime.StartSessionRequest) string {
 	if req.YoloMode {
 		return "bypassPermissions"

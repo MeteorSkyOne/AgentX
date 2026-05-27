@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -29,6 +31,7 @@ type Config struct {
 	SQLitePath                  string
 	AdminToken                  string
 	Server                      ServerSettings
+	ToolUpdates                 ToolUpdateSettings
 	DefaultAgentKind            string
 	DefaultAgentModel           string
 	CodexCommand                string
@@ -66,9 +69,20 @@ type ServerTLSSettings struct {
 	KeyFile    string `json:"key_file" toml:"key_file"`
 }
 
-type fileConfig struct {
-	Server ServerSettings `toml:"server"`
+type ToolUpdateSettings struct {
+	AutoEnabled   bool   `json:"auto_enabled" toml:"auto_enabled"`
+	TimeOfDay     string `json:"time_of_day" toml:"time_of_day"`
+	Timezone      string `json:"timezone" toml:"timezone"`
+	ClaudeEnabled bool   `json:"claude_enabled" toml:"claude_enabled"`
+	CodexEnabled  bool   `json:"codex_enabled" toml:"codex_enabled"`
 }
+
+type fileConfig struct {
+	Server      ServerSettings     `toml:"server"`
+	ToolUpdates ToolUpdateSettings `toml:"tool_updates"`
+}
+
+var configFileMu sync.Mutex
 
 func Load() (Config, error) {
 	cfg := FromEnv()
@@ -77,6 +91,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.Server = settings
+	toolUpdates, err := LoadToolUpdateSettings(cfg.DataDir)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.ToolUpdates = toolUpdates
 	addrOverride := strings.TrimSpace(os.Getenv("AGENTX_ADDR"))
 	cfg.AddrOverrideActive = addrOverride != ""
 	cfg.AddrOverrideValue = addrOverride
@@ -97,6 +116,7 @@ func FromEnv() Config {
 		SQLitePath:                  getenv("AGENTX_SQLITE_PATH", filepath.Join(dataDir, "agentx.db")),
 		AdminToken:                  getenv("AGENTX_ADMIN_TOKEN", randomToken()),
 		Server:                      DefaultServerSettings(),
+		ToolUpdates:                 DefaultToolUpdateSettings(),
 		DefaultAgentKind:            getenv("AGENTX_DEFAULT_AGENT_KIND", "fake"),
 		DefaultAgentModel:           getenv("AGENTX_DEFAULT_AGENT_MODEL", ""),
 		CodexCommand:                getenv("AGENTX_CODEX_COMMAND", "codex"),
@@ -124,7 +144,9 @@ func FromEnv() Config {
 
 func LoadServerSettings(dataDir string) (ServerSettings, error) {
 	configPath := ConfigPath(dataDir)
-	fileCfg, err := loadOrCreateFileConfig(configPath)
+	configFileMu.Lock()
+	defer configFileMu.Unlock()
+	fileCfg, err := loadOrCreateRawFileConfig(configPath)
 	if err != nil {
 		return ServerSettings{}, err
 	}
@@ -137,11 +159,57 @@ func SaveServerSettings(dataDir string, settings ServerSettings) (ServerSettings
 	if err != nil {
 		return ServerSettings{}, err
 	}
+	configFileMu.Lock()
+	defer configFileMu.Unlock()
+	fileCfg, err := loadOrCreateRawFileConfig(configPath)
+	if err != nil {
+		return ServerSettings{}, err
+	}
+	if isZeroToolUpdateSettings(fileCfg.ToolUpdates) {
+		fileCfg.ToolUpdates = DefaultToolUpdateSettings()
+	}
+	fileCfg.Server = normalized
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		return ServerSettings{}, fmt.Errorf("create config dir: %w", err)
 	}
-	if err := os.WriteFile(configPath, []byte(configFile(normalized)), 0o644); err != nil {
+	if err := os.WriteFile(configPath, []byte(configFile(fileCfg)), 0o644); err != nil {
 		return ServerSettings{}, fmt.Errorf("write config file %s: %w", configPath, err)
+	}
+	return normalized, nil
+}
+
+func LoadToolUpdateSettings(dataDir string) (ToolUpdateSettings, error) {
+	configPath := ConfigPath(dataDir)
+	configFileMu.Lock()
+	defer configFileMu.Unlock()
+	fileCfg, err := loadOrCreateRawFileConfig(configPath)
+	if err != nil {
+		return ToolUpdateSettings{}, err
+	}
+	return NormalizeToolUpdateSettings(fileCfg.ToolUpdates, configPath)
+}
+
+func SaveToolUpdateSettings(dataDir string, settings ToolUpdateSettings) (ToolUpdateSettings, error) {
+	configPath := ConfigPath(dataDir)
+	normalized, err := NormalizeToolUpdateSettings(settings, configPath)
+	if err != nil {
+		return ToolUpdateSettings{}, err
+	}
+	configFileMu.Lock()
+	defer configFileMu.Unlock()
+	fileCfg, err := loadOrCreateRawFileConfig(configPath)
+	if err != nil {
+		return ToolUpdateSettings{}, err
+	}
+	if isZeroServerSettings(fileCfg.Server) {
+		fileCfg.Server = DefaultServerSettings()
+	}
+	fileCfg.ToolUpdates = normalized
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		return ToolUpdateSettings{}, fmt.Errorf("create config dir: %w", err)
+	}
+	if err := os.WriteFile(configPath, []byte(configFile(fileCfg)), 0o644); err != nil {
+		return ToolUpdateSettings{}, fmt.Errorf("write config file %s: %w", configPath, err)
 	}
 	return normalized, nil
 }
@@ -161,6 +229,43 @@ func DefaultServerSettings() ServerSettings {
 			KeyFile:    "",
 		},
 	}
+}
+
+func DefaultToolUpdateSettings() ToolUpdateSettings {
+	return ToolUpdateSettings{
+		AutoEnabled:   false,
+		TimeOfDay:     "04:00",
+		Timezone:      defaultToolUpdateTimezone(),
+		ClaudeEnabled: true,
+		CodexEnabled:  true,
+	}
+}
+
+func isZeroServerSettings(settings ServerSettings) bool {
+	return settings.ListenIP == "" &&
+		settings.ListenPort == 0 &&
+		!settings.TLS.Enabled &&
+		settings.TLS.ListenPort == 0 &&
+		settings.TLS.CertFile == "" &&
+		settings.TLS.KeyFile == ""
+}
+
+func isZeroToolUpdateSettings(settings ToolUpdateSettings) bool {
+	return strings.TrimSpace(settings.TimeOfDay) == "" &&
+		strings.TrimSpace(settings.Timezone) == "" &&
+		!settings.AutoEnabled &&
+		!settings.ClaudeEnabled &&
+		!settings.CodexEnabled
+}
+
+func defaultToolUpdateTimezone() string {
+	timezone := strings.TrimSpace(os.Getenv("TZ"))
+	if timezone != "" && timezone != "Local" {
+		if _, err := time.LoadLocation(timezone); err == nil {
+			return timezone
+		}
+	}
+	return "UTC"
 }
 
 func NormalizeServerSettings(settings ServerSettings, path string) (ServerSettings, error) {
@@ -197,6 +302,39 @@ func NormalizeServerSettings(settings ServerSettings, path string) (ServerSettin
 	return settings, nil
 }
 
+func NormalizeToolUpdateSettings(settings ToolUpdateSettings, path string) (ToolUpdateSettings, error) {
+	if strings.TrimSpace(settings.TimeOfDay) == "" && strings.TrimSpace(settings.Timezone) == "" && !settings.AutoEnabled && !settings.ClaudeEnabled && !settings.CodexEnabled {
+		return DefaultToolUpdateSettings(), nil
+	}
+	if strings.TrimSpace(settings.TimeOfDay) == "" {
+		settings.TimeOfDay = "04:00"
+	}
+	settings.TimeOfDay = strings.TrimSpace(settings.TimeOfDay)
+	parts := strings.Split(settings.TimeOfDay, ":")
+	if len(parts) != 2 || len(parts[0]) != 2 || len(parts[1]) != 2 {
+		return ToolUpdateSettings{}, fmt.Errorf("config file %s: tool_updates.time_of_day must use HH:MM", path)
+	}
+	hour, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return ToolUpdateSettings{}, fmt.Errorf("config file %s: tool_updates.time_of_day must use HH:MM", path)
+	}
+	minute, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return ToolUpdateSettings{}, fmt.Errorf("config file %s: tool_updates.time_of_day must use HH:MM", path)
+	}
+	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return ToolUpdateSettings{}, fmt.Errorf("config file %s: tool_updates.time_of_day must use HH:MM", path)
+	}
+	settings.Timezone = strings.TrimSpace(settings.Timezone)
+	if settings.Timezone == "" || settings.Timezone == "Local" {
+		settings.Timezone = defaultToolUpdateTimezone()
+	}
+	if _, err := time.LoadLocation(settings.Timezone); err != nil {
+		return ToolUpdateSettings{}, fmt.Errorf("config file %s: tool_updates.timezone is invalid: %w", path, err)
+	}
+	return settings, nil
+}
+
 func ServerAddr(settings ServerSettings) string {
 	return net.JoinHostPort(settings.ListenIP, strconv.Itoa(settings.ListenPort))
 }
@@ -214,7 +352,7 @@ func ServerSettingsEqual(a ServerSettings, b ServerSettings) bool {
 		a.TLS.KeyFile == b.TLS.KeyFile
 }
 
-func loadOrCreateFileConfig(path string) (fileConfig, error) {
+func loadOrCreateRawFileConfig(path string) (fileConfig, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fileConfig{}, fmt.Errorf("create config dir: %w", err)
 	}
@@ -238,11 +376,30 @@ func loadOrCreateFileConfig(path string) (fileConfig, error) {
 	return cfg, nil
 }
 
-func defaultConfigFile() string {
-	return configFile(DefaultServerSettings())
+func loadOrCreateFileConfig(path string) (fileConfig, error) {
+	cfg, err := loadOrCreateRawFileConfig(path)
+	if err != nil {
+		return fileConfig{}, err
+	}
+	var normErr error
+	cfg.Server, normErr = NormalizeServerSettings(cfg.Server, path)
+	if normErr != nil {
+		return fileConfig{}, normErr
+	}
+	cfg.ToolUpdates, normErr = NormalizeToolUpdateSettings(cfg.ToolUpdates, path)
+	if normErr != nil {
+		return fileConfig{}, normErr
+	}
+	return cfg, nil
 }
 
-func configFile(settings ServerSettings) string {
+func defaultConfigFile() string {
+	return configFile(fileConfig{Server: DefaultServerSettings(), ToolUpdates: DefaultToolUpdateSettings()})
+}
+
+func configFile(cfg fileConfig) string {
+	settings := cfg.Server
+	toolUpdates := cfg.ToolUpdates
 	return fmt.Sprintf(`# AgentX configuration.
 # AGENTX_ADDR overrides server.listen_ip and server.listen_port when set.
 # HTTPS changes require restarting AgentX.
@@ -256,7 +413,14 @@ enabled = %t
 listen_port = %d
 cert_file = %q
 key_file = %q
-`, settings.ListenIP, settings.ListenPort, settings.TLS.Enabled, settings.TLS.ListenPort, settings.TLS.CertFile, settings.TLS.KeyFile)
+
+[tool_updates]
+auto_enabled = %t
+time_of_day = %q
+timezone = %q
+claude_enabled = %t
+codex_enabled = %t
+`, settings.ListenIP, settings.ListenPort, settings.TLS.Enabled, settings.TLS.ListenPort, settings.TLS.CertFile, settings.TLS.KeyFile, toolUpdates.AutoEnabled, toolUpdates.TimeOfDay, toolUpdates.Timezone, toolUpdates.ClaudeEnabled, toolUpdates.CodexEnabled)
 }
 
 func defaultDataDir() string {

@@ -308,3 +308,154 @@ func TestSaveServerSettingsWritesTLSConfig(t *testing.T) {
 		t.Fatalf("loaded settings = %#v, want %#v", loaded, settings)
 	}
 }
+
+func TestToolUpdateSettingsDefaultsAndSavePreservesServer(t *testing.T) {
+	dir := t.TempDir()
+	toolSettings, err := LoadToolUpdateSettings(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if toolSettings.TimeOfDay != "04:00" || toolSettings.Timezone != defaultToolUpdateTimezone() || !toolSettings.ClaudeEnabled || !toolSettings.CodexEnabled {
+		t.Fatalf("tool update defaults = %#v", toolSettings)
+	}
+
+	if _, err := SaveServerSettings(dir, ServerSettings{ListenIP: "0.0.0.0", ListenPort: 9090}); err != nil {
+		t.Fatal(err)
+	}
+	savedUpdates, err := SaveToolUpdateSettings(dir, ToolUpdateSettings{
+		AutoEnabled:   true,
+		TimeOfDay:     "03:30",
+		Timezone:      "UTC",
+		ClaudeEnabled: true,
+		CodexEnabled:  false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !savedUpdates.AutoEnabled || savedUpdates.TimeOfDay != "03:30" || savedUpdates.CodexEnabled {
+		t.Fatalf("saved tool update settings = %#v", savedUpdates)
+	}
+	server, err := LoadServerSettings(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server.ListenIP != "0.0.0.0" || server.ListenPort != 9090 {
+		t.Fatalf("server settings = %#v, want preserved", server)
+	}
+}
+
+func TestSaveServerSettingsPreservesInvalidToolUpdateSection(t *testing.T) {
+	dir := t.TempDir()
+	configPath := ConfigPath(dir)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(`[server]
+listen_ip = "127.0.0.1"
+listen_port = 8080
+
+[server.tls]
+enabled = false
+listen_port = 8443
+cert_file = ""
+key_file = ""
+
+[tool_updates]
+auto_enabled = true
+time_of_day = "04:00"
+timezone = "Mars/Olympus"
+claude_enabled = true
+codex_enabled = true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := SaveServerSettings(dir, ServerSettings{ListenIP: "0.0.0.0", ListenPort: 9090}); err != nil {
+		t.Fatalf("SaveServerSettings error = %v, want unrelated tool_updates ignored", err)
+	}
+	body, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `timezone = "Mars/Olympus"`) {
+		t.Fatalf("config file did not preserve invalid tool update timezone:\n%s", body)
+	}
+}
+
+func TestSaveToolUpdateSettingsPreservesInvalidServerSection(t *testing.T) {
+	dir := t.TempDir()
+	configPath := ConfigPath(dir)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(`[server]
+listen_ip = "127.0.0.1"
+listen_port = 99999
+
+[server.tls]
+enabled = false
+listen_port = 8443
+cert_file = ""
+key_file = ""
+
+[tool_updates]
+auto_enabled = false
+time_of_day = "04:00"
+timezone = "UTC"
+claude_enabled = true
+codex_enabled = true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := SaveToolUpdateSettings(dir, ToolUpdateSettings{
+		AutoEnabled:   true,
+		TimeOfDay:     "03:30",
+		Timezone:      "UTC",
+		ClaudeEnabled: true,
+		CodexEnabled:  true,
+	}); err != nil {
+		t.Fatalf("SaveToolUpdateSettings error = %v, want unrelated server ignored", err)
+	}
+	body, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "listen_port = 99999") {
+		t.Fatalf("config file did not preserve invalid server port:\n%s", body)
+	}
+}
+
+func TestNormalizeToolUpdateSettingsRejectsInvalidTime(t *testing.T) {
+	_, err := NormalizeToolUpdateSettings(ToolUpdateSettings{
+		TimeOfDay:     "24:00",
+		Timezone:      "UTC",
+		ClaudeEnabled: true,
+		CodexEnabled:  true,
+	}, "config.toml")
+	if err == nil {
+		t.Fatal("NormalizeToolUpdateSettings error = nil, want invalid time")
+	}
+	if !strings.Contains(err.Error(), "tool_updates.time_of_day") {
+		t.Fatalf("error = %q, want time_of_day", err)
+	}
+}
+
+func TestNormalizeToolUpdateSettingsDoesNotPersistLocalTimezone(t *testing.T) {
+	t.Setenv("TZ", "Local")
+	settings, err := NormalizeToolUpdateSettings(ToolUpdateSettings{
+		TimeOfDay:     "04:00",
+		Timezone:      "Local",
+		ClaudeEnabled: true,
+		CodexEnabled:  true,
+	}, "config.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.Timezone == "Local" {
+		t.Fatalf("timezone = Local, want explicit timezone")
+	}
+	if settings.Timezone != "UTC" {
+		t.Fatalf("timezone = %q, want UTC fallback", settings.Timezone)
+	}
+}

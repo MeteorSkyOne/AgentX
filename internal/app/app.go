@@ -21,6 +21,7 @@ type Options struct {
 	AdminToken            string
 	DataDir               string
 	ServerSettings        config.ServerSettings
+	ToolUpdateSettings    config.ToolUpdateSettings
 	ServerAddr            string
 	AddrOverride          bool
 	AddrOverrideValue     string
@@ -29,6 +30,7 @@ type Options struct {
 	DefaultAgentModel     string
 	Runtimes              map[string]agentruntime.Runtime
 	ProviderLimits        ProviderLimitOptions
+	ToolUpdates           ToolUpdateOptions
 	WebhookHTTPClient     *http.Client
 	WebhookTimeout        time.Duration
 	D2Command             string
@@ -68,6 +70,7 @@ type activeAgentRun struct {
 	mu               sync.Mutex
 	runID            string
 	agentID          string
+	provider         string
 	organizationID   string
 	conversationType domain.ConversationType
 	conversationID   string
@@ -82,6 +85,7 @@ type activeAgentRun struct {
 	cancelRequested  bool
 	cancel           context.CancelCauseFunc
 	session          agentruntime.Session
+	sessionClosing   bool
 }
 
 type cancelAgentRunResult struct {
@@ -99,12 +103,14 @@ type App struct {
 	bus            *eventbus.Bus
 	opts           Options
 	providerLimits *providerLimitService
+	toolUpdates    *toolUpdateService
 	d2Renderer     *d2Renderer
 	scheduledTasks *scheduledTaskScheduler
 	terminals      *terminalManager
 
 	pendingQuestionsMu sync.Mutex
 	pendingQuestions   map[pendingQuestionKey]*pendingQuestion
+	runtimeResetMu     sync.Mutex
 	activeRunsMu       sync.Mutex
 	activeRuns         map[activeRunKey]map[string]*activeAgentRun
 	messageQueueMu     sync.Mutex
@@ -131,6 +137,13 @@ func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
 		bus:            bus,
 		opts:           opts,
 		providerLimits: newProviderLimitService(opts.ProviderLimits),
+		toolUpdates: newToolUpdateService(st, opts.DataDir, opts.Runtimes, ToolUpdateOptions{
+			Settings:      opts.ToolUpdateSettings,
+			ClaudeCommand: opts.ToolUpdates.ClaudeCommand,
+			CodexCommand:  opts.ToolUpdates.CodexCommand,
+			Exec:          opts.ToolUpdates.Exec,
+			Now:           opts.ToolUpdates.Now,
+		}),
 		d2Renderer: newD2Renderer(D2RenderOptions{
 			Command:         opts.D2Command,
 			Timeout:         opts.D2Timeout,
@@ -198,6 +211,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 	a.backgroundMu.Unlock()
 
 	a.StopScheduledTasks()
+	a.StopToolUpdates()
 	a.StopTerminalManager()
 	a.cancelAllActiveAgentRuns(ctx, errAppShuttingDown)
 	a.clearAllQueuedAgentPrompts("failed")
@@ -257,6 +271,8 @@ func (a *App) RespondToInputRequest(_ context.Context, conversationType domain.C
 }
 
 func (a *App) registerActiveAgentRun(key activeRunKey, run *activeAgentRun) {
+	a.runtimeResetMu.Lock()
+	defer a.runtimeResetMu.Unlock()
 	a.activeRunsMu.Lock()
 	defer a.activeRunsMu.Unlock()
 	runs := a.activeRuns[key]
@@ -273,6 +289,7 @@ func (a *App) setActiveAgentRunSession(ctx context.Context, key activeRunKey, ru
 	if run := a.activeRuns[key][runID]; run != nil {
 		run.mu.Lock()
 		run.session = session
+		run.sessionClosing = false
 		if run.cancelRequested {
 			if _, ok := session.(agentruntime.Interrupter); ok {
 				interrupt = session
@@ -315,23 +332,27 @@ func (a *App) stopActiveAgentRuns(ctx context.Context, key activeRunKey) int {
 		delete(runs, runID)
 	}
 	delete(a.activeRuns, key)
+	stoppingSessions := make([]agentruntime.Session, 0, len(stopping))
 	for _, run := range stopping {
 		run.cancel(errAgentRunStopped)
-		if run.session == nil {
+		run.mu.Lock()
+		session := run.session
+		if session == nil || run.sessionClosing {
+			run.mu.Unlock()
 			continue
 		}
-		if initiator, ok := run.session.(agentruntime.StopInitiator); ok {
+		run.sessionClosing = true
+		if initiator, ok := session.(agentruntime.StopInitiator); ok {
 			initiator.InitiateStop()
 		}
+		stoppingSessions = append(stoppingSessions, session)
+		run.mu.Unlock()
 	}
 	a.activeRunsMu.Unlock()
 
 	a.removePendingQuestions(key.conversationType, key.conversationID)
-	for _, run := range stopping {
-		if run.session == nil {
-			continue
-		}
-		session := run.session
+	for _, session := range stoppingSessions {
+		session := session
 		stopCtx := context.WithoutCancel(ctx)
 		a.startBackground("agent-run-stop", func(context.Context) {
 			stopAgentRunSession(stopCtx, session)
@@ -403,9 +424,11 @@ func (a *App) cancelAllActiveAgentRuns(ctx context.Context, cause error) {
 			}
 			run.cancelRequested = true
 			run.pendingQuestion = nil
-			if run.session != nil {
-				stopping = append(stopping, run.session)
-				if initiator, ok := run.session.(agentruntime.StopInitiator); ok {
+			session := run.session
+			if session != nil && !run.sessionClosing {
+				run.sessionClosing = true
+				stopping = append(stopping, session)
+				if initiator, ok := session.(agentruntime.StopInitiator); ok {
 					initiator.InitiateStop()
 				}
 			}
@@ -421,6 +444,22 @@ func (a *App) cancelAllActiveAgentRuns(ctx context.Context, cause error) {
 	a.pendingQuestionsMu.Unlock()
 
 	stopAgentRunSessions(ctx, stopping)
+}
+
+func (r *activeAgentRun) closeSession(ctx context.Context, session agentruntime.Session) {
+	if session == nil {
+		return
+	}
+	r.mu.Lock()
+	if r.session == session {
+		if r.sessionClosing {
+			r.mu.Unlock()
+			return
+		}
+		r.sessionClosing = true
+	}
+	r.mu.Unlock()
+	_ = session.Close(ctx)
 }
 
 func stopAgentRunSessions(ctx context.Context, sessions []agentruntime.Session) {

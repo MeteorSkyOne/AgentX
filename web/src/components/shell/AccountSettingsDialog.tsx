@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
-import { LogOut, Save, Send, Server as ServerIcon, Upload } from "lucide-react";
-import type { NotificationSettings, Organization, Project, ServerSettings, User, UserPreferences } from "@/api/types";
+import { Download, LogOut, RefreshCw, Save, Send, Server as ServerIcon, Upload } from "lucide-react";
+import type { NotificationSettings, Organization, Project, ServerSettings, ToolUpdateOverview, User, UserPreferences } from "@/api/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -48,6 +48,24 @@ interface AccountSettingsDialogProps {
   serverSettings?: ServerSettings;
   serverSettingsLoading: boolean;
   serverSettingsError: string | null;
+  toolUpdates?: ToolUpdateOverview;
+  toolUpdatesLoading: boolean;
+  toolAutoEnabled: boolean;
+  setToolAutoEnabled: BooleanSetter;
+  toolTimeOfDay: string;
+  setToolTimeOfDay: StringSetter;
+  toolTimezone: string;
+  setToolTimezone: StringSetter;
+  toolClaudeEnabled: boolean;
+  setToolClaudeEnabled: BooleanSetter;
+  toolCodexEnabled: boolean;
+  setToolCodexEnabled: BooleanSetter;
+  toolSettingsPending: boolean;
+  toolActionStatus: string | null;
+  toolActionError: string | null;
+  saveToolUpdateSettings: () => void | Promise<void>;
+  checkAllToolUpdates: () => void | Promise<void>;
+  runAllToolUpdates: () => void | Promise<void>;
   serverListenIP: string;
   setServerListenIP: StringSetter;
   serverListenPort: string;
@@ -111,6 +129,24 @@ export function AccountSettingsDialog({
   serverSettings,
   serverSettingsLoading,
   serverSettingsError,
+  toolUpdates,
+  toolUpdatesLoading,
+  toolAutoEnabled,
+  setToolAutoEnabled,
+  toolTimeOfDay,
+  setToolTimeOfDay,
+  toolTimezone,
+  setToolTimezone,
+  toolClaudeEnabled,
+  setToolClaudeEnabled,
+  toolCodexEnabled,
+  setToolCodexEnabled,
+  toolSettingsPending,
+  toolActionStatus,
+  toolActionError,
+  saveToolUpdateSettings,
+  checkAllToolUpdates,
+  runAllToolUpdates,
   serverListenIP,
   setServerListenIP,
   serverListenPort,
@@ -471,6 +507,98 @@ export function AccountSettingsDialog({
                       </Button>
                     </div>
                   </div>
+                  <div className="grid gap-3 rounded-md border border-border p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-medium">Runtime updates</h3>
+                        <p className="text-xs text-muted-foreground">
+                          {toolUpdatesLoading ? "Loading versions" : runtimeUpdateSummary(toolUpdates)}
+                        </p>
+                      </div>
+                      <label className="flex items-center gap-2 text-sm">
+                        <Switch
+                          checked={toolAutoEnabled}
+                          disabled={toolUpdatesLoading || toolSettingsPending}
+                          aria-label="Enable automatic runtime updates"
+                          onCheckedChange={setToolAutoEnabled}
+                        />
+                        Auto
+                      </label>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-[8rem_1fr]">
+                      <div className="space-y-2">
+                        <Label htmlFor="tool-update-time">Daily time</Label>
+                        <Input
+                          id="tool-update-time"
+                          type="time"
+                          value={toolTimeOfDay}
+                          onChange={(event) => setToolTimeOfDay(event.target.value)}
+                          disabled={toolUpdatesLoading || toolSettingsPending}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="tool-update-timezone">Timezone</Label>
+                        <Input
+                          id="tool-update-timezone"
+                          value={toolTimezone}
+                          onChange={(event) => setToolTimezone(event.target.value)}
+                          disabled={toolUpdatesLoading || toolSettingsPending}
+                          placeholder="Local or Asia/Shanghai"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm">
+                        <Checkbox
+                          checked={toolClaudeEnabled}
+                          onChange={(event) => setToolClaudeEnabled(event.currentTarget.checked)}
+                          disabled={toolUpdatesLoading || toolSettingsPending}
+                          aria-label="Update Claude Code"
+                        />
+                        Claude Code
+                      </label>
+                      <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm">
+                        <Checkbox
+                          checked={toolCodexEnabled}
+                          onChange={(event) => setToolCodexEnabled(event.currentTarget.checked)}
+                          disabled={toolUpdatesLoading || toolSettingsPending}
+                          aria-label="Update Codex"
+                        />
+                        Codex
+                      </label>
+                    </div>
+                    {toolUpdates?.tools.map((tool) => (
+                      <div key={tool.tool} className="grid gap-1 rounded-md bg-muted px-3 py-2 text-xs">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="font-medium">{tool.display_name}</span>
+                          <span className="text-muted-foreground">{tool.state}</span>
+                        </div>
+                        <p className="truncate text-muted-foreground">
+                          {tool.current_version || "unknown"}{tool.latest_version ? ` -> ${tool.latest_version}` : ""}
+                          {tool.runtime_reset_pending ? " · restart pending" : ""}
+                        </p>
+                      </div>
+                    ))}
+                    {(toolActionError || toolActionStatus) && (
+                      <p className={cn("text-sm", toolActionError ? "text-destructive" : "text-muted-foreground")}>
+                        {toolActionError ?? toolActionStatus}
+                      </p>
+                    )}
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Button type="button" variant="outline" onClick={checkAllToolUpdates} disabled={toolUpdatesLoading || toolSettingsPending}>
+                        <RefreshCw className="h-4 w-4" />
+                        Check
+                      </Button>
+                      <Button type="button" variant="outline" onClick={runAllToolUpdates} disabled={toolUpdatesLoading || toolSettingsPending}>
+                        <Download className="h-4 w-4" />
+                        Update
+                      </Button>
+                      <Button type="button" onClick={saveToolUpdateSettings} disabled={toolUpdatesLoading || toolSettingsPending}>
+                        <Save className="h-4 w-4" />
+                        Save Updates
+                      </Button>
+                    </div>
+                  </div>
                 </div>
                 <DialogFooter>
                   <Button variant="outline" onClick={() => setAccountSettingsOpen(false)}>
@@ -486,4 +614,13 @@ export function AccountSettingsDialog({
 
 
   );
+}
+
+function runtimeUpdateSummary(overview?: ToolUpdateOverview): string {
+  if (!overview) return "Version status unavailable";
+  const updates = overview.tools.filter((tool) => tool.update_available).length;
+  if (updates > 0) return `${updates} update${updates === 1 ? "" : "s"} available`;
+  return overview.settings.auto_enabled
+    ? `Auto updates at ${overview.settings.time_of_day} ${overview.settings.timezone}`
+    : "Automatic updates disabled";
 }

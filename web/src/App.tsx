@@ -4,6 +4,7 @@ import {
   agents,
   channelAgents,
   channelThreads,
+  checkToolUpdates,
   clearToken,
   conversationContext,
   createAgent,
@@ -24,6 +25,7 @@ import {
   projects,
   serverSettings,
   setChannelAgents,
+  toolUpdates,
   testNotificationSettings,
   updateAgent,
   updateChannel,
@@ -31,10 +33,12 @@ import {
   updateNotificationSettings,
   updateProject,
   updateServerSettings,
+  updateToolUpdateSettings,
   updateThread,
   updateUserPreferences,
   userPreferences,
   workspace,
+  runToolUpdate,
   respondToInputRequest,
   steerQueuedPrompt,
   deleteQueuedPrompt
@@ -50,6 +54,9 @@ import type {
   ServerSettings,
   ServerSettingsUpdatePayload,
   Thread,
+  ToolUpdateOverview,
+  ToolUpdateSettings,
+  ToolUpdateStatus,
   UserPreferences,
 } from "./api/types";
 import { LoginView } from "./components/LoginView";
@@ -94,6 +101,12 @@ import {
 } from "./app/workspaceActions";
 import { LoadingSessionView } from "./app/LoadingSessionView";
 
+function toolUpdatesRefetchInterval(query: { state: { data?: ToolUpdateOverview } }): number {
+  const hasActiveToolAction = query.state.data?.tools.some(
+    (tool) => tool.state === "checking" || tool.state === "updating" || tool.runtime_reset_pending
+  );
+  return hasActiveToolAction ? 5_000 : 60_000;
+}
 
 export default function App() {
   const queryClient = useQueryClient();
@@ -210,6 +223,15 @@ export default function App() {
     queryFn: () => serverSettings(selectedOrganizationID as string),
     enabled: hasSession && Boolean(selectedOrganizationID),
     retry: false
+  });
+
+  const toolUpdatesQuery = useQuery({
+    queryKey: ["tool-updates", selectedOrganizationID],
+    queryFn: () => toolUpdates(selectedOrganizationID as string),
+    enabled: hasSession && Boolean(selectedOrganizationID),
+    retry: false,
+    refetchInterval: toolUpdatesRefetchInterval,
+    refetchIntervalInBackground: false
   });
 
   const userPreferencesQuery = useQuery({
@@ -899,6 +921,24 @@ export default function App() {
     return updated;
   }
 
+  async function handleUpdateToolUpdateSettings(payload: ToolUpdateSettings): Promise<ToolUpdateOverview> {
+    const updated = await updateToolUpdateSettings(selectedOrganizationID as string, payload);
+    await queryClient.invalidateQueries({ queryKey: ["tool-updates", selectedOrganizationID] });
+    return updated;
+  }
+
+  async function handleCheckToolUpdates(tool: ToolUpdateStatus["tool"] | "all"): Promise<ToolUpdateOverview> {
+    const updated = await checkToolUpdates(selectedOrganizationID as string, tool);
+    await queryClient.invalidateQueries({ queryKey: ["tool-updates", selectedOrganizationID] });
+    return updated;
+  }
+
+  async function handleRunToolUpdate(tool: ToolUpdateStatus["tool"] | "all"): Promise<ToolUpdateOverview> {
+    const updated = await runToolUpdate(selectedOrganizationID as string, tool);
+    await queryClient.invalidateQueries({ queryKey: ["tool-updates", selectedOrganizationID] });
+    return updated;
+  }
+
   async function handleUpdateUserPreferences(payload: UserPreferences): Promise<UserPreferences> {
     const updated = await updateUserPreferences(payload);
     await queryClient.invalidateQueries({ queryKey: ["user-preferences", sessionToken] });
@@ -953,6 +993,8 @@ export default function App() {
       serverSettings={serverSettingsQuery.data}
       serverSettingsLoading={serverSettingsQuery.isLoading}
       serverSettingsError={serverSettingsQuery.error instanceof Error ? serverSettingsQuery.error.message : null}
+      toolUpdates={toolUpdatesQuery.data}
+      toolUpdatesLoading={toolUpdatesQuery.isLoading}
       preferences={userPreferencesQuery.data ?? { show_ttft: true, show_tps: true, hide_avatars: false }}
       preferencesLoading={userPreferencesQuery.isLoading}
       theme={theme}
@@ -974,6 +1016,9 @@ export default function App() {
       onDeleteAgent={handleDeleteAgent}
       onUpdateNotificationSettings={handleUpdateNotificationSettings}
       onUpdateServerSettings={handleUpdateServerSettings}
+      onUpdateToolUpdateSettings={handleUpdateToolUpdateSettings}
+      onCheckToolUpdates={handleCheckToolUpdates}
+      onRunToolUpdate={handleRunToolUpdate}
       onUpdateUserPreferences={handleUpdateUserPreferences}
       onTestNotificationSettings={handleTestNotificationSettings}
       onLoadWorkspaceTree={handleLoadWorkspaceTree}

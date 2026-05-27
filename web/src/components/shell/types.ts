@@ -14,6 +14,9 @@ import type {
   ServerSettingsUpdatePayload,
   TeamMetadata,
   Thread,
+  ToolUpdateOverview,
+  ToolUpdateSettings,
+  ToolUpdateStatus,
   User,
   UserPreferences,
   Workspace,
@@ -99,6 +102,8 @@ export interface ShellProps {
   serverSettings?: ServerSettings;
   serverSettingsLoading: boolean;
   serverSettingsError: string | null;
+  toolUpdates?: ToolUpdateOverview;
+  toolUpdatesLoading: boolean;
   preferences: UserPreferences;
   preferencesLoading: boolean;
   theme: ThemeMode;
@@ -152,6 +157,9 @@ export interface ShellProps {
     webhook_secret?: string;
   }) => Promise<NotificationSettings>;
   onUpdateServerSettings: (payload: ServerSettingsUpdatePayload) => Promise<ServerSettings>;
+  onUpdateToolUpdateSettings: (payload: ToolUpdateSettings) => Promise<ToolUpdateOverview>;
+  onCheckToolUpdates: (tool: ToolUpdateStatus["tool"] | "all") => Promise<ToolUpdateOverview>;
+  onRunToolUpdate: (tool: ToolUpdateStatus["tool"] | "all") => Promise<ToolUpdateOverview>;
   onUpdateUserPreferences: (payload: UserPreferences) => Promise<UserPreferences>;
   onTestNotificationSettings: () => Promise<void>;
   onLoadWorkspaceTree: (workspaceID: string, path?: string) => Promise<WorkspaceTreeEntry>;

@@ -6,11 +6,25 @@ export const AGENT_EFFORT_OPTIONS = ["low", "medium", "high", "xhigh"] as const;
 
 export const AGENT_RUNTIME_OPTIONS = [
   { value: "fake", label: "Fake" },
+  { value: "claude", label: "Claude Code" },
   { value: "codex", label: "Codex" },
-  { value: "claude", label: "Claude" },
-  { value: "claude-persistent", label: "Claude (persistent)" },
-  { value: "codex-persistent", label: "Codex (persistent)" },
 ] as const;
+
+export function agentProviderFromKind(kind: string): "fake" | "claude" | "codex" {
+  if (kind === "claude" || kind === "claude-persistent") return "claude";
+  if (kind === "codex" || kind === "codex-persistent") return "codex";
+  return "fake";
+}
+
+export function agentPersistentFromKind(kind: string): boolean {
+  return kind === "claude-persistent" || kind === "codex-persistent";
+}
+
+export function agentKindFromProviderPersistent(provider: string, persistent: boolean): string {
+  if (provider === "claude") return persistent ? "claude-persistent" : "claude";
+  if (provider === "codex") return persistent ? "codex-persistent" : "codex";
+  return "fake";
+}
 
 export function runWorkspaceOptions(
   agent: Agent,

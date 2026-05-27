@@ -23,6 +23,8 @@ import type {
   ScheduledTaskRun,
   ServerSettings,
   ServerSettingsUpdatePayload,
+  ToolUpdateOverview,
+  ToolUpdateSettings,
   TerminalSessionSummary,
   Thread,
   User,
@@ -173,6 +175,51 @@ export function updateServerSettings(
     {
       method: "PUT",
       body: JSON.stringify(payload)
+    }
+  );
+}
+
+export function toolUpdates(orgID: string): Promise<ToolUpdateOverview> {
+  return request<ToolUpdateOverview>(
+    `/api/organizations/${encodeURIComponent(orgID)}/tool-updates`
+  );
+}
+
+export function updateToolUpdateSettings(
+  orgID: string,
+  payload: ToolUpdateSettings
+): Promise<ToolUpdateOverview> {
+  return request<ToolUpdateOverview>(
+    `/api/organizations/${encodeURIComponent(orgID)}/tool-updates/settings`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    }
+  );
+}
+
+export function checkToolUpdates(
+  orgID: string,
+  tool: "claude" | "codex" | "all"
+): Promise<ToolUpdateOverview> {
+  return request<ToolUpdateOverview>(
+    `/api/organizations/${encodeURIComponent(orgID)}/tool-updates/check`,
+    {
+      method: "POST",
+      body: JSON.stringify({ tool })
+    }
+  );
+}
+
+export function runToolUpdate(
+  orgID: string,
+  tool: "claude" | "codex" | "all"
+): Promise<ToolUpdateOverview> {
+  return request<ToolUpdateOverview>(
+    `/api/organizations/${encodeURIComponent(orgID)}/tool-updates/update`,
+    {
+      method: "POST",
+      body: JSON.stringify({ tool })
     }
   );
 }

@@ -1,8 +1,9 @@
-import type { Dispatch, SetStateAction } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { Bot, Trash2 } from "lucide-react";
-import type { Channel, NotificationSettings, Organization, Project, ServerSettings, User, UserPreferences, Workspace } from "@/api/types";
+import type { Channel, NotificationSettings, Organization, Project, ServerSettings, ToolUpdateOverview, User, UserPreferences, Workspace } from "@/api/types";
 import { cn } from "@/lib/utils";
 import { AVATAR_COLORS, agentKindColor } from "../AgentAvatar";
+import { agentKindFromProviderPersistent, agentPersistentFromKind, agentProviderFromKind } from "./utils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -28,6 +29,8 @@ export interface ShellDialogsProps {
   serverSettings?: ServerSettings;
   serverSettingsLoading: boolean;
   serverSettingsError: string | null;
+  toolUpdates?: ToolUpdateOverview;
+  toolUpdatesLoading: boolean;
   preferences: UserPreferences;
   preferencesLoading: boolean;
   onLogout: () => void;
@@ -89,6 +92,22 @@ export interface ShellDialogsProps {
   serverSettingsSaveDisabled: boolean;
   readServerPEMUpload: (file: File, update: (value: string) => void) => Promise<void>;
   saveServerSettings: () => void | Promise<void>;
+  toolAutoEnabled: boolean;
+  setToolAutoEnabled: BooleanSetter;
+  toolTimeOfDay: string;
+  setToolTimeOfDay: StringSetter;
+  toolTimezone: string;
+  setToolTimezone: StringSetter;
+  toolClaudeEnabled: boolean;
+  setToolClaudeEnabled: BooleanSetter;
+  toolCodexEnabled: boolean;
+  setToolCodexEnabled: BooleanSetter;
+  toolSettingsPending: boolean;
+  toolActionStatus: string | null;
+  toolActionError: string | null;
+  saveToolUpdateSettings: () => void | Promise<void>;
+  checkAllToolUpdates: () => void | Promise<void>;
+  runAllToolUpdates: () => void | Promise<void>;
 
   projectEditOpen: boolean;
   setProjectEditOpen: BooleanSetter;
@@ -167,6 +186,8 @@ export function ShellDialogs({
   serverSettings,
   serverSettingsLoading,
   serverSettingsError,
+  toolUpdates,
+  toolUpdatesLoading,
   preferences,
   preferencesLoading,
   onLogout,
@@ -226,6 +247,22 @@ export function ShellDialogs({
   serverSettingsSaveDisabled,
   readServerPEMUpload,
   saveServerSettings,
+  toolAutoEnabled,
+  setToolAutoEnabled,
+  toolTimeOfDay,
+  setToolTimeOfDay,
+  toolTimezone,
+  setToolTimezone,
+  toolClaudeEnabled,
+  setToolClaudeEnabled,
+  toolCodexEnabled,
+  setToolCodexEnabled,
+  toolSettingsPending,
+  toolActionStatus,
+  toolActionError,
+  saveToolUpdateSettings,
+  checkAllToolUpdates,
+  runAllToolUpdates,
   projectEditOpen,
   setProjectEditOpen,
   projectEditName,
@@ -288,6 +325,20 @@ export function ShellDialogs({
   creatingAgent,
   submitAgent,
 }: ShellDialogsProps) {
+  const [newAgentPersistentDraft, setNewAgentPersistentDraft] = useState(agentPersistentFromKind(newAgentKind));
+
+  useEffect(() => {
+    if (agentDraftOpen) {
+      setNewAgentPersistentDraft(agentPersistentFromKind(newAgentKind));
+    }
+  }, [agentDraftOpen]);
+
+  useEffect(() => {
+    if (agentProviderFromKind(newAgentKind) !== "fake") {
+      setNewAgentPersistentDraft(agentPersistentFromKind(newAgentKind));
+    }
+  }, [newAgentKind]);
+
   return (
     <>
             {/* Edit Post Modal */}
@@ -349,6 +400,24 @@ export function ShellDialogs({
               serverSettings={serverSettings}
               serverSettingsLoading={serverSettingsLoading}
               serverSettingsError={serverSettingsError}
+              toolUpdates={toolUpdates}
+              toolUpdatesLoading={toolUpdatesLoading}
+              toolAutoEnabled={toolAutoEnabled}
+              setToolAutoEnabled={setToolAutoEnabled}
+              toolTimeOfDay={toolTimeOfDay}
+              setToolTimeOfDay={setToolTimeOfDay}
+              toolTimezone={toolTimezone}
+              setToolTimezone={setToolTimezone}
+              toolClaudeEnabled={toolClaudeEnabled}
+              setToolClaudeEnabled={setToolClaudeEnabled}
+              toolCodexEnabled={toolCodexEnabled}
+              setToolCodexEnabled={setToolCodexEnabled}
+              toolSettingsPending={toolSettingsPending}
+              toolActionStatus={toolActionStatus}
+              toolActionError={toolActionError}
+              saveToolUpdateSettings={saveToolUpdateSettings}
+              checkAllToolUpdates={checkAllToolUpdates}
+              runAllToolUpdates={runAllToolUpdates}
               serverListenIP={serverListenIP}
               setServerListenIP={setServerListenIP}
               serverListenPort={serverListenPort}
@@ -720,8 +789,10 @@ export function ShellDialogs({
                       <Label htmlFor="new-agent-runtime">Runtime</Label>
                       <Select
                         id="new-agent-runtime"
-                        value={newAgentKind}
-                        onChange={(e) => setNewAgentKind(e.target.value)}
+                        value={agentProviderFromKind(newAgentKind)}
+                        onChange={(e) =>
+                          setNewAgentKind(agentKindFromProviderPersistent(e.target.value, newAgentPersistentDraft))
+                        }
                         aria-label="New agent runtime"
                       >
                         {AGENT_RUNTIME_OPTIONS.map((option) => (
@@ -759,6 +830,19 @@ export function ShellDialogs({
                       </datalist>
                     </div>
                   </div>
+                  {agentProviderFromKind(newAgentKind) !== "fake" && (
+                    <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
+                      <Checkbox
+                        checked={newAgentPersistentDraft}
+                        onChange={(e) => {
+                          setNewAgentPersistentDraft(e.target.checked);
+                          setNewAgentKind(agentKindFromProviderPersistent(agentProviderFromKind(newAgentKind), e.target.checked));
+                        }}
+                        aria-label="New agent persistent process"
+                      />
+                      Persistent process
+                    </label>
+                  )}
                   <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
                     <Checkbox
                       checked={newAgentFastMode}

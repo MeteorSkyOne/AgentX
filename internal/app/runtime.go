@@ -51,6 +51,7 @@ func (a *App) newReservedAgentRun(ctx context.Context, userMessage domain.Messag
 	activeRun := &activeAgentRun{
 		runID:            runID,
 		agentID:          target.Agent.ID,
+		provider:         agentProvider(target.Agent.Kind),
 		organizationID:   userMessage.OrganizationID,
 		conversationType: userMessage.ConversationType,
 		conversationID:   userMessage.ConversationID,
@@ -131,6 +132,7 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 	defer func() {
 		a.removeActiveAgentRun(activeKey, runID)
 		a.handleAgentRunTerminated(context.WithoutCancel(ctx), activeKey, terminalStatus)
+		a.handleToolUpdateAgentRunTerminated(context.WithoutCancel(ctx), activeRun.provider)
 	}()
 
 	var tracker *agentRunTracker
@@ -260,7 +262,7 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 
 		providerSessionID := session.CurrentSessionID()
 		if err := a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, providerSessionID, "running"); err != nil {
-			_ = session.Close(context.WithoutCancel(ctx))
+			activeRun.closeSession(context.WithoutCancel(ctx), session)
 			failRun(ctx, providerSessionID, err)
 			return
 		}
@@ -282,7 +284,7 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 		}); err != nil {
 			slog.Error("agent runtime send failed", append(runAttrs, "provider_session_id", session.CurrentSessionID(), "error", err)...)
 			failRun(ctx, session.CurrentSessionID(), err)
-			_ = session.Close(context.WithoutCancel(ctx))
+			activeRun.closeSession(context.WithoutCancel(ctx), session)
 			return
 		}
 
@@ -296,19 +298,19 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 			select {
 			case <-ctx.Done():
 				failRun(context.WithoutCancel(ctx), session.CurrentSessionID(), agentRunContextError(ctx))
-				_ = session.Close(context.WithoutCancel(ctx))
+				activeRun.closeSession(context.WithoutCancel(ctx), session)
 				return
 			case evt, ok := <-session.Events():
 				if !ok {
 					if ctx.Err() != nil {
 						failRun(context.WithoutCancel(ctx), session.CurrentSessionID(), agentRunContextError(ctx))
-						_ = session.Close(context.WithoutCancel(ctx))
+						activeRun.closeSession(context.WithoutCancel(ctx), session)
 						return
 					}
 					err := errors.New("agent runtime event stream closed")
 					a.publishAgentRunFailedWithContext(userMessage, runID, agent.ID, opts.Team, err)
 					sendResult(domain.Message{}, err)
-					_ = session.Close(context.WithoutCancel(ctx))
+					activeRun.closeSession(context.WithoutCancel(ctx), session)
 					return
 				}
 				if evt.Usage != nil {
@@ -360,7 +362,7 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 					}), usage, team)
 					if err != nil {
 						sendResult(domain.Message{}, err)
-						_ = session.Close(context.WithoutCancel(ctx))
+						activeRun.closeSession(context.WithoutCancel(ctx), session)
 						return
 					}
 					if opts.OnCompleted != nil {
@@ -368,13 +370,13 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 							terminalStatus = "failed"
 							a.publishAgentRunFailedWithContext(userMessage, runID, agent.ID, opts.Team, err)
 							sendResult(domain.Message{}, err)
-							_ = session.Close(context.WithoutCancel(ctx))
+							activeRun.closeSession(context.WithoutCancel(ctx), session)
 							return
 						}
 					}
 					terminalStatus = "completed"
 					sendResult(botMessage, nil)
-					_ = session.Close(context.WithoutCancel(ctx))
+					activeRun.closeSession(context.WithoutCancel(ctx), session)
 					return
 				case agentruntime.EventCanceled:
 					terminalStatus = "canceled"
@@ -391,7 +393,7 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 					a.persistAgentSessionContextUsage(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, usage)
 					a.publishAgentRunCanceledWithContext(userMessage, runID, agent.ID, opts.Team)
 					sendResult(domain.Message{}, errAgentRunCanceled)
-					_ = session.Close(context.WithoutCancel(ctx))
+					activeRun.closeSession(context.WithoutCancel(ctx), session)
 					return
 				case agentruntime.EventInputRequest:
 					if evt.InputRequest != nil {
@@ -426,7 +428,7 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 						slog.Warn("agent runtime stale provider session; retrying without resume", append(runAttrs, "provider_session_id", previousSessionID, "error", err)...)
 						if err := a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, "", "stale"); err != nil {
 							failRun(ctx, session.CurrentSessionID(), err)
-							_ = session.Close(context.WithoutCancel(ctx))
+							activeRun.closeSession(context.WithoutCancel(ctx), session)
 							return
 						}
 						previousSessionID = ""
@@ -445,12 +447,12 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 					a.persistAgentSessionContextUsage(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, usage)
 					a.publishAgentRunFailedWithContext(userMessage, runID, agent.ID, opts.Team, err)
 					sendResult(domain.Message{}, err)
-					_ = session.Close(context.WithoutCancel(ctx))
+					activeRun.closeSession(context.WithoutCancel(ctx), session)
 					return
 				}
 			}
 		}
-		_ = session.Close(context.WithoutCancel(ctx))
+		activeRun.closeSession(context.WithoutCancel(ctx), session)
 		if !retryWithoutPreviousSession {
 			return
 		}

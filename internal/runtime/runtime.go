@@ -204,3 +204,7 @@ type StopInitiator interface {
 type Shutdowner interface {
 	Shutdown(ctx context.Context) error
 }
+
+type ProcessResetter interface {
+	ResetProcesses(ctx context.Context) error
+}

@@ -110,6 +110,7 @@ func main() {
 		AdminToken:            cfg.AdminToken,
 		DataDir:               cfg.DataDir,
 		ServerSettings:        cfg.Server,
+		ToolUpdateSettings:    cfg.ToolUpdates,
 		ServerAddr:            cfg.Addr,
 		AddrOverride:          cfg.AddrOverrideActive,
 		AddrOverrideValue:     cfg.AddrOverrideValue,
@@ -130,10 +131,18 @@ func main() {
 			CodexCommand:  cfg.CodexCommand,
 			ClaudeCommand: cfg.ClaudeCommand,
 		},
+		ToolUpdates: app.ToolUpdateOptions{
+			CodexCommand:  cfg.CodexCommand,
+			ClaudeCommand: cfg.ClaudeCommand,
+		},
 		Runtimes: runtimes,
 	})
 	if err := a.StartScheduledTasks(ctx); err != nil {
 		slog.Error("start scheduled tasks", "error", err)
+		os.Exit(1)
+	}
+	if err := a.StartToolUpdates(ctx); err != nil {
+		slog.Error("start tool updates", "error", err)
 		os.Exit(1)
 	}
 	a.StartTerminalManager(ctx)

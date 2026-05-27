@@ -6,7 +6,9 @@ import {
   FolderOpen,
   Hash,
   Key,
+  Download,
   Plus,
+  RefreshCw,
   Save,
   Settings,
   Trash2,
@@ -31,7 +33,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import type { Agent, Channel, ConversationAgentContext, Workspace } from "../../api/types";
+import type { Agent, Channel, ConversationAgentContext, ToolUpdateOverview, Workspace } from "../../api/types";
 import type { ThemeMode } from "../../theme";
 import {
   AgentAvatar,
@@ -46,7 +48,10 @@ import type { ShellProps } from "./types";
 import {
   AGENT_EFFORT_OPTIONS,
   AGENT_RUNTIME_OPTIONS,
+  agentKindFromProviderPersistent,
   agentKindLabel,
+  agentPersistentFromKind,
+  agentProviderFromKind,
   agentToneColor,
   defaultAgentInstructionPath,
   isProviderLimitAgent,
@@ -60,6 +65,10 @@ export function AgentDetailsPanel({
   selectedAgent,
   onUpdateAgent,
   onDeleteAgent,
+  toolUpdates,
+  toolUpdatesLoading,
+  onCheckToolUpdates,
+  onRunToolUpdate,
   onLoadWorkspaceTree,
   onSearchWorkspace,
   onReadWorkspaceFile,
@@ -80,6 +89,10 @@ export function AgentDetailsPanel({
   selectedAgent?: Agent;
   onUpdateAgent: ShellProps["onUpdateAgent"];
   onDeleteAgent: ShellProps["onDeleteAgent"];
+  toolUpdates?: ToolUpdateOverview;
+  toolUpdatesLoading: boolean;
+  onCheckToolUpdates: ShellProps["onCheckToolUpdates"];
+  onRunToolUpdate: ShellProps["onRunToolUpdate"];
   onLoadWorkspaceTree: ShellProps["onLoadWorkspaceTree"];
   onSearchWorkspace: ShellProps["onSearchWorkspace"];
   onReadWorkspaceFile: ShellProps["onReadWorkspaceFile"];
@@ -98,6 +111,7 @@ export function AgentDetailsPanel({
   const [description, setDescription] = useState(selectedAgent?.description ?? "");
   const [handle, setHandle] = useState(selectedAgent?.handle ?? "");
   const [kind, setKind] = useState(selectedAgent?.kind ?? "fake");
+  const [persistentDraft, setPersistentDraft] = useState(agentPersistentFromKind(selectedAgent?.kind ?? "fake"));
   const [model, setModel] = useState(selectedAgent?.model ?? "");
   const [effort, setEffort] = useState(selectedAgent?.effort ?? "");
   const [enabled, setEnabled] = useState(selectedAgent?.enabled ?? true);
@@ -108,6 +122,7 @@ export function AgentDetailsPanel({
   const [activeTab, setActiveTab] = useState("settings");
   const [envBody, setEnvBody] = useState("{}");
   const [status, setStatus] = useState<string | null>(null);
+  const [toolAction, setToolAction] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const queryClient = useQueryClient();
@@ -122,6 +137,8 @@ export function AgentDetailsPanel({
     enabled: Boolean(selectedAgentID),
   });
   const supportsProviderLimits = isProviderLimitAgent(selected?.kind);
+  const selectedProvider = agentProviderFromKind(kind);
+  const selectedToolStatus = toolUpdates?.tools.find((tool) => tool.tool === selectedProvider);
   const agentLimitsQuery = useQuery({
     queryKey: ["agent-limits", selectedAgentID],
     queryFn: () => {
@@ -153,6 +170,7 @@ export function AgentDetailsPanel({
     setDescription(selected.description ?? "");
     setHandle(selected.handle);
     setKind(selected.kind);
+    setPersistentDraft(agentPersistentFromKind(selected.kind));
     setModel(selected.model);
     setEffort(selected.effort ?? "");
     setEnabled(selected.enabled);
@@ -176,6 +194,12 @@ export function AgentDetailsPanel({
     selected?.yolo_mode
   ]);
 
+  useEffect(() => {
+    if (agentProviderFromKind(kind) !== "fake") {
+      setPersistentDraft(agentPersistentFromKind(kind));
+    }
+  }, [kind]);
+
 
   async function saveAgent() {
     if (!selected) return;
@@ -183,6 +207,28 @@ export function AgentDetailsPanel({
     await queryClient.invalidateQueries({ queryKey: ["agent-limits", selected.id] });
     setAgentAvatar(selected.id, avatarEmoji ? { emoji: avatarEmoji, color: avatarColor || agentKindColor(kind) } : null);
     setStatus("Saved");
+  }
+
+  async function refreshTool() {
+    if (selectedProvider === "fake") return;
+    setToolAction("Checking");
+    try {
+      await onCheckToolUpdates(selectedProvider);
+      setToolAction("Checked");
+    } catch (err) {
+      setToolAction(err instanceof Error ? err.message : "Check failed");
+    }
+  }
+
+  async function updateTool() {
+    if (selectedProvider === "fake") return;
+    setToolAction("Updating");
+    try {
+      await onRunToolUpdate(selectedProvider);
+      setToolAction("Update started");
+    } catch (err) {
+      setToolAction(err instanceof Error ? err.message : "Update failed");
+    }
   }
 
   async function saveEnv() {
@@ -364,8 +410,8 @@ export function AgentDetailsPanel({
                 <div className="space-y-2">
                   <Label className="text-xs">Runtime</Label>
                   <Select
-                    value={kind}
-                    onChange={(e) => setKind(e.target.value)}
+                    value={selectedProvider}
+                    onChange={(e) => setKind(agentKindFromProviderPersistent(e.target.value, persistentDraft))}
                     aria-label="Agent runtime"
                   >
                     {AGENT_RUNTIME_OPTIONS.map((option) => (
@@ -380,6 +426,56 @@ export function AgentDetailsPanel({
                   <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="Model" aria-label="Agent model" />
                 </div>
               </div>
+              {selectedProvider !== "fake" && (
+                <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
+                  <Checkbox
+                    checked={persistentDraft}
+                    onChange={(e) => {
+                      setPersistentDraft(e.target.checked);
+                      setKind(agentKindFromProviderPersistent(selectedProvider, e.target.checked));
+                    }}
+                    aria-label="Agent persistent process"
+                  />
+                  Persistent process
+                </label>
+              )}
+              {selectedProvider !== "fake" && (
+                <section className="rounded-md border border-border bg-secondary/30 p-3" aria-label="Runtime updates">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-medium uppercase text-muted-foreground">Runtime updates</p>
+                      <p className="mt-1 truncate text-xs text-muted-foreground">
+                        {toolUpdatesLoading
+                          ? "Loading versions..."
+                          : `${selectedToolStatus?.current_version || "unknown"}${selectedToolStatus?.latest_version ? ` -> ${selectedToolStatus.latest_version}` : ""}`}
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="shrink-0 text-[10px]">
+                      {toolUpdateLabel(selectedToolStatus?.state, selectedToolStatus?.update_available)}
+                    </Badge>
+                  </div>
+                  {(selectedToolStatus?.message || selectedToolStatus?.last_error || toolAction) && (
+                    <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
+                      {toolAction ?? selectedToolStatus?.last_error ?? selectedToolStatus?.message}
+                    </p>
+                  )}
+                  {selectedToolStatus?.runtime_reset_pending && (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Runtime will restart after active conversations finish.
+                    </p>
+                  )}
+                  <div className="mt-3 flex justify-end gap-2">
+                    <Button type="button" size="sm" variant="outline" onClick={refreshTool} disabled={selectedToolStatus?.state === "checking" || selectedToolStatus?.state === "updating"}>
+                      <RefreshCw className={cn("h-4 w-4", selectedToolStatus?.state === "checking" && "animate-spin")} />
+                      Check
+                    </Button>
+                    <Button type="button" size="sm" onClick={updateTool} disabled={selectedToolStatus?.state === "updating"}>
+                      <Download className="h-4 w-4" />
+                      Update
+                    </Button>
+                  </div>
+                </section>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="agent-effort" className="text-xs">Effort</Label>
                 <Input
@@ -603,4 +699,13 @@ export function AgentDetailsPanel({
     </Dialog>
     </>
   );
+}
+
+function toolUpdateLabel(state?: string, available?: boolean | null): string {
+  if (state === "checking") return "Checking";
+  if (state === "updating") return "Updating";
+  if (state === "error") return "Error";
+  if (available === true) return "Update";
+  if (available === false) return "Current";
+  return "Unknown";
 }

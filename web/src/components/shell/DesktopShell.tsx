@@ -118,6 +118,10 @@ interface DesktopShellProps {
   selectedAgent?: Agent;
   onUpdateAgent: ShellProps["onUpdateAgent"];
   onDeleteAgent: ShellProps["onDeleteAgent"];
+  toolUpdates: ShellProps["toolUpdates"];
+  toolUpdatesLoading: boolean;
+  onCheckToolUpdates: ShellProps["onCheckToolUpdates"];
+  onRunToolUpdate: ShellProps["onRunToolUpdate"];
   onLoadWorkspaceTree: ShellProps["onLoadWorkspaceTree"];
   onSearchWorkspace: ShellProps["onSearchWorkspace"];
   onReadWorkspaceFile: ShellProps["onReadWorkspaceFile"];
@@ -210,6 +214,10 @@ export function DesktopShell({
   selectedAgent,
   onUpdateAgent,
   onDeleteAgent,
+  toolUpdates,
+  toolUpdatesLoading,
+  onCheckToolUpdates,
+  onRunToolUpdate,
   onLoadWorkspaceTree,
   onSearchWorkspace,
   onReadWorkspaceFile,
@@ -678,6 +686,10 @@ export function DesktopShell({
                 selectedAgent={selectedAgent}
                 onUpdateAgent={onUpdateAgent}
                 onDeleteAgent={onDeleteAgent}
+                toolUpdates={toolUpdates}
+                toolUpdatesLoading={toolUpdatesLoading}
+                onCheckToolUpdates={onCheckToolUpdates}
+                onRunToolUpdate={onRunToolUpdate}
                 onLoadWorkspaceTree={onLoadWorkspaceTree}
                 onSearchWorkspace={onSearchWorkspace}
                 onReadWorkspaceFile={onReadWorkspaceFile}

@@ -108,6 +108,31 @@ func (p *ProcessPool) Kill(key string) {
 	}
 }
 
+func (p *ProcessPool) KillAll(ctx context.Context) error {
+	p.mu.Lock()
+	processes := make([]*ManagedProcess, 0, len(p.processes))
+	for _, mp := range p.processes {
+		processes = append(processes, mp)
+	}
+	p.processes = make(map[string]*ManagedProcess)
+	p.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		for _, mp := range processes {
+			mp.Kill()
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (p *ProcessPool) Shutdown(ctx context.Context) error {
 	p.mu.Lock()
 	processes := make([]*ManagedProcess, 0, len(p.processes))
