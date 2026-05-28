@@ -529,6 +529,10 @@ func releaseVersion(channel string, release *githubRelease) string {
 		return ""
 	}
 	if channel == selfUpdateChannelDev {
+		name := normalizeReleaseTag(release.Name)
+		if looksLikeVersion(name) {
+			return name
+		}
 		target := strings.TrimSpace(release.TargetCommitish)
 		if target != "" {
 			if len(target) > 12 {
@@ -543,6 +547,10 @@ func releaseVersion(channel string, release *githubRelease) string {
 
 func selfUpdateAvailable(channel string, latest string, target string) bool {
 	if channel == selfUpdateChannelDev {
+		if looksLikeVersion(latest) {
+			current := normalizeReleaseTag(version.Short())
+			return latest != "" && current != latest
+		}
 		commit := strings.TrimSpace(version.Commit)
 		target = strings.TrimSpace(target)
 		if commit != "" && commit != "unknown" && target != "" {
@@ -552,6 +560,15 @@ func selfUpdateAvailable(channel string, latest string, target string) bool {
 	}
 	current := normalizeReleaseTag(version.Short())
 	return latest != "" && current != latest
+}
+
+func looksLikeVersion(v string) bool {
+	v = strings.TrimSpace(v)
+	v = strings.TrimPrefix(v, "v")
+	if v == "" || v[0] < '0' || v[0] > '9' {
+		return false
+	}
+	return strings.ContainsRune(v, '.')
 }
 
 func normalizeReleaseTag(v string) string {

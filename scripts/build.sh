@@ -26,7 +26,11 @@ cp -R web/dist "$embed_dir"
 
 echo "Building AgentX server..."
 mkdir -p "$(dirname "$binary")"
-version="$(git describe --tags --always --dirty 2>/dev/null || echo "dev")"
+version="$(git describe --tags --match 'v*' --always --dirty 2>/dev/null || echo "dev")"
+if ! echo "$version" | grep -qE '^v?[0-9]+\.[0-9]+'; then
+  count="$(git rev-list --count HEAD 2>/dev/null || echo "0")"
+  version="0.0.0-dev.${count}"
+fi
 version="$(echo "$version" | sed -E 's/^v//; s/-([0-9]+)-g[a-f0-9]+$/-dev.\1/; s/-([0-9]+)-g[a-f0-9]+-dirty$/-dev.\1-dirty/')"
 commit="$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")"
 build_date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"

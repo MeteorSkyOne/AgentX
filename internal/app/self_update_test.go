@@ -19,13 +19,38 @@ func TestReleaseVersion(t *testing.T) {
 		t.Fatalf("releaseVersion(release) = %q, want 1.2.3", got)
 	}
 
-	got := releaseVersion(selfUpdateChannelDev, &githubRelease{TargetCommitish: "abcdef1234567890"})
+	got := releaseVersion(selfUpdateChannelDev, &githubRelease{
+		TagName:         "dev",
+		Name:            "0.0.1-dev.34",
+		TargetCommitish: "abcdef1234567890",
+	})
+	if got != "0.0.1-dev.34" {
+		t.Fatalf("releaseVersion(dev new-style) = %q, want 0.0.1-dev.34", got)
+	}
+
+	got = releaseVersion(selfUpdateChannelDev, &githubRelease{
+		TagName:         "dev",
+		Name:            "v0.0.1-dev.34",
+		TargetCommitish: "abcdef1234567890",
+	})
+	if got != "0.0.1-dev.34" {
+		t.Fatalf("releaseVersion(dev new-style v-prefix) = %q, want 0.0.1-dev.34", got)
+	}
+
+	got = releaseVersion(selfUpdateChannelDev, &githubRelease{
+		Name:            "dev",
+		TargetCommitish: "abcdef1234567890",
+	})
 	if got != "dev+abcdef123456" {
-		t.Fatalf("releaseVersion(dev) = %q, want dev+abcdef123456", got)
+		t.Fatalf("releaseVersion(dev old-style) = %q, want dev+abcdef123456", got)
 	}
 
 	if got := releaseVersion(selfUpdateChannelDev, &githubRelease{}); got != "dev" {
-		t.Fatalf("releaseVersion(dev empty target) = %q, want dev", got)
+		t.Fatalf("releaseVersion(dev empty) = %q, want dev", got)
+	}
+
+	if got := releaseVersion(selfUpdateChannelDev, nil); got != "" {
+		t.Fatalf("releaseVersion(nil) = %q, want empty", got)
 	}
 }
 
@@ -45,6 +70,9 @@ func TestNormalizeReleaseTag(t *testing.T) {
 		{in: " 1.2.3 ", want: "1.2.3"},
 		{in: "1.2.3-dirty", want: "1.2.3"},
 		{in: "v1.2.3-dirty", want: "1.2.3"},
+		{in: "0.0.1-dev.34", want: "0.0.1-dev.34"},
+		{in: "0.0.1-dev.34-dirty", want: "0.0.1-dev.34"},
+		{in: "v0.0.1-dev.34-dirty", want: "0.0.1-dev.34"},
 	} {
 		if got := normalizeReleaseTag(tc.in); got != tc.want {
 			t.Fatalf("normalizeReleaseTag(%q) = %q, want %q", tc.in, got, tc.want)
@@ -74,18 +102,66 @@ func TestSelfUpdateAvailableRelease(t *testing.T) {
 func TestSelfUpdateAvailableDev(t *testing.T) {
 	restoreAppVersionVars(t)
 
+	// New-style: version-based comparison.
+	version.Version = "0.0.1-dev.33"
+	version.Commit = "abcdef1"
+	if !selfUpdateAvailable(selfUpdateChannelDev, "0.0.1-dev.34", "1234567890ab") {
+		t.Fatal("selfUpdateAvailable() = false, want true for newer dev version")
+	}
+	if selfUpdateAvailable(selfUpdateChannelDev, "0.0.1-dev.33", "abcdef1234567890") {
+		t.Fatal("selfUpdateAvailable() = true, want false for matching dev version")
+	}
+
+	// New-style: current is bare "dev" (pre-change binary), latest has version.
+	version.Version = "dev"
+	version.Commit = "unknown"
+	if !selfUpdateAvailable(selfUpdateChannelDev, "0.0.1-dev.34", "1234567890ab") {
+		t.Fatal("selfUpdateAvailable() = false, want true when current is bare dev")
+	}
+
+	// New-style: current has -dirty suffix, latest matches after normalization.
+	version.Version = "0.0.1-dev.34-dirty"
+	version.Commit = "abcdef1"
+	if selfUpdateAvailable(selfUpdateChannelDev, "0.0.1-dev.34", "abcdef1234567890") {
+		t.Fatal("selfUpdateAvailable() = true, want false for dirty matching dev version")
+	}
+
+	// Old-style fallback: commit SHA comparison.
 	version.Version = "0.1.0-dev.3"
 	version.Commit = "abcdef1"
 	if selfUpdateAvailable(selfUpdateChannelDev, "dev+abcdef123456", "abcdef1234567890") {
-		t.Fatal("selfUpdateAvailable() = true, want false for matching dev commit prefix")
+		t.Fatal("selfUpdateAvailable() = true, want false for matching dev commit prefix (old-style)")
 	}
 	if !selfUpdateAvailable(selfUpdateChannelDev, "dev+123456789abc", "123456789abcdef0") {
-		t.Fatal("selfUpdateAvailable() = false, want true for different dev commit")
+		t.Fatal("selfUpdateAvailable() = false, want true for different dev commit (old-style)")
 	}
 
 	version.Commit = "unknown"
 	if !selfUpdateAvailable(selfUpdateChannelDev, "dev+fedcba987654", "fedcba9876543210") {
-		t.Fatal("selfUpdateAvailable() = false, want true when commit is unknown and latest label differs")
+		t.Fatal("selfUpdateAvailable() = false, want true when commit is unknown (old-style)")
+	}
+}
+
+func TestLooksLikeVersion(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want bool
+	}{
+		{in: "0.0.1-dev.34", want: true},
+		{in: "1.2.3", want: true},
+		{in: "v0.0.1-dev.34", want: true},
+		{in: "0.0.0-dev.0", want: true},
+		{in: "dev", want: false},
+		{in: "dev+abcdef123456", want: false},
+		{in: "", want: false},
+		{in: "abc", want: false},
+		{in: "Release 2.0", want: false},
+		{in: "  v1.2.3  ", want: true},
+		{in: "6429d1e", want: false},
+	} {
+		if got := looksLikeVersion(tc.in); got != tc.want {
+			t.Fatalf("looksLikeVersion(%q) = %v, want %v", tc.in, got, tc.want)
+		}
 	}
 }
 

@@ -57,6 +57,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -115,6 +117,23 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Compute dev version
+        id: devver
+        run: |
+          set -euo pipefail
+          raw="$(git describe --tags --match 'v*' --always --dirty 2>/dev/null || echo "dev")"
+          if ! echo "$raw" | grep -qE '^v?[0-9]+\.[0-9]+'; then
+            count="$(git rev-list --count HEAD 2>/dev/null || echo "0")"
+            raw="0.0.0-dev.${count}"
+          fi
+          version="$(echo "$raw" | sed -E 's/^v//; s/-([0-9]+)-g[a-f0-9]+$/-dev.\1/; s/-([0-9]+)-g[a-f0-9]+-dirty$/-dev.\1-dirty/')"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
       - name: Download build artifacts
         uses: actions/download-artifact@v8
         with:
@@ -133,13 +152,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: dev
           REPO: ${{ github.repository }}
+          DEV_VERSION: ${{ steps.devver.outputs.version }}
         run: |
           set -euo pipefail
           gh release delete "$TAG_NAME" --repo "$REPO" --cleanup-tag --yes >/dev/null 2>&1 || true
           gh release create "$TAG_NAME" release/* \
             --repo "$REPO" \
-            --title "dev" \
-            --notes "Development build from ${GITHUB_SHA}" \
+            --title "$DEV_VERSION" \
+            --notes "Development build ${DEV_VERSION} from ${GITHUB_SHA}" \
             --prerelease \
             --latest=false \
             --target "$GITHUB_SHA"
