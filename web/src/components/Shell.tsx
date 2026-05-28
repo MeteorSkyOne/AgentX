@@ -683,10 +683,20 @@ export function Shell({
     }
   }
 
+  async function saveSelfSettingsQuietly() {
+    await onUpdateSelfUpdateSettings({
+      auto_enabled: selfAutoEnabled,
+      time_of_day: selfTimeOfDay,
+      timezone: selfTimezone.trim() || "Local",
+      channel: selfChannel,
+    });
+  }
+
   async function checkSelfUpdateNow() {
     setSelfActionError(null);
     setSelfActionStatus("Checking");
     try {
+      await saveSelfSettingsQuietly();
       await onCheckSelfUpdate();
       setSelfActionStatus("Checked");
     } catch (err) {
@@ -699,6 +709,7 @@ export function Shell({
     setSelfActionError(null);
     setSelfActionStatus("Updating");
     try {
+      await saveSelfSettingsQuietly();
       await onRunSelfUpdate();
       setSelfActionStatus("Update started");
     } catch (err) {
