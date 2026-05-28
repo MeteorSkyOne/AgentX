@@ -141,7 +141,7 @@ func FromEnv() Config {
 		Server:                      DefaultServerSettings(),
 		ToolUpdates:                 DefaultToolUpdateSettings(),
 		SelfUpdates:                 DefaultSelfUpdateSettings(),
-		GitHubRepo:                  getenv("AGENTX_GITHUB_REPO", "meteorsky/agentx"),
+		GitHubRepo:                  getenv("AGENTX_GITHUB_REPO", "MeteorSkyOne/AgentX"),
 		SelfUpdateChannel:           strings.TrimSpace(os.Getenv("AGENTX_SELF_UPDATE_CHANNEL")),
 		DefaultAgentKind:            getenv("AGENTX_DEFAULT_AGENT_KIND", "fake"),
 		DefaultAgentModel:           getenv("AGENTX_DEFAULT_AGENT_MODEL", ""),

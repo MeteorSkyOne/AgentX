@@ -27,6 +27,7 @@ func TestFromEnvDefaults(t *testing.T) {
 	t.Setenv("AGENTX_D2_TIMEOUT_SECONDS", "")
 	t.Setenv("AGENTX_D2_CACHE_TTL_MINUTES", "")
 	t.Setenv("AGENTX_D2_CACHE_MAX_ENTRIES", "")
+	t.Setenv("AGENTX_GITHUB_REPO", "")
 
 	cfg := FromEnv()
 
@@ -63,6 +64,9 @@ func TestFromEnvDefaults(t *testing.T) {
 	if cfg.D2Command != "d2" || cfg.D2TimeoutSeconds != 10 || cfg.D2CacheTTLMinutes != 1440 || cfg.D2CacheMaxEntries != 256 {
 		t.Fatalf("D2 config = %#v", cfg)
 	}
+	if cfg.GitHubRepo != "MeteorSkyOne/AgentX" {
+		t.Fatalf("GitHubRepo = %q, want MeteorSkyOne/AgentX", cfg.GitHubRepo)
+	}
 }
 
 func TestFromEnvOverrides(t *testing.T) {
@@ -85,6 +89,7 @@ func TestFromEnvOverrides(t *testing.T) {
 	t.Setenv("AGENTX_D2_TIMEOUT_SECONDS", "3")
 	t.Setenv("AGENTX_D2_CACHE_TTL_MINUTES", "60")
 	t.Setenv("AGENTX_D2_CACHE_MAX_ENTRIES", "12")
+	t.Setenv("AGENTX_GITHUB_REPO", "example/agentx")
 
 	cfg := FromEnv()
 
@@ -123,6 +128,9 @@ func TestFromEnvOverrides(t *testing.T) {
 	}
 	if cfg.D2Command != "/usr/local/bin/d2" || cfg.D2TimeoutSeconds != 3 || cfg.D2CacheTTLMinutes != 60 || cfg.D2CacheMaxEntries != 12 {
 		t.Fatalf("D2 overrides = %#v", cfg)
+	}
+	if cfg.GitHubRepo != "example/agentx" {
+		t.Fatalf("GitHubRepo = %q", cfg.GitHubRepo)
 	}
 }
 
