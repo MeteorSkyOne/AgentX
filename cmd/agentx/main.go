@@ -41,6 +41,13 @@ func main() {
 		os.Exit(code)
 	}
 
+	var restartPath string
+	defer func() {
+		if restartPath != "" {
+			execRestart(restartPath)
+		}
+	}()
+
 	logFile, logPath, err := configureLogging(time.Now())
 	if err != nil {
 		slog.Error("create log file", "error", err)
@@ -54,6 +61,9 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	serverCtx, triggerShutdown := context.WithCancel(ctx)
+	defer triggerShutdown()
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -140,6 +150,7 @@ func main() {
 		},
 		SelfUpdates: app.SelfUpdateOptions{
 			GitHubRepo: cfg.GitHubRepo,
+			OnUpdated:  triggerShutdown,
 		},
 		Runtimes: runtimes,
 	})
@@ -188,10 +199,12 @@ func main() {
 	} else {
 		slog.Info("agentx listening", "http_addr", cfg.Addr)
 	}
-	if err := runHTTPServers(ctx, servers); err != nil {
+	if err := runHTTPServers(serverCtx, servers); err != nil {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
+
+	restartPath = a.RestartPath()
 }
 
 func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) (bool, int) {

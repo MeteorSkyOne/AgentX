@@ -44,6 +44,7 @@ type SelfUpdateOptions struct {
 	HTTPClient *http.Client
 	Now        func() time.Time
 	Executable func() (string, error)
+	OnUpdated  func()
 }
 
 type SelfUpdateSettings = config.SelfUpdateSettings
@@ -73,11 +74,13 @@ type selfUpdateService struct {
 	client     *http.Client
 	now        func() time.Time
 	executable func() (string, error)
+	onUpdated  func()
 
-	mu     sync.Mutex
-	state  selfUpdateState
-	latest *githubRelease
-	cron   *cron.Cron
+	mu            sync.Mutex
+	state         selfUpdateState
+	latest        *githubRelease
+	installedPath string
+	cron          *cron.Cron
 }
 
 type selfUpdateState struct {
@@ -135,6 +138,7 @@ func newSelfUpdateService(dataDir string, opts SelfUpdateOptions) *selfUpdateSer
 		client:     client,
 		now:        now,
 		executable: executable,
+		onUpdated:  opts.OnUpdated,
 		state:      selfUpdateState{State: selfUpdateStateIdle},
 	}
 }
@@ -376,20 +380,26 @@ func (s *selfUpdateService) updateStarted(ctx context.Context) error {
 		return err
 	}
 	now := s.now().UTC()
+	autoRestart := s.onUpdated != nil
 	s.mu.Lock()
 	st := &s.state
 	st.State = selfUpdateStateIdle
-	st.Message = "Updated. Restart AgentX to use the new version."
 	st.LastUpdatedAt = &now
 	st.LastError = ""
 	st.RestartRequired = true
 	v := false
 	st.UpdateAvailable = &v
-	if st.LatestVersion != "" {
-		// The running process still reports the old embedded version until restart.
+	if autoRestart && st.LatestVersion != "" {
+		st.Message = "Installed " + st.LatestVersion + ", restarting..."
+	} else if st.LatestVersion != "" {
 		st.Message = "Installed " + st.LatestVersion + ". Restart AgentX to use it."
+	} else {
+		st.Message = "Updated. Restart AgentX to use the new version."
 	}
 	s.mu.Unlock()
+	if autoRestart {
+		s.onUpdated()
+	}
 	return nil
 }
 
@@ -521,6 +531,9 @@ func (s *selfUpdateService) replaceExecutable(newBinary string) error {
 		_ = os.Rename(backup, current)
 		return fmt.Errorf("install new binary: %w", err)
 	}
+	s.mu.Lock()
+	s.installedPath = current
+	s.mu.Unlock()
 	return nil
 }
 

@@ -153,6 +153,7 @@ func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
 			HTTPClient: opts.SelfUpdates.HTTPClient,
 			Now:        opts.SelfUpdates.Now,
 			Executable: opts.SelfUpdates.Executable,
+			OnUpdated:  opts.SelfUpdates.OnUpdated,
 		}),
 		d2Renderer: newD2Renderer(D2RenderOptions{
 			Command:         opts.D2Command,
@@ -208,6 +209,18 @@ func (a *App) isShuttingDown() bool {
 	a.backgroundMu.Lock()
 	defer a.backgroundMu.Unlock()
 	return a.shuttingDown
+}
+
+func (a *App) RestartPath() string {
+	if a.selfUpdates == nil {
+		return ""
+	}
+	a.selfUpdates.mu.Lock()
+	defer a.selfUpdates.mu.Unlock()
+	if !a.selfUpdates.state.RestartRequired {
+		return ""
+	}
+	return a.selfUpdates.installedPath
 }
 
 func (a *App) Shutdown(ctx context.Context) error {
