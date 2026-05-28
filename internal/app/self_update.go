@@ -29,7 +29,7 @@ const (
 	selfUpdateChannelRelease   = "release"
 	selfUpdateChannelDev       = "dev"
 	defaultSelfUpdateTimeout   = 10 * time.Minute
-	defaultSelfUpdateRepo      = "meteorsky/agentx"
+	defaultSelfUpdateRepo      = "MeteorSkyOne/AgentX"
 	selfUpdateUserAgent        = "AgentX/" + "self-update"
 	selfUpdateStateIdle        = "idle"
 	selfUpdateStateChecking    = "checking"

@@ -29,6 +29,13 @@ func TestReleaseVersion(t *testing.T) {
 	}
 }
 
+func TestNewSelfUpdateServiceUsesReleaseRepository(t *testing.T) {
+	service := newSelfUpdateService(t.TempDir(), SelfUpdateOptions{})
+	if service.githubRepo != "MeteorSkyOne/AgentX" {
+		t.Fatalf("githubRepo = %q, want MeteorSkyOne/AgentX", service.githubRepo)
+	}
+}
+
 func TestNormalizeReleaseTag(t *testing.T) {
 	for _, tc := range []struct {
 		in   string

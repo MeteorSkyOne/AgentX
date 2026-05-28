@@ -60,7 +60,7 @@ func (s *Server) handleCheckSelfUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	overview, err := s.app.CheckSelfUpdate(r.Context())
 	if err != nil {
-		writeAppError(w, err)
+		writeSelfUpdateActionError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, overview)
@@ -78,8 +78,12 @@ func (s *Server) handleRunSelfUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	overview, err := s.app.StartRunSelfUpdate(r.Context())
 	if err != nil {
-		writeAppError(w, err)
+		writeSelfUpdateActionError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, overview)
+}
+
+func writeSelfUpdateActionError(w http.ResponseWriter, err error) {
+	writeError(w, http.StatusBadGateway, err.Error())
 }

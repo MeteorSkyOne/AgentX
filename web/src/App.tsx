@@ -966,15 +966,19 @@ export default function App() {
   }
 
   async function handleCheckSelfUpdate(): Promise<SelfUpdateOverview> {
-    const updated = await checkSelfUpdate(selectedOrganizationID as string);
-    await queryClient.invalidateQueries({ queryKey: ["self-update", selectedOrganizationID] });
-    return updated;
+    try {
+      return await checkSelfUpdate(selectedOrganizationID as string);
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: ["self-update", selectedOrganizationID] });
+    }
   }
 
   async function handleRunSelfUpdate(): Promise<SelfUpdateOverview> {
-    const updated = await runSelfUpdate(selectedOrganizationID as string);
-    await queryClient.invalidateQueries({ queryKey: ["self-update", selectedOrganizationID] });
-    return updated;
+    try {
+      return await runSelfUpdate(selectedOrganizationID as string);
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: ["self-update", selectedOrganizationID] });
+    }
   }
 
   async function handleUpdateUserPreferences(payload: UserPreferences): Promise<UserPreferences> {

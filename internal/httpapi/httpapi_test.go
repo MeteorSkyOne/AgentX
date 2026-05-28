@@ -668,6 +668,36 @@ func TestHTTPServerSettingsAuthorizeAndPersistTLS(t *testing.T) {
 	}
 }
 
+func TestHTTPSelfUpdateCheckReturnsDetailedActionError(t *testing.T) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Host != "api.github.com" || req.URL.Path != "/repos/example/agentx/releases" {
+				t.Fatalf("unexpected GitHub request URL: %s", req.URL.String())
+			}
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Status:     "404 Not Found",
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"message":"Not Found"}`)),
+				Request:    req,
+			}, nil
+		}),
+	}
+	env := newTestEnvWithOptions(t, app.Options{
+		SelfUpdates: app.SelfUpdateOptions{
+			GitHubRepo: "example/agentx",
+			HTTPClient: client,
+		},
+	})
+	bootstrap := setupApp(t, context.Background(), env.app)
+
+	var response errorResponse
+	postJSON(t, env.server.URL+"/api/organizations/"+bootstrap.Organization.ID+"/self-update/check", bootstrap.SessionToken, map[string]any{}, http.StatusBadGateway, &response)
+	if !strings.Contains(response.Error, "GitHub releases request failed: 404 Not Found") || !strings.Contains(response.Error, "Not Found") {
+		t.Fatalf("error = %q, want detailed GitHub failure", response.Error)
+	}
+}
+
 func TestHTTPNotificationSettingsAuthorizeValidateAndRedactSecret(t *testing.T) {
 	ts := newTestServer(t)
 	webhookCalls := make(chan http.Header, 1)
@@ -2517,6 +2547,12 @@ func getRaw(t *testing.T, url string, token string) (int, http.Header, []byte) {
 		t.Fatal(err)
 	}
 	return resp.StatusCode, resp.Header.Clone(), body
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
 }
 
 func doJSON(t *testing.T, req *http.Request, wantStatus int, dst any) {
