@@ -104,7 +104,34 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 		"thinking_chars", len([]rune(thinking)),
 		"process_items", len(process),
 	)
+	if team == nil {
+		a.dispatchBotMentionedAgents(context.WithoutCancel(ctx), botMessage, agent.ID)
+	}
 	return botMessage, nil
+}
+
+func (a *App) dispatchBotMentionedAgents(ctx context.Context, botMessage domain.Message, senderAgentID string) {
+	mentions := agentMentions(botMessage.Body)
+	if len(mentions) == 0 {
+		return
+	}
+	scope, err := a.conversationScope(ctx, botMessage.ConversationType, botMessage.ConversationID)
+	if err != nil {
+		slog.Warn("failed to resolve scope for bot mention dispatch", "error", err)
+		return
+	}
+	agents, err := a.conversationAgents(ctx, scope)
+	if err != nil {
+		slog.Warn("failed to resolve agents for bot mention dispatch", "error", err)
+		return
+	}
+	targets := mentionedAgentsForBody(agents, botMessage.Body)
+	for _, target := range targets {
+		if target.Agent.ID == senderAgentID {
+			continue
+		}
+		a.dispatchAgentRunOrQueue(ctx, botMessage, target)
+	}
 }
 
 func (a *App) setFailedAgentSession(ctx context.Context, agentID string, message domain.Message, providerSessionID string) {
