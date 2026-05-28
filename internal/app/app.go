@@ -22,6 +22,7 @@ type Options struct {
 	DataDir               string
 	ServerSettings        config.ServerSettings
 	ToolUpdateSettings    config.ToolUpdateSettings
+	SelfUpdateSettings    config.SelfUpdateSettings
 	ServerAddr            string
 	AddrOverride          bool
 	AddrOverrideValue     string
@@ -31,6 +32,7 @@ type Options struct {
 	Runtimes              map[string]agentruntime.Runtime
 	ProviderLimits        ProviderLimitOptions
 	ToolUpdates           ToolUpdateOptions
+	SelfUpdates           SelfUpdateOptions
 	WebhookHTTPClient     *http.Client
 	WebhookTimeout        time.Duration
 	D2Command             string
@@ -104,6 +106,7 @@ type App struct {
 	opts           Options
 	providerLimits *providerLimitService
 	toolUpdates    *toolUpdateService
+	selfUpdates    *selfUpdateService
 	d2Renderer     *d2Renderer
 	scheduledTasks *scheduledTaskScheduler
 	terminals      *terminalManager
@@ -143,6 +146,13 @@ func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
 			CodexCommand:  opts.ToolUpdates.CodexCommand,
 			Exec:          opts.ToolUpdates.Exec,
 			Now:           opts.ToolUpdates.Now,
+		}),
+		selfUpdates: newSelfUpdateService(opts.DataDir, SelfUpdateOptions{
+			Settings:   opts.SelfUpdateSettings,
+			GitHubRepo: opts.SelfUpdates.GitHubRepo,
+			HTTPClient: opts.SelfUpdates.HTTPClient,
+			Now:        opts.SelfUpdates.Now,
+			Executable: opts.SelfUpdates.Executable,
 		}),
 		d2Renderer: newD2Renderer(D2RenderOptions{
 			Command:         opts.D2Command,
@@ -212,6 +222,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 
 	a.StopScheduledTasks()
 	a.StopToolUpdates()
+	a.StopSelfUpdate()
 	a.StopTerminalManager()
 	a.cancelAllActiveAgentRuns(ctx, errAppShuttingDown)
 	a.clearAllQueuedAgentPrompts("failed")

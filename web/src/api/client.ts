@@ -21,6 +21,8 @@ import type {
   ScheduledTask,
   ScheduledTaskKind,
   ScheduledTaskRun,
+  SelfUpdateOverview,
+  SelfUpdateSettings,
   ServerSettings,
   ServerSettingsUpdatePayload,
   ToolUpdateOverview,
@@ -220,6 +222,43 @@ export function runToolUpdate(
     {
       method: "POST",
       body: JSON.stringify({ tool })
+    }
+  );
+}
+
+export function selfUpdate(orgID: string): Promise<SelfUpdateOverview> {
+  return request<SelfUpdateOverview>(
+    `/api/organizations/${encodeURIComponent(orgID)}/self-update`
+  );
+}
+
+export function updateSelfUpdateSettings(
+  orgID: string,
+  payload: SelfUpdateSettings
+): Promise<SelfUpdateOverview> {
+  return request<SelfUpdateOverview>(
+    `/api/organizations/${encodeURIComponent(orgID)}/self-update/settings`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    }
+  );
+}
+
+export function checkSelfUpdate(orgID: string): Promise<SelfUpdateOverview> {
+  return request<SelfUpdateOverview>(
+    `/api/organizations/${encodeURIComponent(orgID)}/self-update/check`,
+    {
+      method: "POST"
+    }
+  );
+}
+
+export function runSelfUpdate(orgID: string): Promise<SelfUpdateOverview> {
+  return request<SelfUpdateOverview>(
+    `/api/organizations/${encodeURIComponent(orgID)}/self-update/update`,
+    {
+      method: "POST"
     }
   );
 }

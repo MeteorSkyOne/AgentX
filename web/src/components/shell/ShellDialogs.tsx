@@ -1,6 +1,6 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { Bot, Trash2 } from "lucide-react";
-import type { Channel, NotificationSettings, Organization, Project, ServerSettings, ToolUpdateOverview, User, UserPreferences, Workspace } from "@/api/types";
+import type { Channel, NotificationSettings, Organization, Project, SelfUpdateOverview, SelfUpdateSettings, ServerSettings, ToolUpdateOverview, User, UserPreferences, Workspace } from "@/api/types";
 import { cn } from "@/lib/utils";
 import { AVATAR_COLORS, agentKindColor } from "../AgentAvatar";
 import { agentKindFromProviderPersistent, agentPersistentFromKind, agentProviderFromKind } from "./utils";
@@ -31,6 +31,8 @@ export interface ShellDialogsProps {
   serverSettingsError: string | null;
   toolUpdates?: ToolUpdateOverview;
   toolUpdatesLoading: boolean;
+  selfUpdate?: SelfUpdateOverview;
+  selfUpdateLoading: boolean;
   preferences: UserPreferences;
   preferencesLoading: boolean;
   onLogout: () => void;
@@ -108,6 +110,20 @@ export interface ShellDialogsProps {
   saveToolUpdateSettings: () => void | Promise<void>;
   checkAllToolUpdates: () => void | Promise<void>;
   runAllToolUpdates: () => void | Promise<void>;
+  selfAutoEnabled: boolean;
+  setSelfAutoEnabled: BooleanSetter;
+  selfTimeOfDay: string;
+  setSelfTimeOfDay: StringSetter;
+  selfTimezone: string;
+  setSelfTimezone: StringSetter;
+  selfChannel: SelfUpdateSettings["channel"];
+  setSelfChannel: Dispatch<SetStateAction<SelfUpdateSettings["channel"]>>;
+  selfSettingsPending: boolean;
+  selfActionStatus: string | null;
+  selfActionError: string | null;
+  saveSelfUpdateSettings: () => void | Promise<void>;
+  checkSelfUpdateNow: () => void | Promise<void>;
+  runSelfUpdateNow: () => void | Promise<void>;
 
   projectEditOpen: boolean;
   setProjectEditOpen: BooleanSetter;
@@ -188,6 +204,8 @@ export function ShellDialogs({
   serverSettingsError,
   toolUpdates,
   toolUpdatesLoading,
+  selfUpdate,
+  selfUpdateLoading,
   preferences,
   preferencesLoading,
   onLogout,
@@ -263,6 +281,20 @@ export function ShellDialogs({
   saveToolUpdateSettings,
   checkAllToolUpdates,
   runAllToolUpdates,
+  selfAutoEnabled,
+  setSelfAutoEnabled,
+  selfTimeOfDay,
+  setSelfTimeOfDay,
+  selfTimezone,
+  setSelfTimezone,
+  selfChannel,
+  setSelfChannel,
+  selfSettingsPending,
+  selfActionStatus,
+  selfActionError,
+  saveSelfUpdateSettings,
+  checkSelfUpdateNow,
+  runSelfUpdateNow,
   projectEditOpen,
   setProjectEditOpen,
   projectEditName,
@@ -402,6 +434,22 @@ export function ShellDialogs({
               serverSettingsError={serverSettingsError}
               toolUpdates={toolUpdates}
               toolUpdatesLoading={toolUpdatesLoading}
+              selfUpdate={selfUpdate}
+              selfUpdateLoading={selfUpdateLoading}
+              selfAutoEnabled={selfAutoEnabled}
+              setSelfAutoEnabled={setSelfAutoEnabled}
+              selfTimeOfDay={selfTimeOfDay}
+              setSelfTimeOfDay={setSelfTimeOfDay}
+              selfTimezone={selfTimezone}
+              setSelfTimezone={setSelfTimezone}
+              selfChannel={selfChannel}
+              setSelfChannel={setSelfChannel}
+              selfSettingsPending={selfSettingsPending}
+              selfActionStatus={selfActionStatus}
+              selfActionError={selfActionError}
+              saveSelfUpdateSettings={saveSelfUpdateSettings}
+              checkSelfUpdateNow={checkSelfUpdateNow}
+              runSelfUpdateNow={runSelfUpdateNow}
               toolAutoEnabled={toolAutoEnabled}
               setToolAutoEnabled={setToolAutoEnabled}
               toolTimeOfDay={toolTimeOfDay}

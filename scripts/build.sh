@@ -26,4 +26,11 @@ cp -R web/dist "$embed_dir"
 
 echo "Building AgentX server..."
 mkdir -p "$(dirname "$binary")"
-go build -tags agentx_embed_web -o "$binary" ./cmd/agentx
+version="$(git describe --tags --always --dirty 2>/dev/null || echo "dev")"
+version="$(echo "$version" | sed -E 's/^v//; s/-([0-9]+)-g[a-f0-9]+$/-dev.\1/; s/-([0-9]+)-g[a-f0-9]+-dirty$/-dev.\1-dirty/')"
+commit="$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")"
+build_date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+version_pkg="github.com/meteorsky/agentx/internal/version"
+ldflags="-s -w -X ${version_pkg}.Version=${version} -X ${version_pkg}.Commit=${commit} -X ${version_pkg}.Date=${build_date}"
+
+go build -tags agentx_embed_web -ldflags "$ldflags" -o "$binary" ./cmd/agentx

@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { Channel, UserPreferences } from "../api/types";
+import type { Channel, SelfUpdateSettings, UserPreferences } from "../api/types";
 import {
   agentKindColor,
   setAgentAvatar,
@@ -64,6 +64,8 @@ export function Shell({
   serverSettingsError,
   toolUpdates,
   toolUpdatesLoading,
+  selfUpdate,
+  selfUpdateLoading,
   preferences,
   preferencesLoading,
   theme,
@@ -88,6 +90,9 @@ export function Shell({
   onUpdateToolUpdateSettings,
   onCheckToolUpdates,
   onRunToolUpdate,
+  onUpdateSelfUpdateSettings,
+  onCheckSelfUpdate,
+  onRunSelfUpdate,
   onUpdateUserPreferences,
   onTestNotificationSettings,
   onLoadWorkspaceTree,
@@ -194,6 +199,13 @@ export function Shell({
   const [toolSettingsPending, setToolSettingsPending] = useState(false);
   const [toolActionStatus, setToolActionStatus] = useState<string | null>(null);
   const [toolActionError, setToolActionError] = useState<string | null>(null);
+  const [selfAutoEnabled, setSelfAutoEnabled] = useState(false);
+  const [selfTimeOfDay, setSelfTimeOfDay] = useState("04:00");
+  const [selfTimezone, setSelfTimezone] = useState("Local");
+  const [selfChannel, setSelfChannel] = useState<SelfUpdateSettings["channel"]>("release");
+  const [selfSettingsPending, setSelfSettingsPending] = useState(false);
+  const [selfActionStatus, setSelfActionStatus] = useState<string | null>(null);
+  const [selfActionError, setSelfActionError] = useState<string | null>(null);
   const [preferencesPending, setPreferencesPending] = useState(false);
   const [preferencesError, setPreferencesError] = useState<string | null>(null);
   const {
@@ -353,6 +365,7 @@ export function Shell({
       syncNotificationDraft();
       syncServerSettingsDraft();
       syncPreferenceDraft();
+      syncSelfUpdateDraft();
     }
   }, [
     accountSettingsOpen,
@@ -366,6 +379,10 @@ export function Shell({
     serverSettings?.tls.listen_port,
     serverSettings?.tls.cert_file,
     serverSettings?.tls.key_file,
+    selfUpdate?.settings.auto_enabled,
+    selfUpdate?.settings.time_of_day,
+    selfUpdate?.settings.timezone,
+    selfUpdate?.settings.channel,
     preferences.show_ttft,
     preferences.show_tps,
     preferences.hide_avatars
@@ -461,6 +478,7 @@ export function Shell({
     syncNotificationDraft();
     syncServerSettingsDraft();
     syncToolUpdateDraft();
+    syncSelfUpdateDraft();
     setAccountSettingsOpen(true);
   }
 
@@ -494,6 +512,16 @@ export function Shell({
     setToolCodexEnabled(settings?.codex_enabled ?? true);
     setToolActionError(null);
     setToolActionStatus(null);
+  }
+
+  function syncSelfUpdateDraft() {
+    const settings = selfUpdate?.settings;
+    setSelfAutoEnabled(settings?.auto_enabled ?? false);
+    setSelfTimeOfDay(settings?.time_of_day ?? "04:00");
+    setSelfTimezone(settings?.timezone ?? "Local");
+    setSelfChannel(settings?.channel ?? "release");
+    setSelfActionError(null);
+    setSelfActionStatus(null);
   }
 
   function syncPreferenceDraft() {
@@ -633,6 +661,49 @@ export function Shell({
     } catch (err) {
       setToolActionError(err instanceof Error ? err.message : "Update failed");
       setToolActionStatus(null);
+    }
+  }
+
+  async function saveSelfUpdateSettings() {
+    setSelfActionError(null);
+    setSelfActionStatus(null);
+    setSelfSettingsPending(true);
+    try {
+      await onUpdateSelfUpdateSettings({
+        auto_enabled: selfAutoEnabled,
+        time_of_day: selfTimeOfDay,
+        timezone: selfTimezone.trim() || "Local",
+        channel: selfChannel,
+      });
+      setSelfActionStatus("Saved");
+    } catch (err) {
+      setSelfActionError(err instanceof Error ? err.message : "Save self-update settings failed");
+    } finally {
+      setSelfSettingsPending(false);
+    }
+  }
+
+  async function checkSelfUpdateNow() {
+    setSelfActionError(null);
+    setSelfActionStatus("Checking");
+    try {
+      await onCheckSelfUpdate();
+      setSelfActionStatus("Checked");
+    } catch (err) {
+      setSelfActionError(err instanceof Error ? err.message : "Check failed");
+      setSelfActionStatus(null);
+    }
+  }
+
+  async function runSelfUpdateNow() {
+    setSelfActionError(null);
+    setSelfActionStatus("Updating");
+    try {
+      await onRunSelfUpdate();
+      setSelfActionStatus("Update started");
+    } catch (err) {
+      setSelfActionError(err instanceof Error ? err.message : "Update failed");
+      setSelfActionStatus(null);
     }
   }
 
@@ -1033,6 +1104,22 @@ export function Shell({
         serverSettingsError={serverSettingsError}
         toolUpdates={toolUpdates}
         toolUpdatesLoading={toolUpdatesLoading}
+        selfUpdate={selfUpdate}
+        selfUpdateLoading={selfUpdateLoading}
+        selfAutoEnabled={selfAutoEnabled}
+        setSelfAutoEnabled={setSelfAutoEnabled}
+        selfTimeOfDay={selfTimeOfDay}
+        setSelfTimeOfDay={setSelfTimeOfDay}
+        selfTimezone={selfTimezone}
+        setSelfTimezone={setSelfTimezone}
+        selfChannel={selfChannel}
+        setSelfChannel={setSelfChannel}
+        selfSettingsPending={selfSettingsPending}
+        selfActionStatus={selfActionStatus}
+        selfActionError={selfActionError}
+        saveSelfUpdateSettings={saveSelfUpdateSettings}
+        checkSelfUpdateNow={checkSelfUpdateNow}
+        runSelfUpdateNow={runSelfUpdateNow}
         toolAutoEnabled={toolAutoEnabled}
         setToolAutoEnabled={setToolAutoEnabled}
         toolTimeOfDay={toolTimeOfDay}

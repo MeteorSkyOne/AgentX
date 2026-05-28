@@ -12,6 +12,8 @@ import type {
   Project,
   ServerSettings,
   ServerSettingsUpdatePayload,
+  SelfUpdateOverview,
+  SelfUpdateSettings,
   TeamMetadata,
   Thread,
   ToolUpdateOverview,
@@ -104,6 +106,8 @@ export interface ShellProps {
   serverSettingsError: string | null;
   toolUpdates?: ToolUpdateOverview;
   toolUpdatesLoading: boolean;
+  selfUpdate?: SelfUpdateOverview;
+  selfUpdateLoading: boolean;
   preferences: UserPreferences;
   preferencesLoading: boolean;
   theme: ThemeMode;
@@ -160,6 +164,9 @@ export interface ShellProps {
   onUpdateToolUpdateSettings: (payload: ToolUpdateSettings) => Promise<ToolUpdateOverview>;
   onCheckToolUpdates: (tool: ToolUpdateStatus["tool"] | "all") => Promise<ToolUpdateOverview>;
   onRunToolUpdate: (tool: ToolUpdateStatus["tool"] | "all") => Promise<ToolUpdateOverview>;
+  onUpdateSelfUpdateSettings: (payload: SelfUpdateSettings) => Promise<SelfUpdateOverview>;
+  onCheckSelfUpdate: () => Promise<SelfUpdateOverview>;
+  onRunSelfUpdate: () => Promise<SelfUpdateOverview>;
   onUpdateUserPreferences: (payload: UserPreferences) => Promise<UserPreferences>;
   onTestNotificationSettings: () => Promise<void>;
   onLoadWorkspaceTree: (workspaceID: string, path?: string) => Promise<WorkspaceTreeEntry>;

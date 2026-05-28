@@ -224,6 +224,18 @@ func TestPrintSetupTokenIfNeededWritesOnlyWhenSetupIsPending(t *testing.T) {
 	}
 }
 
+func TestRunCLIVersion(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	handled, code := runCLI(context.Background(), []string{"--version"}, strings.NewReader(""), &stdout, &stderr)
+	if !handled || code != 0 {
+		t.Fatalf("runCLI handled=%v code=%d stderr=%q", handled, code, stderr.String())
+	}
+	if got := stdout.String(); !strings.Contains(got, "commit") || !strings.Contains(got, "built") {
+		t.Fatalf("stdout = %q, want version info", got)
+	}
+}
+
 func TestPrintSetupTokenIfNeededDoesNotWriteTokenToLogFile(t *testing.T) {
 	t.Chdir(t.TempDir())
 	previousLogger := slog.Default()

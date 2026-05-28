@@ -150,6 +150,31 @@ export interface ToolUpdateOverview {
   tools: ToolUpdateStatus[];
 }
 
+export interface SelfUpdateSettings {
+  auto_enabled: boolean;
+  time_of_day: string;
+  timezone: string;
+  channel: "release" | "dev";
+}
+
+export interface SelfUpdateStatus {
+  current_version: string;
+  latest_version?: string;
+  update_available?: boolean | null;
+  state: string;
+  message?: string;
+  last_checked_at?: string | null;
+  last_updated_at?: string | null;
+  last_error?: string;
+  restart_required: boolean;
+  channel: "release" | "dev";
+}
+
+export interface SelfUpdateOverview {
+  settings: SelfUpdateSettings;
+  status: SelfUpdateStatus;
+}
+
 export interface UserPreferences {
   show_ttft: boolean;
   show_tps: boolean;

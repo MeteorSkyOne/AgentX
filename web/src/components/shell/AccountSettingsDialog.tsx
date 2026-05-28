@@ -1,12 +1,13 @@
 import type { Dispatch, SetStateAction } from "react";
 import { Download, LogOut, RefreshCw, Save, Send, Server as ServerIcon, Upload } from "lucide-react";
-import type { NotificationSettings, Organization, Project, ServerSettings, ToolUpdateOverview, User, UserPreferences } from "@/api/types";
+import type { NotificationSettings, Organization, Project, SelfUpdateOverview, SelfUpdateSettings, ServerSettings, ToolUpdateOverview, User, UserPreferences } from "@/api/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import type { BrowserNotificationPermission } from "@/notifications/browser";
@@ -50,6 +51,8 @@ interface AccountSettingsDialogProps {
   serverSettingsError: string | null;
   toolUpdates?: ToolUpdateOverview;
   toolUpdatesLoading: boolean;
+  selfUpdate?: SelfUpdateOverview;
+  selfUpdateLoading: boolean;
   toolAutoEnabled: boolean;
   setToolAutoEnabled: BooleanSetter;
   toolTimeOfDay: string;
@@ -66,6 +69,20 @@ interface AccountSettingsDialogProps {
   saveToolUpdateSettings: () => void | Promise<void>;
   checkAllToolUpdates: () => void | Promise<void>;
   runAllToolUpdates: () => void | Promise<void>;
+  selfAutoEnabled: boolean;
+  setSelfAutoEnabled: BooleanSetter;
+  selfTimeOfDay: string;
+  setSelfTimeOfDay: StringSetter;
+  selfTimezone: string;
+  setSelfTimezone: StringSetter;
+  selfChannel: SelfUpdateSettings["channel"];
+  setSelfChannel: Dispatch<SetStateAction<SelfUpdateSettings["channel"]>>;
+  selfSettingsPending: boolean;
+  selfActionStatus: string | null;
+  selfActionError: string | null;
+  saveSelfUpdateSettings: () => void | Promise<void>;
+  checkSelfUpdateNow: () => void | Promise<void>;
+  runSelfUpdateNow: () => void | Promise<void>;
   serverListenIP: string;
   setServerListenIP: StringSetter;
   serverListenPort: string;
@@ -131,6 +148,8 @@ export function AccountSettingsDialog({
   serverSettingsError,
   toolUpdates,
   toolUpdatesLoading,
+  selfUpdate,
+  selfUpdateLoading,
   toolAutoEnabled,
   setToolAutoEnabled,
   toolTimeOfDay,
@@ -147,6 +166,20 @@ export function AccountSettingsDialog({
   saveToolUpdateSettings,
   checkAllToolUpdates,
   runAllToolUpdates,
+  selfAutoEnabled,
+  setSelfAutoEnabled,
+  selfTimeOfDay,
+  setSelfTimeOfDay,
+  selfTimezone,
+  setSelfTimezone,
+  selfChannel,
+  setSelfChannel,
+  selfSettingsPending,
+  selfActionStatus,
+  selfActionError,
+  saveSelfUpdateSettings,
+  checkSelfUpdateNow,
+  runSelfUpdateNow,
   serverListenIP,
   setServerListenIP,
   serverListenPort,
@@ -599,6 +632,94 @@ export function AccountSettingsDialog({
                       </Button>
                     </div>
                   </div>
+                  <div className="grid gap-3 rounded-md border border-border p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-medium">AgentX self-update</h3>
+                        <p className="text-xs text-muted-foreground">
+                          {selfUpdateLoading ? "Loading version" : selfUpdateSummary(selfUpdate)}
+                        </p>
+                      </div>
+                      <label className="flex items-center gap-2 text-sm">
+                        <Switch
+                          checked={selfAutoEnabled}
+                          disabled={selfUpdateLoading || selfSettingsPending}
+                          aria-label="Enable automatic AgentX updates"
+                          onCheckedChange={setSelfAutoEnabled}
+                        />
+                        Auto
+                      </label>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-[8rem_1fr_8rem]">
+                      <div className="space-y-2">
+                        <Label htmlFor="self-update-time">Daily time</Label>
+                        <Input
+                          id="self-update-time"
+                          type="time"
+                          value={selfTimeOfDay}
+                          onChange={(event) => setSelfTimeOfDay(event.target.value)}
+                          disabled={selfUpdateLoading || selfSettingsPending}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="self-update-timezone">Timezone</Label>
+                        <Input
+                          id="self-update-timezone"
+                          value={selfTimezone}
+                          onChange={(event) => setSelfTimezone(event.target.value)}
+                          disabled={selfUpdateLoading || selfSettingsPending}
+                          placeholder="Local or Asia/Shanghai"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="self-update-channel">Channel</Label>
+                        <Select
+                          id="self-update-channel"
+                          value={selfChannel}
+                          disabled={selfUpdateLoading || selfSettingsPending}
+                          onChange={(event) => setSelfChannel(event.target.value as SelfUpdateSettings["channel"])}
+                        >
+                          <option value="release">Release</option>
+                          <option value="dev">Dev</option>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="grid gap-1 rounded-md bg-muted px-3 py-2 text-xs">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-medium">AgentX</span>
+                        <span className="text-muted-foreground">{selfUpdate?.status.state ?? "idle"}</span>
+                      </div>
+                      <p className="truncate text-muted-foreground">
+                        {selfUpdate?.status.current_version || "unknown"}
+                        {selfUpdate?.status.latest_version ? ` -> ${selfUpdate.status.latest_version}` : ""}
+                        {selfUpdate?.status.restart_required ? " · restart required" : ""}
+                      </p>
+                    </div>
+                    {selfUpdate?.status.restart_required ? (
+                      <p className="text-xs text-muted-foreground">
+                        Restart AgentX to run the installed version.
+                      </p>
+                    ) : null}
+                    {(selfActionError || selfActionStatus || selfUpdate?.status.last_error || selfUpdate?.status.message) && (
+                      <p className={cn("text-sm", selfActionError || selfUpdate?.status.last_error ? "text-destructive" : "text-muted-foreground")}>
+                        {selfActionError ?? selfUpdate?.status.last_error ?? selfUpdate?.status.message ?? selfActionStatus}
+                      </p>
+                    )}
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Button type="button" variant="outline" onClick={checkSelfUpdateNow} disabled={selfUpdateLoading || selfSettingsPending}>
+                        <RefreshCw className="h-4 w-4" />
+                        Check
+                      </Button>
+                      <Button type="button" variant="outline" onClick={runSelfUpdateNow} disabled={selfUpdateLoading || selfSettingsPending}>
+                        <Download className="h-4 w-4" />
+                        Update
+                      </Button>
+                      <Button type="button" onClick={saveSelfUpdateSettings} disabled={selfUpdateLoading || selfSettingsPending}>
+                        <Save className="h-4 w-4" />
+                        Save Self-Update
+                      </Button>
+                    </div>
+                  </div>
                 </div>
                 <DialogFooter>
                   <Button variant="outline" onClick={() => setAccountSettingsOpen(false)}>
@@ -620,6 +741,15 @@ function runtimeUpdateSummary(overview?: ToolUpdateOverview): string {
   if (!overview) return "Version status unavailable";
   const updates = overview.tools.filter((tool) => tool.update_available).length;
   if (updates > 0) return `${updates} update${updates === 1 ? "" : "s"} available`;
+  return overview.settings.auto_enabled
+    ? `Auto updates at ${overview.settings.time_of_day} ${overview.settings.timezone}`
+    : "Automatic updates disabled";
+}
+
+function selfUpdateSummary(overview?: SelfUpdateOverview): string {
+  if (!overview) return "Version status unavailable";
+  if (overview.status.update_available) return "Update available";
+  if (overview.status.restart_required) return "Restart required";
   return overview.settings.auto_enabled
     ? `Auto updates at ${overview.settings.time_of_day} ${overview.settings.timezone}`
     : "Automatic updates disabled";

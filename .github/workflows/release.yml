@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'dev-release' }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+
 jobs:
   build:
     name: Build ${{ matrix.target }}
@@ -101,6 +105,44 @@ jobs:
           path: release/*
           if-no-files-found: error
           retention-days: 14
+
+  dev-release:
+    name: Publish dev prerelease
+    needs: build
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: agentx-*
+          path: release
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum agentx-* > SHA256SUMS
+
+      - name: Create rolling dev release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: dev
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release delete "$TAG_NAME" --repo "$REPO" --cleanup-tag --yes >/dev/null 2>&1 || true
+          gh release create "$TAG_NAME" release/* \
+            --repo "$REPO" \
+            --title "dev" \
+            --notes "Development build from ${GITHUB_SHA}" \
+            --prerelease \
+            --latest=false \
+            --target "$GITHUB_SHA"
 
   release:
     name: Publish GitHub Release

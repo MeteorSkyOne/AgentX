@@ -29,6 +29,7 @@ import (
 	"github.com/meteorsky/agentx/internal/runtime/codexpersist"
 	"github.com/meteorsky/agentx/internal/runtime/fake"
 	sqlitestore "github.com/meteorsky/agentx/internal/store/sqlite"
+	"github.com/meteorsky/agentx/internal/version"
 	"github.com/meteorsky/agentx/internal/webdist"
 )
 
@@ -63,6 +64,7 @@ func main() {
 		slog.Error("create data dir", "error", err)
 		os.Exit(1)
 	}
+	slog.Info("agentx starting", "version", version.Short(), "commit", version.Commit, "built", version.Date)
 
 	st, err := sqlitestore.Open(ctx, cfg.SQLitePath)
 	if err != nil {
@@ -111,6 +113,7 @@ func main() {
 		DataDir:               cfg.DataDir,
 		ServerSettings:        cfg.Server,
 		ToolUpdateSettings:    cfg.ToolUpdates,
+		SelfUpdateSettings:    cfg.SelfUpdates,
 		ServerAddr:            cfg.Addr,
 		AddrOverride:          cfg.AddrOverrideActive,
 		AddrOverrideValue:     cfg.AddrOverrideValue,
@@ -135,6 +138,9 @@ func main() {
 			CodexCommand:  cfg.CodexCommand,
 			ClaudeCommand: cfg.ClaudeCommand,
 		},
+		SelfUpdates: app.SelfUpdateOptions{
+			GitHubRepo: cfg.GitHubRepo,
+		},
 		Runtimes: runtimes,
 	})
 	if err := a.StartScheduledTasks(ctx); err != nil {
@@ -143,6 +149,10 @@ func main() {
 	}
 	if err := a.StartToolUpdates(ctx); err != nil {
 		slog.Error("start tool updates", "error", err)
+		os.Exit(1)
+	}
+	if err := a.StartSelfUpdate(ctx); err != nil {
+		slog.Error("start self update", "error", err)
 		os.Exit(1)
 	}
 	a.StartTerminalManager(ctx)
@@ -185,6 +195,10 @@ func main() {
 }
 
 func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) (bool, int) {
+	if len(args) == 1 && (args[0] == "--version" || args[0] == "version") {
+		_, _ = fmt.Fprintln(stdout, version.Info())
+		return true, 0
+	}
 	if len(args) == 0 || args[0] != "auth" {
 		return false, 0
 	}

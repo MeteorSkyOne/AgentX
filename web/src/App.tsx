@@ -4,6 +4,7 @@ import {
   agents,
   channelAgents,
   channelThreads,
+  checkSelfUpdate,
   checkToolUpdates,
   clearToken,
   conversationContext,
@@ -23,8 +24,10 @@ import {
   organizations,
   projectChannels,
   projects,
+  runSelfUpdate,
   serverSettings,
   setChannelAgents,
+  selfUpdate,
   toolUpdates,
   testNotificationSettings,
   updateAgent,
@@ -33,6 +36,7 @@ import {
   updateNotificationSettings,
   updateProject,
   updateServerSettings,
+  updateSelfUpdateSettings,
   updateToolUpdateSettings,
   updateThread,
   updateUserPreferences,
@@ -51,6 +55,8 @@ import type {
   Message,
   NotificationSettings,
   Project,
+  SelfUpdateOverview,
+  SelfUpdateSettings,
   ServerSettings,
   ServerSettingsUpdatePayload,
   Thread,
@@ -106,6 +112,11 @@ function toolUpdatesRefetchInterval(query: { state: { data?: ToolUpdateOverview 
     (tool) => tool.state === "checking" || tool.state === "updating" || tool.runtime_reset_pending
   );
   return hasActiveToolAction ? 5_000 : 60_000;
+}
+
+function selfUpdateRefetchInterval(query: { state: { data?: SelfUpdateOverview } }): number {
+  const state = query.state.data?.status.state;
+  return state === "checking" || state === "downloading" || state === "replacing" ? 5_000 : 60_000;
 }
 
 export default function App() {
@@ -231,6 +242,15 @@ export default function App() {
     enabled: hasSession && Boolean(selectedOrganizationID),
     retry: false,
     refetchInterval: toolUpdatesRefetchInterval,
+    refetchIntervalInBackground: false
+  });
+
+  const selfUpdateQuery = useQuery({
+    queryKey: ["self-update", selectedOrganizationID],
+    queryFn: () => selfUpdate(selectedOrganizationID as string),
+    enabled: hasSession && Boolean(selectedOrganizationID),
+    retry: false,
+    refetchInterval: selfUpdateRefetchInterval,
     refetchIntervalInBackground: false
   });
 
@@ -939,6 +959,24 @@ export default function App() {
     return updated;
   }
 
+  async function handleUpdateSelfUpdateSettings(payload: SelfUpdateSettings): Promise<SelfUpdateOverview> {
+    const updated = await updateSelfUpdateSettings(selectedOrganizationID as string, payload);
+    await queryClient.invalidateQueries({ queryKey: ["self-update", selectedOrganizationID] });
+    return updated;
+  }
+
+  async function handleCheckSelfUpdate(): Promise<SelfUpdateOverview> {
+    const updated = await checkSelfUpdate(selectedOrganizationID as string);
+    await queryClient.invalidateQueries({ queryKey: ["self-update", selectedOrganizationID] });
+    return updated;
+  }
+
+  async function handleRunSelfUpdate(): Promise<SelfUpdateOverview> {
+    const updated = await runSelfUpdate(selectedOrganizationID as string);
+    await queryClient.invalidateQueries({ queryKey: ["self-update", selectedOrganizationID] });
+    return updated;
+  }
+
   async function handleUpdateUserPreferences(payload: UserPreferences): Promise<UserPreferences> {
     const updated = await updateUserPreferences(payload);
     await queryClient.invalidateQueries({ queryKey: ["user-preferences", sessionToken] });
@@ -995,6 +1033,8 @@ export default function App() {
       serverSettingsError={serverSettingsQuery.error instanceof Error ? serverSettingsQuery.error.message : null}
       toolUpdates={toolUpdatesQuery.data}
       toolUpdatesLoading={toolUpdatesQuery.isLoading}
+      selfUpdate={selfUpdateQuery.data}
+      selfUpdateLoading={selfUpdateQuery.isLoading}
       preferences={userPreferencesQuery.data ?? { show_ttft: true, show_tps: true, hide_avatars: false }}
       preferencesLoading={userPreferencesQuery.isLoading}
       theme={theme}
@@ -1019,6 +1059,9 @@ export default function App() {
       onUpdateToolUpdateSettings={handleUpdateToolUpdateSettings}
       onCheckToolUpdates={handleCheckToolUpdates}
       onRunToolUpdate={handleRunToolUpdate}
+      onUpdateSelfUpdateSettings={handleUpdateSelfUpdateSettings}
+      onCheckSelfUpdate={handleCheckSelfUpdate}
+      onRunSelfUpdate={handleRunSelfUpdate}
       onUpdateUserPreferences={handleUpdateUserPreferences}
       onTestNotificationSettings={handleTestNotificationSettings}
       onLoadWorkspaceTree={handleLoadWorkspaceTree}

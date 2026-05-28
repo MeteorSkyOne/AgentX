@@ -32,6 +32,9 @@ type Config struct {
 	AdminToken                  string
 	Server                      ServerSettings
 	ToolUpdates                 ToolUpdateSettings
+	SelfUpdates                 SelfUpdateSettings
+	GitHubRepo                  string
+	SelfUpdateChannel           string
 	DefaultAgentKind            string
 	DefaultAgentModel           string
 	CodexCommand                string
@@ -77,9 +80,17 @@ type ToolUpdateSettings struct {
 	CodexEnabled  bool   `json:"codex_enabled" toml:"codex_enabled"`
 }
 
+type SelfUpdateSettings struct {
+	AutoEnabled bool   `json:"auto_enabled" toml:"auto_enabled"`
+	TimeOfDay   string `json:"time_of_day" toml:"time_of_day"`
+	Timezone    string `json:"timezone" toml:"timezone"`
+	Channel     string `json:"channel" toml:"channel"`
+}
+
 type fileConfig struct {
 	Server      ServerSettings     `toml:"server"`
 	ToolUpdates ToolUpdateSettings `toml:"tool_updates"`
+	SelfUpdates SelfUpdateSettings `toml:"self_update"`
 }
 
 var configFileMu sync.Mutex
@@ -96,6 +107,18 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.ToolUpdates = toolUpdates
+	selfUpdates, err := LoadSelfUpdateSettings(cfg.DataDir)
+	if err != nil {
+		return Config{}, err
+	}
+	if cfg.SelfUpdateChannel != "" {
+		selfUpdates.Channel = cfg.SelfUpdateChannel
+		selfUpdates, err = NormalizeSelfUpdateSettings(selfUpdates, "AGENTX_SELF_UPDATE_CHANNEL")
+		if err != nil {
+			return Config{}, err
+		}
+	}
+	cfg.SelfUpdates = selfUpdates
 	addrOverride := strings.TrimSpace(os.Getenv("AGENTX_ADDR"))
 	cfg.AddrOverrideActive = addrOverride != ""
 	cfg.AddrOverrideValue = addrOverride
@@ -117,6 +140,9 @@ func FromEnv() Config {
 		AdminToken:                  getenv("AGENTX_ADMIN_TOKEN", randomToken()),
 		Server:                      DefaultServerSettings(),
 		ToolUpdates:                 DefaultToolUpdateSettings(),
+		SelfUpdates:                 DefaultSelfUpdateSettings(),
+		GitHubRepo:                  getenv("AGENTX_GITHUB_REPO", "meteorsky/agentx"),
+		SelfUpdateChannel:           strings.TrimSpace(os.Getenv("AGENTX_SELF_UPDATE_CHANNEL")),
 		DefaultAgentKind:            getenv("AGENTX_DEFAULT_AGENT_KIND", "fake"),
 		DefaultAgentModel:           getenv("AGENTX_DEFAULT_AGENT_MODEL", ""),
 		CodexCommand:                getenv("AGENTX_CODEX_COMMAND", "codex"),
@@ -168,6 +194,9 @@ func SaveServerSettings(dataDir string, settings ServerSettings) (ServerSettings
 	if isZeroToolUpdateSettings(fileCfg.ToolUpdates) {
 		fileCfg.ToolUpdates = DefaultToolUpdateSettings()
 	}
+	if isZeroSelfUpdateSettings(fileCfg.SelfUpdates) {
+		fileCfg.SelfUpdates = DefaultSelfUpdateSettings()
+	}
 	fileCfg.Server = normalized
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		return ServerSettings{}, fmt.Errorf("create config dir: %w", err)
@@ -204,12 +233,54 @@ func SaveToolUpdateSettings(dataDir string, settings ToolUpdateSettings) (ToolUp
 	if isZeroServerSettings(fileCfg.Server) {
 		fileCfg.Server = DefaultServerSettings()
 	}
+	if isZeroSelfUpdateSettings(fileCfg.SelfUpdates) {
+		fileCfg.SelfUpdates = DefaultSelfUpdateSettings()
+	}
 	fileCfg.ToolUpdates = normalized
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		return ToolUpdateSettings{}, fmt.Errorf("create config dir: %w", err)
 	}
 	if err := os.WriteFile(configPath, []byte(configFile(fileCfg)), 0o644); err != nil {
 		return ToolUpdateSettings{}, fmt.Errorf("write config file %s: %w", configPath, err)
+	}
+	return normalized, nil
+}
+
+func LoadSelfUpdateSettings(dataDir string) (SelfUpdateSettings, error) {
+	configPath := ConfigPath(dataDir)
+	configFileMu.Lock()
+	defer configFileMu.Unlock()
+	fileCfg, err := loadOrCreateRawFileConfig(configPath)
+	if err != nil {
+		return SelfUpdateSettings{}, err
+	}
+	return NormalizeSelfUpdateSettings(fileCfg.SelfUpdates, configPath)
+}
+
+func SaveSelfUpdateSettings(dataDir string, settings SelfUpdateSettings) (SelfUpdateSettings, error) {
+	configPath := ConfigPath(dataDir)
+	normalized, err := NormalizeSelfUpdateSettings(settings, configPath)
+	if err != nil {
+		return SelfUpdateSettings{}, err
+	}
+	configFileMu.Lock()
+	defer configFileMu.Unlock()
+	fileCfg, err := loadOrCreateRawFileConfig(configPath)
+	if err != nil {
+		return SelfUpdateSettings{}, err
+	}
+	if isZeroServerSettings(fileCfg.Server) {
+		fileCfg.Server = DefaultServerSettings()
+	}
+	if isZeroToolUpdateSettings(fileCfg.ToolUpdates) {
+		fileCfg.ToolUpdates = DefaultToolUpdateSettings()
+	}
+	fileCfg.SelfUpdates = normalized
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		return SelfUpdateSettings{}, fmt.Errorf("create config dir: %w", err)
+	}
+	if err := os.WriteFile(configPath, []byte(configFile(fileCfg)), 0o644); err != nil {
+		return SelfUpdateSettings{}, fmt.Errorf("write config file %s: %w", configPath, err)
 	}
 	return normalized, nil
 }
@@ -241,6 +312,15 @@ func DefaultToolUpdateSettings() ToolUpdateSettings {
 	}
 }
 
+func DefaultSelfUpdateSettings() SelfUpdateSettings {
+	return SelfUpdateSettings{
+		AutoEnabled: false,
+		TimeOfDay:   "04:00",
+		Timezone:    defaultToolUpdateTimezone(),
+		Channel:     "release",
+	}
+}
+
 func isZeroServerSettings(settings ServerSettings) bool {
 	return settings.ListenIP == "" &&
 		settings.ListenPort == 0 &&
@@ -256,6 +336,13 @@ func isZeroToolUpdateSettings(settings ToolUpdateSettings) bool {
 		!settings.AutoEnabled &&
 		!settings.ClaudeEnabled &&
 		!settings.CodexEnabled
+}
+
+func isZeroSelfUpdateSettings(settings SelfUpdateSettings) bool {
+	return strings.TrimSpace(settings.TimeOfDay) == "" &&
+		strings.TrimSpace(settings.Timezone) == "" &&
+		strings.TrimSpace(settings.Channel) == "" &&
+		!settings.AutoEnabled
 }
 
 func defaultToolUpdateTimezone() string {
@@ -335,6 +422,46 @@ func NormalizeToolUpdateSettings(settings ToolUpdateSettings, path string) (Tool
 	return settings, nil
 }
 
+func NormalizeSelfUpdateSettings(settings SelfUpdateSettings, path string) (SelfUpdateSettings, error) {
+	if isZeroSelfUpdateSettings(settings) {
+		return DefaultSelfUpdateSettings(), nil
+	}
+	if strings.TrimSpace(settings.TimeOfDay) == "" {
+		settings.TimeOfDay = "04:00"
+	}
+	settings.TimeOfDay = strings.TrimSpace(settings.TimeOfDay)
+	parts := strings.Split(settings.TimeOfDay, ":")
+	if len(parts) != 2 || len(parts[0]) != 2 || len(parts[1]) != 2 {
+		return SelfUpdateSettings{}, fmt.Errorf("config file %s: self_update.time_of_day must use HH:MM", path)
+	}
+	hour, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return SelfUpdateSettings{}, fmt.Errorf("config file %s: self_update.time_of_day must use HH:MM", path)
+	}
+	minute, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return SelfUpdateSettings{}, fmt.Errorf("config file %s: self_update.time_of_day must use HH:MM", path)
+	}
+	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return SelfUpdateSettings{}, fmt.Errorf("config file %s: self_update.time_of_day must use HH:MM", path)
+	}
+	settings.Timezone = strings.TrimSpace(settings.Timezone)
+	if settings.Timezone == "" || settings.Timezone == "Local" {
+		settings.Timezone = defaultToolUpdateTimezone()
+	}
+	if _, err := time.LoadLocation(settings.Timezone); err != nil {
+		return SelfUpdateSettings{}, fmt.Errorf("config file %s: self_update.timezone is invalid: %w", path, err)
+	}
+	settings.Channel = strings.ToLower(strings.TrimSpace(settings.Channel))
+	if settings.Channel == "" {
+		settings.Channel = "release"
+	}
+	if settings.Channel != "release" && settings.Channel != "dev" {
+		return SelfUpdateSettings{}, fmt.Errorf("config file %s: self_update.channel must be release or dev", path)
+	}
+	return settings, nil
+}
+
 func ServerAddr(settings ServerSettings) string {
 	return net.JoinHostPort(settings.ListenIP, strconv.Itoa(settings.ListenPort))
 }
@@ -390,16 +517,21 @@ func loadOrCreateFileConfig(path string) (fileConfig, error) {
 	if normErr != nil {
 		return fileConfig{}, normErr
 	}
+	cfg.SelfUpdates, normErr = NormalizeSelfUpdateSettings(cfg.SelfUpdates, path)
+	if normErr != nil {
+		return fileConfig{}, normErr
+	}
 	return cfg, nil
 }
 
 func defaultConfigFile() string {
-	return configFile(fileConfig{Server: DefaultServerSettings(), ToolUpdates: DefaultToolUpdateSettings()})
+	return configFile(fileConfig{Server: DefaultServerSettings(), ToolUpdates: DefaultToolUpdateSettings(), SelfUpdates: DefaultSelfUpdateSettings()})
 }
 
 func configFile(cfg fileConfig) string {
 	settings := cfg.Server
 	toolUpdates := cfg.ToolUpdates
+	selfUpdates := cfg.SelfUpdates
 	return fmt.Sprintf(`# AgentX configuration.
 # AGENTX_ADDR overrides server.listen_ip and server.listen_port when set.
 # HTTPS changes require restarting AgentX.
@@ -420,7 +552,13 @@ time_of_day = %q
 timezone = %q
 claude_enabled = %t
 codex_enabled = %t
-`, settings.ListenIP, settings.ListenPort, settings.TLS.Enabled, settings.TLS.ListenPort, settings.TLS.CertFile, settings.TLS.KeyFile, toolUpdates.AutoEnabled, toolUpdates.TimeOfDay, toolUpdates.Timezone, toolUpdates.ClaudeEnabled, toolUpdates.CodexEnabled)
+
+[self_update]
+auto_enabled = %t
+time_of_day = %q
+timezone = %q
+channel = %q
+`, settings.ListenIP, settings.ListenPort, settings.TLS.Enabled, settings.TLS.ListenPort, settings.TLS.CertFile, settings.TLS.KeyFile, toolUpdates.AutoEnabled, toolUpdates.TimeOfDay, toolUpdates.Timezone, toolUpdates.ClaudeEnabled, toolUpdates.CodexEnabled, selfUpdates.AutoEnabled, selfUpdates.TimeOfDay, selfUpdates.Timezone, selfUpdates.Channel)
 }
 
 func defaultDataDir() string {
