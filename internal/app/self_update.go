@@ -519,15 +519,28 @@ func (s *selfUpdateService) replaceExecutable(newBinary string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Chmod(newBinary, info.Mode().Perm()|0o700); err != nil {
+	perm := info.Mode().Perm() | 0o700
+
+	// Stage the new binary in the install directory first so the final swap is an
+	// atomic same-filesystem rename. Renaming straight from the download temp dir
+	// fails with "invalid cross-device link" when that temp dir and the install
+	// dir are on different filesystems (e.g. /tmp on tmpfs vs the binary in $HOME).
+	staged := filepath.Join(filepath.Dir(current), "."+filepath.Base(current)+".new")
+	_ = os.Remove(staged)
+	defer os.Remove(staged)
+	if err := copyExecutable(newBinary, staged, perm); err != nil {
+		return fmt.Errorf("stage new binary: %w", err)
+	}
+	if err := os.Chmod(staged, perm); err != nil {
 		return err
 	}
+
 	backup := current + ".old"
 	_ = os.Remove(backup)
 	if err := os.Rename(current, backup); err != nil {
 		return fmt.Errorf("backup current binary: %w", err)
 	}
-	if err := os.Rename(newBinary, current); err != nil {
+	if err := os.Rename(staged, current); err != nil {
 		_ = os.Rename(backup, current)
 		return fmt.Errorf("install new binary: %w", err)
 	}
@@ -535,6 +548,18 @@ func (s *selfUpdateService) replaceExecutable(newBinary string) error {
 	s.installedPath = current
 	s.mu.Unlock()
 	return nil
+}
+
+// copyExecutable copies src to dst with the given mode, used to stage a freshly
+// downloaded binary next to the installed one so the swap can be an atomic rename
+// even when the download lives on a different filesystem.
+func copyExecutable(src string, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	return writeExtractedBinary(dst, in, mode)
 }
 
 func releaseVersion(channel string, release *githubRelease) string {

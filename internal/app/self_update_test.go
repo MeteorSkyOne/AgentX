@@ -253,6 +253,53 @@ func TestExtractAgentXBinaryRejectsMissingBinary(t *testing.T) {
 	}
 }
 
+func TestReplaceExecutableStagesNewBinaryFromAnotherDir(t *testing.T) {
+	installDir := t.TempDir()
+	current := filepath.Join(installDir, executableName())
+	if err := os.WriteFile(current, []byte("old-binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// The new binary lives in a separate directory, mimicking the /tmp download
+	// whose direct rename onto the install dir fails with a cross-device link.
+	newBinary := filepath.Join(t.TempDir(), executableName())
+	if err := os.WriteFile(newBinary, []byte("new-binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &selfUpdateService{executable: func() (string, error) { return current, nil }}
+	if err := s.replaceExecutable(newBinary); err != nil {
+		t.Fatalf("replaceExecutable() error = %v", err)
+	}
+
+	got, err := os.ReadFile(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "new-binary" {
+		t.Fatalf("installed binary = %q, want new-binary", got)
+	}
+	info, err := os.Stat(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o100 == 0 {
+		t.Fatalf("installed binary is not executable: %v", info.Mode())
+	}
+	if s.installedPath == "" {
+		t.Fatalf("installedPath not recorded")
+	}
+
+	resolved, err := filepath.EvalSymlinks(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staged := filepath.Join(filepath.Dir(resolved), "."+filepath.Base(resolved)+".new")
+	if _, err := os.Stat(staged); !os.IsNotExist(err) {
+		t.Fatalf("staged file should be removed, stat err = %v", err)
+	}
+}
+
 func restoreAppVersionVars(t *testing.T) {
 	t.Helper()
 	oldVersion := version.Version
