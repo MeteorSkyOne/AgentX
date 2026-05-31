@@ -34,9 +34,10 @@ type persistentSession struct {
 	threadID string
 	model    string
 
-	mu                 sync.Mutex
-	eventMu            sync.Mutex
-	sessionID          string
+	mu                    sync.Mutex
+	eventMu               sync.Mutex
+	processItemsDelivered int // guarded by eventMu
+	sessionID             string
 	alive              bool
 	started            bool
 	turnHeld           bool
@@ -280,11 +281,10 @@ func (s *persistentSession) runTurn(ctx context.Context, input runtime.Input) {
 	s.startTurnAndProcess(ctx, input)
 }
 
-func (s *persistentSession) startTurnAndProcess(ctx context.Context, input runtime.Input) {
-	userInput := buildUserInput(input)
+func (s *persistentSession) buildTurnParams(input runtime.Input) map[string]any {
 	turnParams := map[string]any{
 		"threadId": s.threadID,
-		"input":    userInput,
+		"input":    buildUserInput(input),
 	}
 	if model := strings.TrimSpace(s.req.Model); model != "" {
 		turnParams["model"] = model
@@ -293,22 +293,38 @@ func (s *persistentSession) startTurnAndProcess(ctx context.Context, input runti
 		turnParams["effort"] = effort
 	}
 	s.addTurnOverrides(turnParams)
+	return turnParams
+}
 
-	result, err := s.rpc.Call(ctx, "turn/start", turnParams)
+// startTurn sends turn/start and registers the active turn id. It returns false
+// when the turn could not be started, in which case a failure event has already
+// been emitted.
+func (s *persistentSession) startTurn(ctx context.Context, input runtime.Input) bool {
+	result, err := s.rpc.Call(ctx, "turn/start", s.buildTurnParams(input))
 	if err != nil {
 		s.emit(rpcFailureEvent("turn/start failed", err))
-		return
+		return false
 	}
-	turnID := turnIDFromResult(result)
-	s.setActiveTurnID(turnID)
+	s.setActiveTurnID(turnIDFromResult(result))
 	if err := s.interruptActiveTurnIfRequested(ctx); err != nil {
 		s.emit(rpcFailureEvent("turn/interrupt failed", err))
+		return false
+	}
+	return true
+}
+
+func (s *persistentSession) startTurnAndProcess(ctx context.Context, input runtime.Input) {
+	if !s.startTurn(ctx, input) {
 		return
 	}
-
 	s.processNotifications(ctx)
 }
 
+// handleGoalSet sets an autonomous goal and runs it as a single AgentX turn.
+// codex drives a goal across multiple server-side turns (each ends with
+// turn/completed, then codex auto-continues with a fresh turn) until the goal
+// reaches a terminal status or is cleared, so completion is detected by
+// processGoalNotifications rather than the first turn/completed.
 func (s *persistentSession) handleGoalSet(ctx context.Context, input runtime.Input, objective string) {
 	_, err := s.rpc.Call(ctx, "thread/goal/set", map[string]any{
 		"threadId":  s.threadID,
@@ -323,7 +339,10 @@ func (s *persistentSession) handleGoalSet(ctx context.Context, input runtime.Inp
 		Context:     input.Context,
 		Attachments: input.Attachments,
 	}
-	s.startTurnAndProcess(ctx, goalInput)
+	if !s.startTurn(ctx, goalInput) {
+		return
+	}
+	s.processGoalNotifications(ctx)
 }
 
 func (s *persistentSession) handleGoalClear(ctx context.Context) {

@@ -115,6 +115,20 @@ func (c *rpcClient) Notifications() <-chan jsonRPCMessage {
 	return c.notifyCh
 }
 
+// drain discards notifications still buffered from a previous session on this
+// pooled process. A new session calls this before starting its turn so leftover
+// events — e.g. from a goal that ended (or was cleared) while codex was still
+// auto-continuing — don't surface in the next session.
+func (c *rpcClient) drain() {
+	for {
+		select {
+		case <-c.notifyCh:
+		default:
+			return
+		}
+	}
+}
+
 func (c *rpcClient) RespondToRequest(id any, result any) error {
 	msg := map[string]any{
 		"jsonrpc": "2.0",

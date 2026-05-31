@@ -56,6 +56,10 @@ func (r *Runtime) StartSession(ctx context.Context, req runtime.StartSessionRequ
 			proc.Kill()
 			return nil, err
 		}
+	} else {
+		// Reused process: drop any notifications left over from the previous
+		// session before this one starts its turn.
+		rpc.drain()
 	}
 
 	sess := newPersistentSession(proc, rpc, key, r, req)
