@@ -488,6 +488,79 @@ describe("MessagePane avatar density", () => {
   });
 });
 
+describe("MessagePane failure messages", () => {
+  it("renders the error reason from a persisted failed run message", async () => {
+    const { container } = await renderMessagePane({
+      messages: [
+        message({ id: "user-message", sender_type: "user", body: "do it" }),
+        message({
+          id: "bot-failure",
+          sender_type: "bot",
+          sender_id: "bot-1",
+          body: "",
+          metadata: { error: "claude exited with status 1" },
+        }),
+      ],
+      streaming: [],
+      onOpenWorkspacePath: () => undefined,
+    });
+
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert).toBeTruthy();
+    expect(alert?.textContent).toContain("claude exited with status 1");
+  });
+});
+
+describe("MessagePane retry action", () => {
+  it("shows Retry on the last agent reply and calls onRetryMessage", async () => {
+    const retried: string[] = [];
+    const { container } = await renderMessagePane({
+      messages: [
+        message({ id: "user-1", sender_type: "user", body: "do it" }),
+        message({ id: "bot-1", sender_type: "bot", sender_id: "bot-1", body: "Echo" }),
+      ],
+      streaming: [],
+      onOpenWorkspacePath: () => undefined,
+      onRetryMessage: async (m) => {
+        retried.push(m.id);
+      },
+    });
+
+    const retry = container.querySelector<HTMLButtonElement>('button[aria-label="Retry"]');
+    expect(retry).toBeTruthy();
+    await clickAsync(retry!);
+    expect(retried).toEqual(["bot-1"]);
+  });
+
+  it("hides Retry while a run is streaming", async () => {
+    const { container } = await renderMessagePane({
+      messages: [
+        message({ id: "user-1", sender_type: "user", body: "do it" }),
+        message({ id: "bot-1", sender_type: "bot", sender_id: "bot-1", body: "Echo" }),
+      ],
+      streaming: [{ runID: "run-1", agentID: "agent-1", text: "thinking" }],
+      onOpenWorkspacePath: () => undefined,
+      onRetryMessage: async () => undefined,
+    });
+
+    expect(container.querySelector('button[aria-label="Retry"]')).toBeNull();
+  });
+
+  it("hides Retry when the last message is not an agent reply", async () => {
+    const { container } = await renderMessagePane({
+      messages: [
+        message({ id: "bot-1", sender_type: "bot", sender_id: "bot-1", body: "Echo" }),
+        message({ id: "user-2", sender_type: "user", body: "another" }),
+      ],
+      streaming: [],
+      onOpenWorkspacePath: () => undefined,
+      onRetryMessage: async () => undefined,
+    });
+
+    expect(container.querySelector('button[aria-label="Retry"]')).toBeNull();
+  });
+});
+
 describe("isTextAttachmentPreviewSupported", () => {
   it("previews text attachments in the readonly editor", () => {
     expect(
@@ -553,6 +626,7 @@ async function renderMessagePane({
   streaming,
   preferences = { show_ttft: false, show_tps: false, hide_avatars: false },
   onOpenWorkspacePath,
+  onRetryMessage,
 }: {
   messages: Message[];
   streaming: Array<{
@@ -567,6 +641,7 @@ async function renderMessagePane({
   }>;
   preferences?: UserPreferences;
   onOpenWorkspacePath: (target: WorkspacePathTarget) => void;
+  onRetryMessage?: (message: Message) => Promise<void>;
 }): Promise<{
   container: HTMLDivElement;
   rerender: (
@@ -591,7 +666,7 @@ async function renderMessagePane({
   document.body.appendChild(container);
   const root = createRoot(container);
   mountedRoots.push({ root, container });
-  let current = { messages, streaming, preferences, onOpenWorkspacePath };
+  let current = { messages, streaming, preferences, onOpenWorkspacePath, onRetryMessage };
 
   async function render() {
     await act(async () => {
@@ -608,6 +683,7 @@ async function renderMessagePane({
           onUpdateMessage: async (_messageID: string, body: string) => message({ body }),
           onDeleteMessage: async () => undefined,
           onReplyMessage: () => undefined,
+          onRetryMessage: current.onRetryMessage,
           onLoadOlder: () => false,
           workspacePath: "/workspace/AgentX",
           onOpenWorkspacePath: current.onOpenWorkspacePath,

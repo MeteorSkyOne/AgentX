@@ -96,6 +96,7 @@ interface MobileShellProps {
   onDeleteThread: ShellProps["onDeleteThread"];
   onUpdateMessage: ShellProps["onUpdateMessage"];
   onDeleteMessage: ShellProps["onDeleteMessage"];
+  onRetryMessage?: ShellProps["onRetryMessage"];
   onLoadOlderMessages: ShellProps["onLoadOlderMessages"];
   onRespondToQuestion: ShellProps["onRespondToQuestion"];
   onSteerQueuedPrompt: ShellProps["onSteerQueuedPrompt"];
@@ -195,6 +196,7 @@ export function MobileShell({
   onDeleteThread,
   onUpdateMessage,
   onDeleteMessage,
+  onRetryMessage,
   onLoadOlderMessages,
   onRespondToQuestion,
   onSteerQueuedPrompt,
@@ -481,6 +483,7 @@ export function MobileShell({
               onDeleteThread={onDeleteThread}
               onUpdateMessage={onUpdateMessage}
               onDeleteMessage={onDeleteMessage}
+              onRetryMessage={onRetryMessage}
               onLoadOlderMessages={onLoadOlderMessages}
               onRespondToQuestion={onRespondToQuestion}
               onSteerQueuedPrompt={onSteerQueuedPrompt}

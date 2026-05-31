@@ -34,6 +34,7 @@ export interface MessagePaneProps {
   onUpdateMessage: (messageID: string, body: string) => Promise<Message>;
   onDeleteMessage: (message: Message) => Promise<void>;
   onReplyMessage: (message: Message) => void;
+  onRetryMessage?: (message: Message) => Promise<void>;
   onLoadOlder: () => boolean;
   onRespondToQuestion?: (questionID: string, answer: string) => Promise<void>;
   conversationKey?: string;

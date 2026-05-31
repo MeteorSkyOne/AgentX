@@ -109,6 +109,7 @@ interface DesktopShellProps {
   onDeleteThread: ShellProps["onDeleteThread"];
   onUpdateMessage: ShellProps["onUpdateMessage"];
   onDeleteMessage: ShellProps["onDeleteMessage"];
+  onRetryMessage?: ShellProps["onRetryMessage"];
   onLoadOlderMessages: ShellProps["onLoadOlderMessages"];
   onRespondToQuestion: ShellProps["onRespondToQuestion"];
   onSteerQueuedPrompt: ShellProps["onSteerQueuedPrompt"];
@@ -205,6 +206,7 @@ export function DesktopShell({
   onDeleteThread,
   onUpdateMessage,
   onDeleteMessage,
+  onRetryMessage,
   onLoadOlderMessages,
   onRespondToQuestion,
   onSteerQueuedPrompt,
@@ -619,6 +621,7 @@ export function DesktopShell({
                     onDeleteThread={onDeleteThread}
                     onUpdateMessage={onUpdateMessage}
                     onDeleteMessage={onDeleteMessage}
+                    onRetryMessage={onRetryMessage}
                     onLoadOlderMessages={onLoadOlderMessages}
                     onRespondToQuestion={onRespondToQuestion}
                     onSteerQueuedPrompt={onSteerQueuedPrompt}

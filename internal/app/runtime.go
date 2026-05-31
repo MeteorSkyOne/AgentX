@@ -157,7 +157,7 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 					CompletedAt: time.Now().UTC(),
 				}))
 			}
-			a.publishAgentRunFailedWithContext(userMessage, runID, target.Agent.ID, opts.Team, err)
+			a.failAgentRunWithMessage(context.WithoutCancel(ctx), userMessage, target.Agent, runID, activeRun, opts.Team, err)
 			sendResult(domain.Message{}, err)
 		}
 	}()
@@ -188,7 +188,7 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 			ProviderSessionID: providerSessionID,
 			CompletedAt:       time.Now().UTC(),
 		}))
-		a.publishAgentRunFailedWithContext(userMessage, runID, agent.ID, opts.Team, err)
+		a.failAgentRunWithMessage(failCtx, userMessage, agent, runID, activeRun, opts.Team, err)
 		sendResult(domain.Message{}, err)
 	}
 	slog.Info("agent run starting", runAttrs...)
@@ -308,7 +308,7 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 						return
 					}
 					err := errors.New("agent runtime event stream closed")
-					a.publishAgentRunFailedWithContext(userMessage, runID, agent.ID, opts.Team, err)
+					a.failAgentRunWithMessage(context.WithoutCancel(ctx), userMessage, agent, runID, activeRun, opts.Team, err)
 					sendResult(domain.Message{}, err)
 					activeRun.closeSession(context.WithoutCancel(ctx), session)
 					return
@@ -445,7 +445,7 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 					}))
 					a.setFailedAgentSession(ctx, agent.ID, userMessage, session.CurrentSessionID())
 					a.persistAgentSessionContextUsage(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, usage)
-					a.publishAgentRunFailedWithContext(userMessage, runID, agent.ID, opts.Team, err)
+					a.failAgentRunWithMessage(context.WithoutCancel(ctx), userMessage, agent, runID, activeRun, opts.Team, err)
 					sendResult(domain.Message{}, err)
 					activeRun.closeSession(context.WithoutCancel(ctx), session)
 					return

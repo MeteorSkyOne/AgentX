@@ -3,10 +3,12 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  CircleAlert,
   Copy,
   MessageSquare,
   Pencil,
   Reply,
+  RotateCcw,
   Save,
   Trash2,
 } from "lucide-react";
@@ -160,6 +162,8 @@ interface MessageItemProps {
   onUpdateMessage: (messageID: string, body: string) => Promise<Message>;
   onDeleteMessage: (message: Message) => Promise<void>;
   onReplyMessage: (message: Message) => void;
+  onRetryMessage?: (message: Message) => Promise<void>;
+  canRetry?: boolean;
   onJumpToReplyMessage?: (messageID: string) => void;
   workspacePath?: string;
   onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
@@ -184,6 +188,8 @@ function ConversationMessageItem({
   onUpdateMessage,
   onDeleteMessage,
   onReplyMessage,
+  onRetryMessage,
+  canRetry = false,
   onJumpToReplyMessage,
   workspacePath,
   onOpenWorkspacePath,
@@ -199,6 +205,10 @@ function ConversationMessageItem({
   const label = isBot ? agentName ?? "Agent" : isSystem ? "System" : "You";
   const initial = label.charAt(0).toUpperCase();
   const process = isBot ? processFromMetadata(message.metadata) : [];
+  const errorText =
+    typeof message.metadata?.error === "string" && message.metadata.error.trim() !== ""
+      ? message.metadata.error
+      : null;
   const metricsParts = isBot ? messageMetricsParts(message.metadata?.metrics, preferences) : [];
   const workingLabel = isBot ? messageWorkingLabel(message.metadata?.metrics) : null;
   const footerMetricsParts = workingLabel ? [workingLabel, ...metricsParts] : metricsParts;
@@ -262,6 +272,20 @@ function ConversationMessageItem({
     }
   }
 
+  async function retry() {
+    if (!onRetryMessage) return;
+    setPending(true);
+    setError(null);
+    try {
+      await onRetryMessage(message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Retry failed");
+      setPending(false);
+    }
+  }
+
+  const showRetry = isBot && canRetry && Boolean(onRetryMessage);
+
   return (
     <div
       className="group flex min-w-0 max-w-full gap-3 rounded-md px-1 py-1 hover:bg-accent/30 md:gap-4 md:px-2"
@@ -290,6 +314,19 @@ function ConversationMessageItem({
           </span>
           {!editing && (
             <div className="ml-auto flex items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
+              {showRetry && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  title="Retry"
+                  aria-label="Retry"
+                  disabled={pending}
+                  onClick={retry}
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="icon"
@@ -393,6 +430,15 @@ function ConversationMessageItem({
               onOpenWorkspacePath={onOpenWorkspacePath}
               className={messageBodyClassName}
             />
+            {errorText && (
+              <div
+                role="alert"
+                className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              >
+                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                <span className="min-w-0 whitespace-pre-wrap break-words">{errorText}</span>
+              </div>
+            )}
             <MessageAttachments attachments={message.attachments ?? []} theme={theme} />
             {footerMetricsParts.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-muted-foreground">

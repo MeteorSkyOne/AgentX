@@ -99,6 +99,9 @@ export interface AgentRunFailedEvent extends BaseEvent {
     agent_id?: string;
     error: string;
     team?: TeamMetadata;
+    // When true, the failure was also stored as a chat message, so the
+    // streaming placeholder can be dropped in favor of the persisted message.
+    persisted?: boolean;
   };
 }
 

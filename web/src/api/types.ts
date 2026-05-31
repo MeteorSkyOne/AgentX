@@ -56,6 +56,7 @@ export interface MessageMetadata {
   process?: ProcessItem[];
   metrics?: MessageMetricsSummary;
   team?: TeamMetadata;
+  error?: string;
   [key: string]: JsonValue | ProcessItem[] | MessageMetricsSummary | TeamMetadata | undefined;
 }
 

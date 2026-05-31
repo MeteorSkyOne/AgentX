@@ -109,6 +109,7 @@ export function Shell({
   onLoadWorkspaceGitDiff,
   onUpdateMessage,
   onDeleteMessage,
+  onRetryMessage,
   onLoadOlderMessages,
   onRespondToQuestion,
   onSteerQueuedPrompt,
@@ -957,6 +958,7 @@ export function Shell({
           onDeleteThread={onDeleteThread}
           onUpdateMessage={onUpdateMessage}
           onDeleteMessage={onDeleteMessage}
+          onRetryMessage={onRetryMessage}
           onLoadOlderMessages={onLoadOlderMessages}
           onRespondToQuestion={onRespondToQuestion}
           onSteerQueuedPrompt={onSteerQueuedPrompt}
@@ -1073,6 +1075,7 @@ export function Shell({
           onDeleteThread={onDeleteThread}
           onUpdateMessage={onUpdateMessage}
           onDeleteMessage={onDeleteMessage}
+          onRetryMessage={onRetryMessage}
           onLoadOlderMessages={onLoadOlderMessages}
           onRespondToQuestion={onRespondToQuestion}
           onSteerQueuedPrompt={onSteerQueuedPrompt}

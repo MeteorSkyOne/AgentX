@@ -44,6 +44,7 @@ import {
   workspace,
   runToolUpdate,
   respondToInputRequest,
+  retryAgentRun,
   steerQueuedPrompt,
   deleteQueuedPrompt
 } from "./api/client";
@@ -560,6 +561,17 @@ export default function App() {
             current?.runID === event.payload.run_id ? null : current
           );
           setStreamingByRunID((current) => {
+            // When the failure was persisted as a message, the error reason
+            // already arrived via MessageCreated; drop the streaming placeholder
+            // so the run shows a single, refresh-safe error message.
+            if (event.payload.persisted) {
+              if (!(event.payload.run_id in current)) {
+                return current;
+              }
+              const next = { ...current };
+              delete next[event.payload.run_id];
+              return next;
+            }
             const existing = current[event.payload.run_id];
             return {
               ...current,
@@ -855,6 +867,17 @@ export default function App() {
     setConversationMessages((current) => removeMessageAndMarkReferencesDeleted(current, message.id));
   }
 
+  async function handleRetryMessage(message: Message): Promise<void> {
+    if (!activeConversation) return;
+    const agents = conversationContextQuery.data?.agents ?? channelAgentsQuery.data ?? [];
+    const agent = agents.find((item) => item.agent.bot_user_id === message.sender_id)?.agent;
+    if (!agent) {
+      throw new Error("Could not resolve the agent for this message");
+    }
+    // The stale reply is removed and the fresh run streams in via websocket events.
+    await retryAgentRun(activeConversation.type, activeConversation.id, agent.id);
+  }
+
   async function handleRespondToQuestion(questionID: string, answer: string) {
     if (!activeConversation) return;
     await respondToInputRequest(
@@ -1082,6 +1105,7 @@ export default function App() {
       onLoadWorkspaceGitDiff={handleLoadWorkspaceGitDiff}
       onUpdateMessage={handleUpdateMessage}
       onDeleteMessage={handleDeleteMessage}
+      onRetryMessage={handleRetryMessage}
       onLoadOlderMessages={handleLoadOlderMessages}
       onMessageSent={handleMessageSent}
       onToggleTheme={handleToggleTheme}

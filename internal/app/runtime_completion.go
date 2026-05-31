@@ -110,6 +110,83 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 	return botMessage, nil
 }
 
+// failAgentRunWithMessage persists the failure of an in-progress agent run as a
+// bot message (capturing the error reason and any partial output streamed so
+// far) and publishes the AgentRunFailed event. Persisting the failure means the
+// error reason survives a page refresh instead of vanishing with the ephemeral
+// streaming state. Cancellations (stop/cancel) are not persisted — only the
+// event is published so clients clear their streaming placeholder.
+func (a *App) failAgentRunWithMessage(ctx context.Context, userMessage domain.Message, agent domain.Agent, runID string, run *activeAgentRun, team *domain.TeamMetadata, err error) {
+	errText := ""
+	if err != nil {
+		errText = err.Error()
+	}
+	persisted := false
+	if !isAgentRunCancellation(err) {
+		var text, thinking string
+		var process []domain.ProcessItem
+		if run != nil {
+			text, thinking, process, _ = run.snapshot()
+		}
+		persisted = a.persistFailedAgentRunMessage(context.WithoutCancel(ctx), userMessage, agent, runID, errText, text, thinking, process, team)
+	}
+	a.publishAgentRunFailedEvent(userMessage, runID, agent.ID, team, errText, persisted)
+}
+
+// persistFailedAgentRunMessage stores a bot message describing a failed run and
+// publishes EventMessageCreated for it. It returns true when the message was
+// stored. The error reason is kept in metadata["error"]; any partial body,
+// thinking, and process items captured before the failure are preserved.
+func (a *App) persistFailedAgentRunMessage(ctx context.Context, userMessage domain.Message, agent domain.Agent, runID string, errText string, body string, thinking string, process []domain.ProcessItem, team *domain.TeamMetadata) bool {
+	createdAt := time.Now().UTC()
+	if !createdAt.After(userMessage.CreatedAt) {
+		createdAt = userMessage.CreatedAt.Add(time.Nanosecond)
+	}
+	metadata := map[string]any{"error": errText}
+	if thinking = strings.TrimSpace(thinking); thinking != "" {
+		metadata["thinking"] = thinking
+	}
+	if len(process) > 0 {
+		metadata["process"] = process
+	}
+	if team != nil {
+		metadata["team"] = *team
+	}
+	botMessage := domain.Message{
+		ID:               id.New("msg"),
+		OrganizationID:   userMessage.OrganizationID,
+		ConversationType: userMessage.ConversationType,
+		ConversationID:   userMessage.ConversationID,
+		SenderType:       domain.SenderBot,
+		SenderID:         agent.BotUserID,
+		Kind:             domain.MessageText,
+		Body:             body,
+		Metadata:         metadata,
+		CreatedAt:        createdAt,
+	}
+	if err := a.store.Messages().Create(ctx, botMessage); err != nil {
+		slog.Error(
+			"failed to persist agent run failure message",
+			"run_id", runID,
+			"agent_id", agent.ID,
+			"organization_id", userMessage.OrganizationID,
+			"conversation_type", userMessage.ConversationType,
+			"conversation_id", userMessage.ConversationID,
+			"error", err,
+		)
+		return false
+	}
+	a.publishConversationEvent(domain.Event{
+		Type:             domain.EventMessageCreated,
+		OrganizationID:   botMessage.OrganizationID,
+		ConversationType: botMessage.ConversationType,
+		ConversationID:   botMessage.ConversationID,
+		Payload:          domain.MessageCreatedPayload{Message: botMessage},
+	})
+	a.notifyAgentMessageCreated(context.WithoutCancel(ctx), agent.Name, botMessage)
+	return true
+}
+
 func (a *App) dispatchBotMentionedAgents(ctx context.Context, botMessage domain.Message, senderAgentID string) {
 	mentions := agentMentions(botMessage.Body)
 	if len(mentions) == 0 {

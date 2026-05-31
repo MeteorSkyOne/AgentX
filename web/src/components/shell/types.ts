@@ -223,6 +223,7 @@ export interface ShellProps {
   ) => Promise<WorkspaceGitDiff>;
   onUpdateMessage: (messageID: string, body: string) => Promise<Message>;
   onDeleteMessage: (message: Message) => Promise<void>;
+  onRetryMessage?: (message: Message) => Promise<void>;
   onLoadOlderMessages: () => boolean;
   onRespondToQuestion?: (questionID: string, answer: string) => Promise<void>;
   onSteerQueuedPrompt?: (queueID: string) => Promise<void>;

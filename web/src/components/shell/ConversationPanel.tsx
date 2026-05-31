@@ -28,6 +28,7 @@ export function ConversationPanel({
   onDeleteThread,
   onUpdateMessage,
   onDeleteMessage,
+  onRetryMessage,
   onLoadOlderMessages,
   onRespondToQuestion,
   onSteerQueuedPrompt,
@@ -56,6 +57,7 @@ export function ConversationPanel({
   onDeleteThread: ShellProps["onDeleteThread"];
   onUpdateMessage: ShellProps["onUpdateMessage"];
   onDeleteMessage: ShellProps["onDeleteMessage"];
+  onRetryMessage?: ShellProps["onRetryMessage"];
   onLoadOlderMessages: ShellProps["onLoadOlderMessages"];
   onRespondToQuestion?: (questionID: string, answer: string) => Promise<void>;
   onSteerQueuedPrompt?: (queueID: string) => Promise<void>;
@@ -157,6 +159,7 @@ export function ConversationPanel({
         theme={theme}
         onUpdateMessage={onUpdateMessage}
         onDeleteMessage={onDeleteMessage}
+        onRetryMessage={onRetryMessage}
         onLoadOlder={onLoadOlderMessages}
         onRespondToQuestion={onRespondToQuestion}
         onReplyMessage={selectReplyTarget}

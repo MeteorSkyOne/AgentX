@@ -78,6 +78,10 @@ type AgentRunFailedPayload struct {
 	AgentID string        `json:"agent_id,omitempty"`
 	Error   string        `json:"error"`
 	Team    *TeamMetadata `json:"team,omitempty"`
+	// Persisted reports whether the failure was also stored as a chat message
+	// (so it survives a page refresh). When true, clients can drop the
+	// ephemeral streaming entry and rely on the persisted message instead.
+	Persisted bool `json:"persisted,omitempty"`
 }
 
 type AgentInputRequestPayload struct {

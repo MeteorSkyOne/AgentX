@@ -103,6 +103,7 @@ func NewRouter(a *app.App, bus *eventbus.Bus) http.Handler {
 			r.Get("/conversations/{type}/{id}/metrics", s.handleConversationMetrics)
 			r.Post("/conversations/{type}/{id}/messages", s.handleSendMessage)
 			r.Post("/conversations/{type}/{id}/input-response", s.handleInputResponse)
+			r.Post("/conversations/{type}/{id}/retry", s.handleRetryRun)
 			r.Post("/conversations/{type}/{id}/message-queue/{queueID}/steer", s.handleMessageQueueSteer)
 			r.Delete("/conversations/{type}/{id}/message-queue/{queueID}", s.handleMessageQueueDelete)
 			r.Post("/diagrams/d2/render", s.handleRenderD2Diagram)

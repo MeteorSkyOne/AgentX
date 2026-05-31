@@ -589,6 +589,12 @@ func (r *activeAgentRun) appendDelta(text string, thinking string, process []dom
 	}
 }
 
+func (r *activeAgentRun) snapshot() (text string, thinking string, process []domain.ProcessItem, team *domain.TeamMetadata) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.text, r.thinking, cloneProcessItems(r.process), cloneTeamMetadata(r.team)
+}
+
 func (r *activeAgentRun) setPendingQuestion(payload domain.AgentInputRequestPayload) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

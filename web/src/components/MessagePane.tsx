@@ -32,6 +32,7 @@ export function MessagePane({
   onUpdateMessage,
   onDeleteMessage,
   onReplyMessage,
+  onRetryMessage,
   onLoadOlder,
   onRespondToQuestion,
   conversationKey,
@@ -49,6 +50,13 @@ export function MessagePane({
   const messagesByID = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
   const messageItems = useMemo(() => groupTeamDiscussionMessages(messages), [messages]);
   const mentionLabels = useMemo(() => buildMentionLabels(agents), [agents]);
+  // Only the trailing agent reply can be retried in place, and only when no run
+  // is currently streaming for the conversation.
+  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : undefined;
+  const retryableMessageID =
+    onRetryMessage && streaming.length === 0 && lastMessage?.sender_type === "bot"
+      ? lastMessage.id
+      : undefined;
 
   useLayoutEffect(() => {
     const conversationChanged = previousConversationKeyRef.current !== conversationKey;
@@ -192,6 +200,8 @@ export function MessagePane({
                     onUpdateMessage={onUpdateMessage}
                     onDeleteMessage={onDeleteMessage}
                     onReplyMessage={onReplyMessage}
+                    onRetryMessage={onRetryMessage}
+                    canRetry={message.id === retryableMessageID}
                     onJumpToReplyMessage={jumpToMessage}
                     theme={theme}
                     workspacePath={workspacePath}

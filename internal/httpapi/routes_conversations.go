@@ -292,6 +292,10 @@ type inputResponseRequest struct {
 	Answer     string `json:"answer"`
 }
 
+type retryRunRequest struct {
+	AgentID string `json:"agent_id"`
+}
+
 func (s *Server) handleInputResponse(w http.ResponseWriter, r *http.Request) {
 	userID, ok := userIDFromContext(r.Context())
 	if !ok {
@@ -330,6 +334,53 @@ func (s *Server) handleInputResponse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleRetryRun(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	conversationType, ok := parseConversationType(chi.URLParam(r, "type"))
+	if !ok {
+		writeError(w, http.StatusBadRequest, "unknown conversation type")
+		return
+	}
+
+	conversationID := chi.URLParam(r, "id")
+	if _, ok, err := s.authorizedConversationOrganizationID(r, userID, conversationType, conversationID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	} else if !ok {
+		writeError(w, http.StatusNotFound, "conversation not found")
+		return
+	}
+
+	var req retryRunRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "malformed JSON")
+		return
+	}
+	if strings.TrimSpace(req.AgentID) == "" {
+		writeError(w, http.StatusBadRequest, "agent_id is required")
+		return
+	}
+
+	switch err := s.app.RetryAgentRun(r.Context(), conversationType, conversationID, req.AgentID); {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, app.ErrAgentRunInProgress):
+		writeError(w, http.StatusConflict, "agent run already in progress")
+	case errors.Is(err, app.ErrNoMessageToRetry):
+		writeError(w, http.StatusConflict, "no message to retry")
+	case errors.Is(err, app.ErrInvalidInput):
+		writeError(w, http.StatusBadRequest, app.InvalidInputMessage(err))
+	default:
+		slog.Error("retry agent run failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to retry agent run")
+	}
 }
 
 func (s *Server) handleMessageQueueSteer(w http.ResponseWriter, r *http.Request) {

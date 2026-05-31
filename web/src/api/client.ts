@@ -902,6 +902,20 @@ export function respondToInputRequest(
   );
 }
 
+export function retryAgentRun(
+  type: ConversationType,
+  id: string,
+  agentID: string
+): Promise<void> {
+  return request<void>(
+    `/api/conversations/${encodeURIComponent(type)}/${encodeURIComponent(id)}/retry`,
+    {
+      method: "POST",
+      body: JSON.stringify({ agent_id: agentID })
+    }
+  );
+}
+
 export function steerQueuedPrompt(
   type: ConversationType,
   id: string,

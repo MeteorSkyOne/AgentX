@@ -39,6 +39,13 @@ func (a *App) publishAgentRunFailedWithContext(message domain.Message, runID str
 	if err != nil {
 		errText = err.Error()
 	}
+	a.publishAgentRunFailedEvent(message, runID, agentID, team, errText, false)
+}
+
+// publishAgentRunFailedEvent emits the ephemeral failure event. When persisted is
+// true the same failure has also been stored as a chat message, so clients can
+// drop their streaming placeholder and render the persisted message instead.
+func (a *App) publishAgentRunFailedEvent(message domain.Message, runID string, agentID string, team *domain.TeamMetadata, errText string, persisted bool) {
 	slog.Error(
 		"agent run failed",
 		"run_id", runID,
@@ -46,6 +53,7 @@ func (a *App) publishAgentRunFailedWithContext(message domain.Message, runID str
 		"conversation_type", message.ConversationType,
 		"conversation_id", message.ConversationID,
 		"message_id", message.ID,
+		"persisted", persisted,
 		"error", errText,
 	)
 	a.publishConversationEvent(domain.Event{
@@ -53,8 +61,20 @@ func (a *App) publishAgentRunFailedWithContext(message domain.Message, runID str
 		OrganizationID:   message.OrganizationID,
 		ConversationType: message.ConversationType,
 		ConversationID:   message.ConversationID,
-		Payload:          domain.AgentRunFailedPayload{RunID: runID, AgentID: agentID, Error: errText, Team: team},
+		Payload:          domain.AgentRunFailedPayload{RunID: runID, AgentID: agentID, Error: errText, Team: team, Persisted: persisted},
 	})
+}
+
+// isAgentRunCancellation reports whether err is a user- or system-initiated
+// cancellation (stop, cancel, context cancellation) rather than a genuine agent
+// failure. Cancellations are not persisted as error messages.
+func isAgentRunCancellation(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, context.Canceled) ||
+		errors.Is(err, errAgentRunStopped) ||
+		errors.Is(err, errAgentRunCanceled)
 }
 
 func (a *App) publishConversationEvent(evt domain.Event) {

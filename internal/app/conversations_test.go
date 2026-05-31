@@ -760,6 +760,92 @@ func TestAgentRunPersistsFailedMetric(t *testing.T) {
 	})
 }
 
+func TestAgentRunFailurePersistsErrorMessage(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	bus := eventbus.New()
+	app := New(st, bus, Options{
+		AdminToken: "secret",
+		DataDir:    t.TempDir(),
+		Runtimes: map[string]agentruntime.Runtime{
+			domain.AgentKindFake: scriptedRuntime{events: []agentruntime.Event{
+				{Type: agentruntime.EventFailed, Error: "runtime failed"},
+			}},
+		},
+	})
+	defer shutdownAppForTest(t, app)
+	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, unsubscribe := bus.Subscribe(ctx, eventbus.Filter{
+		OrganizationID: bootstrap.Organization.ID,
+		ConversationID: bootstrap.Channel.ID,
+	})
+	defer unsubscribe()
+
+	if _, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "fail",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The failure must be stored as a bot message so the error reason survives a
+	// page refresh instead of vanishing with the ephemeral streaming state.
+	var failureMessage *domain.Message
+	requireEventuallyApp(t, time.Second, func() bool {
+		messages, err := app.ListMessages(ctx, domain.ConversationChannel, bootstrap.Channel.ID, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range messages {
+			if messages[i].SenderType == domain.SenderBot && messages[i].SenderID == bootstrap.Agent.BotUserID {
+				failureMessage = &messages[i]
+				return true
+			}
+		}
+		return false
+	})
+	if got, _ := failureMessage.Metadata["error"].(string); got != "runtime failed" {
+		t.Fatalf("failure message metadata error = %#v, want %q", failureMessage.Metadata["error"], "runtime failed")
+	}
+
+	// The failure event must advertise that it was persisted so clients can drop
+	// the streaming placeholder in favor of the stored message.
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-events:
+			if evt.Type != domain.EventAgentRunFailed {
+				continue
+			}
+			payload, ok := evt.Payload.(domain.AgentRunFailedPayload)
+			if !ok {
+				t.Fatalf("failed payload type = %T, want domain.AgentRunFailedPayload", evt.Payload)
+			}
+			if !payload.Persisted {
+				t.Fatalf("failed payload persisted = false, want true: %#v", payload)
+			}
+			if payload.Error != "runtime failed" {
+				t.Fatalf("failed payload error = %q, want %q", payload.Error, "runtime failed")
+			}
+			return
+		case <-timeout:
+			t.Fatal("timed out waiting for persisted AgentRunFailed event")
+		}
+	}
+}
+
 func TestAgentRunMetricTPSUsesDurationForBatchedOutput(t *testing.T) {
 	startedAt := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
 	completedAt := startedAt.Add(10 * time.Second)
