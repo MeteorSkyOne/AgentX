@@ -300,6 +300,37 @@ export interface ScheduledTaskRun {
   message_id?: string;
 }
 
+export type RoadmapStageStatus = "active" | "completed";
+
+export interface RoadmapStage {
+  id: string;
+  organization_id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  status: RoadmapStageStatus;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoadmapTask {
+  id: string;
+  organization_id: string;
+  stage_id: string;
+  title: string;
+  description: string;
+  completed: boolean;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoadmapStageWithTasks {
+  stage: RoadmapStage;
+  tasks: RoadmapTask[];
+}
+
 export type WorkspaceEntryType = "file" | "directory";
 
 export interface WorkspaceEntry {

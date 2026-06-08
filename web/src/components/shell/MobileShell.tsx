@@ -7,6 +7,7 @@ import {
   ChevronUp,
   FolderOpen,
   LogOut,
+  Map,
   Menu,
   Moon,
   Pencil,
@@ -38,6 +39,7 @@ import { AgentsSidebar } from "./AgentsSidebar";
 import { ConversationPanel } from "./ConversationPanel";
 import { MembersPanel } from "./MembersPanel";
 import { MetricsPanel } from "./MetricsPanel";
+import { RoadmapPanel } from "./RoadmapPanel";
 import { TasksPanel } from "./TasksPanel";
 import { TerminalDockBoundary } from "./LazyTerminalDock";
 import type { ShellProps } from "./types";
@@ -60,9 +62,10 @@ interface MobileShellProps {
   mobileEditorHeaderCollapsed: boolean;
   setMobileEditorHeaderCollapsed: Dispatch<SetStateAction<boolean>>;
   showMobileProjectFilesButton: boolean;
-  mainView: "chat" | "metrics" | "tasks";
+  mainView: "chat" | "metrics" | "tasks" | "roadmap";
   project: ShellProps["project"];
   openTasks: () => void;
+  openRoadmap: () => void;
   terminalAllowed: boolean;
   terminalOpen: boolean;
   setMobileMembersPanelOpen: Dispatch<SetStateAction<boolean>>;
@@ -163,6 +166,7 @@ export function MobileShell({
   mainView,
   project,
   openTasks,
+  openRoadmap,
   terminalAllowed,
   terminalOpen,
   setMobileMembersPanelOpen,
@@ -348,6 +352,18 @@ export function MobileShell({
               <Button
                 variant="ghost"
                 size="icon"
+                className={cn("h-11 w-11", mainView === "roadmap" && "bg-accent")}
+                title="Roadmap"
+                aria-label="Roadmap"
+                aria-pressed={mainView === "roadmap"}
+                disabled={!project}
+                onClick={openRoadmap}
+              >
+                <Map className="h-5 w-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
                 className={cn("h-11 w-11", projectFilesOpen && "bg-accent")}
                 title="Project files"
                 aria-label="Project files"
@@ -461,6 +477,8 @@ export function MobileShell({
               activeConversation={activeConversation}
               agents={activeAgents}
             />
+          ) : mainView === "roadmap" ? (
+            <RoadmapPanel project={project} />
           ) : (
             <ConversationPanel
               selectedChannel={selectedChannel}
@@ -661,6 +679,23 @@ export function MobileShell({
                   >
                     <CalendarClock className="h-4 w-4 shrink-0" />
                     <span className="min-w-0 truncate">Tasks</span>
+                  </button>
+
+                  <button
+                    className={cn(
+                      "flex min-h-10 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors",
+                      mainView === "roadmap"
+                        ? "bg-accent text-accent-foreground"
+                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    )}
+                    disabled={!project}
+                    onClick={() => {
+                      setMobileNavOpen(false);
+                      openRoadmap();
+                    }}
+                  >
+                    <Map className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0 truncate">Roadmap</span>
                   </button>
 
                   <AgentsSidebar

@@ -18,6 +18,10 @@ import type {
   NotificationSettings,
   Organization,
   Project,
+  RoadmapStage,
+  RoadmapStageStatus,
+  RoadmapStageWithTasks,
+  RoadmapTask,
   ScheduledTask,
   ScheduledTaskKind,
   ScheduledTaskRun,
@@ -441,6 +445,80 @@ export function scheduledTaskRuns(taskID: string, limit = 20): Promise<Scheduled
   const params = new URLSearchParams({ limit: String(limit) });
   return request<ScheduledTaskRun[]>(
     `/api/scheduled-tasks/${encodeURIComponent(taskID)}/runs?${params.toString()}`
+  );
+}
+
+export function projectRoadmap(projectID: string): Promise<RoadmapStageWithTasks[]> {
+  return request<RoadmapStageWithTasks[]>(
+    `/api/projects/${encodeURIComponent(projectID)}/roadmap`
+  );
+}
+
+export function createRoadmapStage(
+  projectID: string,
+  payload: { name: string; description?: string }
+): Promise<RoadmapStage> {
+  return request<RoadmapStage>(
+    `/api/projects/${encodeURIComponent(projectID)}/roadmap-stages`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
+export function updateRoadmapStage(
+  stageID: string,
+  payload: { name?: string; description?: string; status?: RoadmapStageStatus }
+): Promise<RoadmapStage> {
+  return request<RoadmapStage>(
+    `/api/roadmap-stages/${encodeURIComponent(stageID)}`,
+    { method: "PATCH", body: JSON.stringify(payload) }
+  );
+}
+
+export function deleteRoadmapStage(stageID: string): Promise<void> {
+  return request<void>(
+    `/api/roadmap-stages/${encodeURIComponent(stageID)}`,
+    { method: "DELETE" }
+  );
+}
+
+export function reorderRoadmapStages(projectID: string, ids: string[]): Promise<void> {
+  return request<void>(
+    `/api/projects/${encodeURIComponent(projectID)}/roadmap-stages/reorder`,
+    { method: "PUT", body: JSON.stringify({ ids }) }
+  );
+}
+
+export function createRoadmapTask(
+  stageID: string,
+  payload: { title: string; description?: string }
+): Promise<RoadmapTask> {
+  return request<RoadmapTask>(
+    `/api/roadmap-stages/${encodeURIComponent(stageID)}/tasks`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
+export function updateRoadmapTask(
+  taskID: string,
+  payload: { title?: string; description?: string; completed?: boolean }
+): Promise<RoadmapTask> {
+  return request<RoadmapTask>(
+    `/api/roadmap-tasks/${encodeURIComponent(taskID)}`,
+    { method: "PATCH", body: JSON.stringify(payload) }
+  );
+}
+
+export function deleteRoadmapTask(taskID: string): Promise<void> {
+  return request<void>(
+    `/api/roadmap-tasks/${encodeURIComponent(taskID)}`,
+    { method: "DELETE" }
+  );
+}
+
+export function reorderRoadmapTasks(stageID: string, ids: string[]): Promise<void> {
+  return request<void>(
+    `/api/roadmap-stages/${encodeURIComponent(stageID)}/tasks/reorder`,
+    { method: "PUT", body: JSON.stringify({ ids }) }
   );
 }
 

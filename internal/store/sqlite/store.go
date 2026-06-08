@@ -108,6 +108,14 @@ func (s *Store) ScheduledTasks() store.ScheduledTaskStore {
 	return scheduledTaskRepo{q: s.db}
 }
 
+func (s *Store) RoadmapStages() store.RoadmapStageStore {
+	return roadmapStageRepo{q: s.db}
+}
+
+func (s *Store) RoadmapTasks() store.RoadmapTaskStore {
+	return roadmapTaskRepo{q: s.db}
+}
+
 func (t *txStore) Users() store.UserStore {
 	return userRepo{q: t.tx}
 }
@@ -174,4 +182,12 @@ func (t *txStore) Metrics() store.MetricsStore {
 
 func (t *txStore) ScheduledTasks() store.ScheduledTaskStore {
 	return scheduledTaskRepo{q: t.tx}
+}
+
+func (t *txStore) RoadmapStages() store.RoadmapStageStore {
+	return roadmapStageRepo{q: t.tx}
+}
+
+func (t *txStore) RoadmapTasks() store.RoadmapTaskStore {
+	return roadmapTaskRepo{q: t.tx}
 }

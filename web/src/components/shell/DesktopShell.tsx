@@ -9,6 +9,7 @@ import {
   FolderOpen,
   Hash,
   LogOut,
+  Map,
   Moon,
   Pencil,
   Plus,
@@ -36,6 +37,7 @@ import { ConversationPanel } from "./ConversationPanel";
 import { MembersPanel } from "./MembersPanel";
 import { MetricsPanel } from "./MetricsPanel";
 import { ProjectFilesOverlay } from "./ProjectFilesOverlay";
+import { RoadmapPanel } from "./RoadmapPanel";
 import { TasksPanel } from "./TasksPanel";
 import { TerminalDockBoundary } from "./LazyTerminalDock";
 import type { ComposerConversation, ShellProps } from "./types";
@@ -52,7 +54,7 @@ interface DesktopShellProps {
   onLogout: ShellProps["onLogout"];
   onSelectProject: ShellProps["onSelectProject"];
   openProjectSettings: () => void;
-  mainView: "chat" | "metrics" | "tasks";
+  mainView: "chat" | "metrics" | "tasks" | "roadmap";
   channels: ShellProps["channels"];
   selectedChannel?: Channel;
   selectSidebarChannel: (channel: Channel) => void;
@@ -61,6 +63,7 @@ interface DesktopShellProps {
   onDeleteChannel: ShellProps["onDeleteChannel"];
   setChannelDraftOpen: Dispatch<SetStateAction<boolean>>;
   openTasks: () => void;
+  openRoadmap: () => void;
   activeAgents: Agent[];
   boundAgents: ConversationAgentContext[];
   contextLoading: boolean;
@@ -158,6 +161,7 @@ export function DesktopShell({
   onDeleteChannel,
   setChannelDraftOpen,
   openTasks,
+  openRoadmap,
   activeAgents,
   boundAgents,
   contextLoading,
@@ -398,6 +402,20 @@ export function DesktopShell({
                     <span className="min-w-0 truncate">Tasks</span>
                   </button>
 
+                  <button
+                    className={cn(
+                      "flex min-h-10 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors",
+                      mainView === "roadmap"
+                        ? "bg-accent text-accent-foreground"
+                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    )}
+                    disabled={!project}
+                    onClick={openRoadmap}
+                  >
+                    <Map className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0 truncate">Roadmap</span>
+                  </button>
+
                   {/* Agents Section */}
                   <AgentsSidebar
                     agents={activeAgents}
@@ -533,6 +551,18 @@ export function DesktopShell({
                 <Button
                   variant="ghost"
                   size="icon"
+                  className={cn("h-8 w-8", mainView === "roadmap" && "bg-accent")}
+                  title="Roadmap"
+                  aria-label="Roadmap"
+                  aria-pressed={mainView === "roadmap"}
+                  disabled={!project}
+                  onClick={openRoadmap}
+                >
+                  <Map className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
                   className="h-8 w-8"
                   title="Project files"
                   aria-label="Project files"
@@ -599,6 +629,8 @@ export function DesktopShell({
                     activeConversation={activeConversation}
                     agents={activeAgents}
                   />
+                ) : mainView === "roadmap" ? (
+                  <RoadmapPanel project={project} />
                 ) : (
                   <ConversationPanel
                     selectedChannel={selectedChannel}

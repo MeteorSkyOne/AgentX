@@ -123,7 +123,7 @@ export function Shell({
   const [membersPanelOpen, setMembersPanelOpen] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalHeightPct, setTerminalHeightPct] = useState(38);
-  const [mainView, setMainView] = useState<"chat" | "metrics" | "tasks">("chat");
+  const [mainView, setMainView] = useState<"chat" | "metrics" | "tasks" | "roadmap">("chat");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [mobileAgentPanelOpen, setMobileAgentPanelOpen] = useState(false);
   const [mobileMembersPanelOpen, setMobileMembersPanelOpen] = useState(false);
@@ -770,6 +770,18 @@ export function Shell({
     setMainView("tasks");
   }
 
+  function openRoadmap() {
+    if (!project) return;
+    blurActiveElement();
+    closeProjectFiles();
+    setAgentPanelOpen(false);
+    setMembersPanelOpen(false);
+    setMobileNavOpen(false);
+    setMobileAgentPanelOpen(false);
+    setMobileMembersPanelOpen(false);
+    setMainView("roadmap");
+  }
+
   function selectMobileProject(projectID: string) {
     setMobileNavOpen(false);
     onSelectProject(projectID);
@@ -888,9 +900,9 @@ export function Shell({
 
   const title = conversationTitle(selectedChannel, activeThread, boundAgents.map((item) => item.agent));
   const subtitle = conversationSubtitle(selectedChannel, activeThread, boundAgents.length);
-  const headerTitle = mainView === "metrics" ? "Metrics" : mainView === "tasks" ? "Tasks" : title;
+  const headerTitle = mainView === "metrics" ? "Metrics" : mainView === "tasks" ? "Tasks" : mainView === "roadmap" ? "Roadmap" : title;
   const headerSubtitle =
-    mainView === "metrics" || mainView === "tasks" ? project?.name ?? "No project" : subtitle;
+    mainView === "metrics" || mainView === "tasks" || mainView === "roadmap" ? project?.name ?? "No project" : subtitle;
   const activityLabel = conversationActivityLabel(connectionStatus, streaming.length > 0);
   const composerConversation =
     activeConversation && selectedChannel?.type === "text"
@@ -925,6 +937,7 @@ export function Shell({
           mainView={mainView}
           project={project}
           openTasks={openTasks}
+          openRoadmap={openRoadmap}
           terminalAllowed={terminalAllowed}
           terminalOpen={terminalOpen}
           setMobileMembersPanelOpen={setMobileMembersPanelOpen}
@@ -1027,6 +1040,7 @@ export function Shell({
           onDeleteChannel={onDeleteChannel}
           setChannelDraftOpen={setChannelDraftOpen}
           openTasks={openTasks}
+          openRoadmap={openRoadmap}
           activeAgents={activeAgents}
           boundAgents={boundAgents}
           contextLoading={contextLoading}

@@ -267,6 +267,37 @@ type ScheduledTaskRun struct {
 	MessageID       string                 `json:"message_id,omitempty"`
 }
 
+type RoadmapStageStatus string
+
+const (
+	RoadmapStageStatusActive    RoadmapStageStatus = "active"
+	RoadmapStageStatusCompleted RoadmapStageStatus = "completed"
+)
+
+type RoadmapStage struct {
+	ID             string             `json:"id"`
+	OrganizationID string             `json:"organization_id"`
+	ProjectID      string             `json:"project_id"`
+	Name           string             `json:"name"`
+	Description    string             `json:"description"`
+	Status         RoadmapStageStatus `json:"status"`
+	Position       int                `json:"position"`
+	CreatedAt      time.Time          `json:"created_at"`
+	UpdatedAt      time.Time          `json:"updated_at"`
+}
+
+type RoadmapTask struct {
+	ID             string    `json:"id"`
+	OrganizationID string    `json:"organization_id"`
+	StageID        string    `json:"stage_id"`
+	Title          string    `json:"title"`
+	Description    string    `json:"description"`
+	Completed      bool      `json:"completed"`
+	Position       int       `json:"position"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
 type Message struct {
 	ID               string              `json:"id"`
 	OrganizationID   string              `json:"organization_id"`

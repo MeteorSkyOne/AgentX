@@ -26,6 +26,8 @@ type Store interface {
 	Sessions() SessionStore
 	Metrics() MetricsStore
 	ScheduledTasks() ScheduledTaskStore
+	RoadmapStages() RoadmapStageStore
+	RoadmapTasks() RoadmapTaskStore
 }
 
 type Tx interface {
@@ -46,6 +48,8 @@ type Tx interface {
 	Sessions() SessionStore
 	Metrics() MetricsStore
 	ScheduledTasks() ScheduledTaskStore
+	RoadmapStages() RoadmapStageStore
+	RoadmapTasks() RoadmapTaskStore
 }
 
 type UserStore interface {
@@ -187,4 +191,25 @@ type ScheduledTaskStore interface {
 	CreateRun(ctx context.Context, run domain.ScheduledTaskRun) error
 	UpdateRun(ctx context.Context, run domain.ScheduledTaskRun) error
 	ListRunsByTask(ctx context.Context, taskID string, limit int) ([]domain.ScheduledTaskRun, error)
+}
+
+type RoadmapStageStore interface {
+	Create(ctx context.Context, stage domain.RoadmapStage) error
+	ByID(ctx context.Context, id string) (domain.RoadmapStage, error)
+	Update(ctx context.Context, stage domain.RoadmapStage) error
+	Delete(ctx context.Context, id string) error
+	ListByProject(ctx context.Context, projectID string) ([]domain.RoadmapStage, error)
+	MaxPositionByProject(ctx context.Context, projectID string) (int, error)
+	ReorderByProject(ctx context.Context, projectID string, ids []string) error
+}
+
+type RoadmapTaskStore interface {
+	Create(ctx context.Context, task domain.RoadmapTask) error
+	ByID(ctx context.Context, id string) (domain.RoadmapTask, error)
+	Update(ctx context.Context, task domain.RoadmapTask) error
+	Delete(ctx context.Context, id string) error
+	ListByStage(ctx context.Context, stageID string) ([]domain.RoadmapTask, error)
+	ListByProject(ctx context.Context, projectID string) ([]domain.RoadmapTask, error)
+	MaxPositionByStage(ctx context.Context, stageID string) (int, error)
+	ReorderByStage(ctx context.Context, stageID string, ids []string) error
 }
