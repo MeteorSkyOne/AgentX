@@ -462,12 +462,23 @@ function MarkdownPreview({
 }) {
   const previewRef = useRef<HTMLDivElement | null>(null);
   const previewContentRef = useRef<HTMLDivElement | null>(null);
+  // Track the restore target in a ref instead of an effect dependency. The
+  // effect's cleanup writes this value back through saveTabMarkdownPreviewScrollTop,
+  // so depending on it would re-run the effect on every save — and because the
+  // saved value is measured live from the DOM (which keeps changing while the
+  // layout settles, e.g. when the file tree is collapsed), it never converges and
+  // React aborts with "Maximum update depth exceeded" (#185).
+  const targetScrollTopRef = useRef(controller.activeTabMarkdownPreviewScrollTop);
+  targetScrollTopRef.current = controller.activeTabMarkdownPreviewScrollTop;
+  const activeTabId = controller.activeTabId;
+  const saveMarkdownPreviewScrollTop = controller.saveTabMarkdownPreviewScrollTop;
 
   useLayoutEffect(() => {
     const previewElement = previewRef.current;
     const contentElement = previewContentRef.current;
     if (!previewElement) return;
-    const targetScrollTop = controller.activeTabMarkdownPreviewScrollTop;
+    // Snapshot the target for this mount; used as the fallback when saving below.
+    const initialTargetScrollTop = targetScrollTopRef.current;
     let cancelled = false;
     let restoreActive = true;
     let userInteracted = false;
@@ -475,14 +486,14 @@ function MarkdownPreview({
     let restoreFrame: number | null = null;
 
     const updateReachedTarget = () => {
-      if (Math.abs(previewElement.scrollTop - targetScrollTop) < 1) {
+      if (Math.abs(previewElement.scrollTop - targetScrollTopRef.current) < 1) {
         reachedTargetScrollTop = true;
       }
     };
 
     const restoreScrollTop = () => {
       if (cancelled || !restoreActive || userInteracted) return;
-      previewElement.scrollTop = targetScrollTop;
+      previewElement.scrollTop = targetScrollTopRef.current;
       updateReachedTarget();
     };
 
@@ -535,19 +546,15 @@ function MarkdownPreview({
       previewElement.removeEventListener("touchstart", stopRestoring);
       previewElement.removeEventListener("pointerdown", stopRestoring);
       previewElement.removeEventListener("keydown", stopRestoring);
-      if (controller.activeTabId) {
+      if (activeTabId) {
         const scrollTop =
           !userInteracted && !reachedTargetScrollTop
-            ? Math.max(previewElement.scrollTop, targetScrollTop)
+            ? Math.max(previewElement.scrollTop, initialTargetScrollTop)
             : previewElement.scrollTop;
-        controller.saveTabMarkdownPreviewScrollTop(controller.activeTabId, scrollTop);
+        saveMarkdownPreviewScrollTop(activeTabId, scrollTop);
       }
     };
-  }, [
-    controller.activeTabId,
-    controller.activeTabMarkdownPreviewScrollTop,
-    controller.saveTabMarkdownPreviewScrollTop,
-  ]);
+  }, [activeTabId, saveMarkdownPreviewScrollTop]);
 
   return (
     <div

@@ -187,6 +187,44 @@ describe("WorkspaceFileEditor markdown preview", () => {
     await waitFor(() => expect(preview.scrollTop).toBe(480));
   });
 
+  it("does not re-save when the saved scroll position is pushed back for the same tab", () => {
+    // Regression for React #185 (Maximum update depth exceeded): the preview's
+    // layout effect cleanup writes back through saveTabMarkdownPreviewScrollTop,
+    // so the saved value must not be a dependency. Otherwise each save re-runs
+    // the effect, whose cleanup saves a freshly measured (and changing) value,
+    // looping forever — which crashed the page when the file tree was hidden.
+    const saveTabMarkdownPreviewScrollTop = vi.fn();
+    const props = {
+      activeTabId: "tab-1",
+      filePath: "docs/readme.md",
+      fileBody: "# Readme\n\nBody",
+      fileViewMode: "preview" as const,
+      saveTabMarkdownPreviewScrollTop,
+    };
+    const { rerender } = render(
+      <WorkspaceFileEditor
+        controller={controllerFixture({ ...props, activeTabMarkdownPreviewScrollTop: 0 })}
+        theme="dark"
+        contentAriaLabel="File content"
+        className="h-96"
+      />
+    );
+
+    // Simulate the controller pushing back a new saved scroll value for the same
+    // tab (what the cleanup itself triggers). This must not re-run the effect.
+    rerender(
+      <WorkspaceFileEditor
+        controller={controllerFixture({ ...props, activeTabMarkdownPreviewScrollTop: 320 })}
+        theme="dark"
+        contentAriaLabel="File content"
+        className="h-96"
+      />
+    );
+
+    expect(saveTabMarkdownPreviewScrollTop).not.toHaveBeenCalled();
+    expect(screen.getByTestId("workspace-file-markdown-preview")).toBeTruthy();
+  });
+
   it("keeps non-markdown files in edit mode", () => {
     renderEditor({
       filePath: "src/main.go",
