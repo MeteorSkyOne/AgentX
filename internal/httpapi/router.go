@@ -42,6 +42,7 @@ func NewRouter(a *app.App, bus *eventbus.Bus) http.Handler {
 			r.Get("/organizations/{orgID}/channels", s.handleChannels)
 			r.Get("/organizations/{orgID}/server-settings", s.handleServerSettings)
 			r.Put("/organizations/{orgID}/server-settings", s.handleUpdateServerSettings)
+			r.Post("/organizations/{orgID}/server-settings/restart", s.handleRestartServer)
 			r.Get("/organizations/{orgID}/tool-updates", s.handleToolUpdates)
 			r.Put("/organizations/{orgID}/tool-updates/settings", s.handleUpdateToolUpdateSettings)
 			r.Post("/organizations/{orgID}/tool-updates/check", s.handleCheckToolUpdates)

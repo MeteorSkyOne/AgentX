@@ -51,6 +51,24 @@ func (s *Server) handleUpdateServerSettings(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, settings)
 }
 
+func (s *Server) handleRestartServer(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	orgID := chi.URLParam(r, "orgID")
+	if !s.authorizeServerSettings(w, r, userID, orgID) {
+		return
+	}
+
+	if err := s.app.RestartServer(r.Context()); err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"restarting": true})
+}
+
 func (s *Server) authorizeServerSettings(w http.ResponseWriter, r *http.Request, userID string, orgID string) bool {
 	role, authorized, err := s.authorizedOrganizationRole(r, userID, orgID)
 	if err != nil {

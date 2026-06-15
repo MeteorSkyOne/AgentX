@@ -92,8 +92,10 @@ export interface ShellDialogsProps {
   serverSettingsActionError: string | null;
   serverSettingsActionStatus: string | null;
   serverSettingsSaveDisabled: boolean;
+  serverRestartPending: boolean;
   readServerPEMUpload: (file: File, update: (value: string) => void) => Promise<void>;
   saveServerSettings: () => void | Promise<void>;
+  restartServer: () => void | Promise<void>;
   toolAutoEnabled: boolean;
   setToolAutoEnabled: BooleanSetter;
   toolTimeOfDay: string;
@@ -263,8 +265,10 @@ export function ShellDialogs({
   serverSettingsActionError,
   serverSettingsActionStatus,
   serverSettingsSaveDisabled,
+  serverRestartPending,
   readServerPEMUpload,
   saveServerSettings,
+  restartServer,
   toolAutoEnabled,
   setToolAutoEnabled,
   toolTimeOfDay,
@@ -491,8 +495,10 @@ export function ShellDialogs({
               serverSettingsActionError={serverSettingsActionError}
               serverSettingsActionStatus={serverSettingsActionStatus}
               serverSettingsSaveDisabled={serverSettingsSaveDisabled}
+              serverRestartPending={serverRestartPending}
               readServerPEMUpload={readServerPEMUpload}
               saveServerSettings={saveServerSettings}
+              restartServer={restartServer}
               onLogout={onLogout}
             />
 

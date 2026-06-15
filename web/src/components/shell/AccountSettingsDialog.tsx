@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
-import { Download, LogOut, RefreshCw, Save, Send, Server as ServerIcon, Upload } from "lucide-react";
+import { Download, LogOut, RefreshCw, RotateCw, Save, Send, Server as ServerIcon, Upload } from "lucide-react";
 import type { NotificationSettings, Organization, Project, SelfUpdateOverview, SelfUpdateSettings, ServerSettings, ToolUpdateOverview, User, UserPreferences } from "@/api/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -108,8 +108,10 @@ interface AccountSettingsDialogProps {
   serverSettingsActionError: string | null;
   serverSettingsActionStatus: string | null;
   serverSettingsSaveDisabled: boolean;
+  serverRestartPending: boolean;
   readServerPEMUpload: (file: File, update: (value: string) => void) => Promise<void>;
   saveServerSettings: () => void | Promise<void>;
+  restartServer: () => void | Promise<void>;
   onLogout: () => void;
 }
 
@@ -205,8 +207,10 @@ export function AccountSettingsDialog({
   serverSettingsActionError,
   serverSettingsActionStatus,
   serverSettingsSaveDisabled,
+  serverRestartPending,
   readServerPEMUpload,
   saveServerSettings,
+  restartServer,
   onLogout,
 }: AccountSettingsDialogProps) {
   return (
@@ -529,15 +533,29 @@ export function AccountSettingsDialog({
                         {serverSettingsActionError ?? serverSettingsActionStatus}
                       </p>
                     )}
-                    <div className="flex justify-end">
-                      <Button
-                        type="button"
-                        onClick={saveServerSettings}
-                        disabled={serverSettingsSaveDisabled}
-                      >
-                        {serverTLSCertPEM || serverTLSKeyPEM ? <Upload className="h-4 w-4" /> : <Save className="h-4 w-4" />}
-                        Save Server
-                      </Button>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs text-muted-foreground">
+                        Restart to reload certificates from disk after saving a renewed certificate.
+                      </p>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={restartServer}
+                          disabled={serverSettingsLoading || serverSettingsPending || serverRestartPending}
+                        >
+                          <RotateCw className="h-4 w-4" />
+                          Restart server
+                        </Button>
+                        <Button
+                          type="button"
+                          onClick={saveServerSettings}
+                          disabled={serverSettingsSaveDisabled}
+                        >
+                          {serverTLSCertPEM || serverTLSKeyPEM ? <Upload className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+                          Save Server
+                        </Button>
+                      </div>
                     </div>
                   </div>
                   <div className="grid gap-3 rounded-md border border-border p-3">

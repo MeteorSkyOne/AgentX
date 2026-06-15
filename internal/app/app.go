@@ -35,6 +35,7 @@ type Options struct {
 	SelfUpdates           SelfUpdateOptions
 	WebhookHTTPClient     *http.Client
 	WebhookTimeout        time.Duration
+	OnRestart             func()
 	D2Command             string
 	D2Timeout             time.Duration
 	D2CacheTTL            time.Duration
@@ -126,6 +127,9 @@ type App struct {
 	backgroundCancel   context.CancelFunc
 	backgroundWG       sync.WaitGroup
 	shuttingDown       bool
+	restartMu          sync.Mutex
+	restartRequested   bool
+	restartExecPath    string
 }
 
 func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
@@ -212,6 +216,13 @@ func (a *App) isShuttingDown() bool {
 }
 
 func (a *App) RestartPath() string {
+	a.restartMu.Lock()
+	requested := a.restartRequested
+	path := a.restartExecPath
+	a.restartMu.Unlock()
+	if requested && path != "" {
+		return path
+	}
 	if a.selfUpdates == nil {
 		return ""
 	}

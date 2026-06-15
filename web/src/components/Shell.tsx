@@ -87,6 +87,7 @@ export function Shell({
   onDeleteAgent,
   onUpdateNotificationSettings,
   onUpdateServerSettings,
+  onRestartServer,
   onUpdateToolUpdateSettings,
   onCheckToolUpdates,
   onRunToolUpdate,
@@ -190,6 +191,7 @@ export function Shell({
   const [serverTLSCertPEM, setServerTLSCertPEM] = useState("");
   const [serverTLSKeyPEM, setServerTLSKeyPEM] = useState("");
   const [serverSettingsPending, setServerSettingsPending] = useState(false);
+  const [serverRestartPending, setServerRestartPending] = useState(false);
   const [serverSettingsActionError, setServerSettingsActionError] = useState<string | null>(null);
   const [serverSettingsActionStatus, setServerSettingsActionStatus] = useState<string | null>(null);
   const [toolAutoEnabled, setToolAutoEnabled] = useState(false);
@@ -618,6 +620,20 @@ export function Shell({
       setServerSettingsActionError(err instanceof Error ? err.message : "Save server settings failed");
     } finally {
       setServerSettingsPending(false);
+    }
+  }
+
+  async function restartServer() {
+    setServerSettingsActionError(null);
+    setServerSettingsActionStatus("Restarting server…");
+    setServerRestartPending(true);
+    try {
+      await onRestartServer();
+      setServerSettingsActionStatus("Server is restarting. It will reconnect shortly.");
+    } catch (err) {
+      setServerSettingsActionError(err instanceof Error ? err.message : "Restart server failed");
+      setServerSettingsActionStatus(null);
+      setServerRestartPending(false);
     }
   }
 
@@ -1221,8 +1237,10 @@ export function Shell({
         serverSettingsActionError={serverSettingsActionError}
         serverSettingsActionStatus={serverSettingsActionStatus}
         serverSettingsSaveDisabled={serverSettingsSaveDisabled}
+        serverRestartPending={serverRestartPending}
         readServerPEMUpload={readServerPEMUpload}
         saveServerSettings={saveServerSettings}
+        restartServer={restartServer}
         projectEditOpen={projectEditOpen}
         setProjectEditOpen={setProjectEditOpen}
         projectEditName={projectEditName}

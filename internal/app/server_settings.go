@@ -102,6 +102,31 @@ func (a *App) UpdateServerSettings(ctx context.Context, orgID string, req Server
 	return a.serverSettingsResponse(orgID, saved), nil
 }
 
+// RestartServer triggers a graceful restart of the AgentX process by re-execing
+// the current executable. This reloads TLS certificates from disk, which the
+// running server only reads at startup, so an admin can apply a refreshed
+// certificate without manual host access.
+func (a *App) RestartServer(_ context.Context) error {
+	if a.opts.OnRestart == nil {
+		return invalidInput("server restart is not supported in this deployment")
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if resolved, rerr := filepath.EvalSymlinks(exe); rerr == nil {
+		exe = resolved
+	}
+	a.restartMu.Lock()
+	a.restartRequested = true
+	a.restartExecPath = exe
+	a.restartMu.Unlock()
+	// Trigger the shutdown asynchronously so the HTTP response is flushed before
+	// the listeners close; the re-exec happens once graceful shutdown completes.
+	go a.opts.OnRestart()
+	return nil
+}
+
 func validateServerPEM(body string, label string) error {
 	if !strings.Contains(body, "-----BEGIN ") || !strings.Contains(body, "-----END ") {
 		return invalidInput(label + " must be PEM encoded")

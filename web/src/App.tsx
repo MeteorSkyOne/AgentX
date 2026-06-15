@@ -24,6 +24,7 @@ import {
   organizations,
   projectChannels,
   projects,
+  restartServer,
   runSelfUpdate,
   serverSettings,
   setChannelAgents,
@@ -964,6 +965,10 @@ export default function App() {
     return updated;
   }
 
+  async function handleRestartServer(): Promise<void> {
+    await restartServer(selectedOrganizationID as string);
+  }
+
   async function handleUpdateToolUpdateSettings(payload: ToolUpdateSettings): Promise<ToolUpdateOverview> {
     const updated = await updateToolUpdateSettings(selectedOrganizationID as string, payload);
     await queryClient.invalidateQueries({ queryKey: ["tool-updates", selectedOrganizationID] });
@@ -1083,6 +1088,7 @@ export default function App() {
       onDeleteAgent={handleDeleteAgent}
       onUpdateNotificationSettings={handleUpdateNotificationSettings}
       onUpdateServerSettings={handleUpdateServerSettings}
+      onRestartServer={handleRestartServer}
       onUpdateToolUpdateSettings={handleUpdateToolUpdateSettings}
       onCheckToolUpdates={handleCheckToolUpdates}
       onRunToolUpdate={handleRunToolUpdate}

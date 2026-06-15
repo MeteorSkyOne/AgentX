@@ -400,6 +400,7 @@ function shellProps(): ShellProps {
     onDeleteAgent: vi.fn(),
     onUpdateNotificationSettings: vi.fn(),
     onUpdateServerSettings: vi.fn(),
+    onRestartServer: vi.fn(),
     onUpdateToolUpdateSettings: vi.fn(),
     onCheckToolUpdates: vi.fn(),
     onRunToolUpdate: vi.fn(),

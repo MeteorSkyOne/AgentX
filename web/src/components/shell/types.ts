@@ -161,6 +161,7 @@ export interface ShellProps {
     webhook_secret?: string;
   }) => Promise<NotificationSettings>;
   onUpdateServerSettings: (payload: ServerSettingsUpdatePayload) => Promise<ServerSettings>;
+  onRestartServer: () => Promise<void>;
   onUpdateToolUpdateSettings: (payload: ToolUpdateSettings) => Promise<ToolUpdateOverview>;
   onCheckToolUpdates: (tool: ToolUpdateStatus["tool"] | "all") => Promise<ToolUpdateOverview>;
   onRunToolUpdate: (tool: ToolUpdateStatus["tool"] | "all") => Promise<ToolUpdateOverview>;

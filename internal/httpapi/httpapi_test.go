@@ -668,6 +668,64 @@ func TestHTTPServerSettingsAuthorizeAndPersistTLS(t *testing.T) {
 	}
 }
 
+func TestHTTPServerRestartAuthorizeAndTriggers(t *testing.T) {
+	ctx := context.Background()
+	restarted := make(chan struct{}, 1)
+	env := newTestEnvWithOptions(t, app.Options{OnRestart: func() { restarted <- struct{}{} }})
+	bootstrap := setupApp(t, ctx, env.app)
+
+	restartURL := env.server.URL + "/api/organizations/" + bootstrap.Organization.ID + "/server-settings/restart"
+	postJSON(t, restartURL, "", nil, http.StatusUnauthorized, nil)
+	postJSON(t, env.server.URL+"/api/organizations/not-a-real-org/server-settings/restart", bootstrap.SessionToken, nil, http.StatusNotFound, nil)
+
+	memberPassword := "member-password-123"
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(memberPassword), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	passwordUpdatedAt := now
+	member := domain.User{
+		ID:                "usr_member",
+		Username:          "member",
+		DisplayName:       "Member",
+		PasswordHash:      string(passwordHash),
+		PasswordUpdatedAt: &passwordUpdatedAt,
+		CreatedAt:         now,
+	}
+	if err := env.store.Users().Create(ctx, member); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.store.Organizations().AddMember(ctx, bootstrap.Organization.ID, member.ID, domain.RoleMember); err != nil {
+		t.Fatal(err)
+	}
+	memberLogin, err := env.app.Login(ctx, app.LoginRequest{Username: "member", Password: memberPassword})
+	if err != nil {
+		t.Fatal(err)
+	}
+	postJSON(t, restartURL, memberLogin.SessionToken, nil, http.StatusForbidden, nil)
+
+	var resp map[string]bool
+	postJSON(t, restartURL, bootstrap.SessionToken, nil, http.StatusOK, &resp)
+	if !resp["restarting"] {
+		t.Fatalf("restart response = %#v", resp)
+	}
+	select {
+	case <-restarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnRestart callback was not triggered")
+	}
+}
+
+func TestHTTPServerRestartUnsupportedWithoutCallback(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	bootstrap := setupApp(t, ctx, env.app)
+
+	restartURL := env.server.URL + "/api/organizations/" + bootstrap.Organization.ID + "/server-settings/restart"
+	postJSON(t, restartURL, bootstrap.SessionToken, nil, http.StatusBadRequest, nil)
+}
+
 func TestHTTPSelfUpdateCheckReturnsDetailedActionError(t *testing.T) {
 	client := &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {

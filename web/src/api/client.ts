@@ -185,6 +185,15 @@ export function updateServerSettings(
   );
 }
 
+export function restartServer(orgID: string): Promise<{ restarting: boolean }> {
+  return request<{ restarting: boolean }>(
+    `/api/organizations/${encodeURIComponent(orgID)}/server-settings/restart`,
+    {
+      method: "POST"
+    }
+  );
+}
+
 export function toolUpdates(orgID: string): Promise<ToolUpdateOverview> {
   return request<ToolUpdateOverview>(
     `/api/organizations/${encodeURIComponent(orgID)}/tool-updates`

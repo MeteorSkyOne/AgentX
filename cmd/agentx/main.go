@@ -134,6 +134,7 @@ func main() {
 		D2CacheTTL:            time.Duration(cfg.D2CacheTTLMinutes) * time.Minute,
 		D2CacheMaxEntries:     cfg.D2CacheMaxEntries,
 		ScheduledShellEnabled: cfg.ScheduledShellEnabled,
+		OnRestart:             triggerShutdown,
 		Terminal: app.TerminalOptions{
 			Shell:                   cfg.TerminalShell,
 			IdleTimeout:             time.Duration(cfg.TerminalIdleMinutes) * time.Minute,
