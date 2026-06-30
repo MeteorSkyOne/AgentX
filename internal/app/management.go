@@ -246,7 +246,7 @@ func (a *App) ListThreads(ctx context.Context, channelID string) ([]domain.Threa
 	return a.store.Threads().ListByChannel(ctx, channelID)
 }
 
-func (a *App) CreateThread(ctx context.Context, userID string, channelID string, title string, body string) (domain.Thread, domain.Message, error) {
+func (a *App) CreateThread(ctx context.Context, userID string, channelID string, title string, body string, attachments []AttachmentUpload) (domain.Thread, domain.Message, error) {
 	channel, err := a.store.Channels().ByID(ctx, channelID)
 	if err != nil {
 		return domain.Thread{}, domain.Message{}, err
@@ -256,7 +256,7 @@ func (a *App) CreateThread(ctx context.Context, userID string, channelID string,
 	}
 	title = strings.TrimSpace(title)
 	body = strings.TrimSpace(body)
-	if title == "" || body == "" {
+	if title == "" || (body == "" && len(attachments) == 0) {
 		return domain.Thread{}, domain.Message{}, ErrInvalidInput
 	}
 	now := time.Now().UTC()
@@ -283,6 +283,7 @@ func (a *App) CreateThread(ctx context.Context, userID string, channelID string,
 		ConversationType: domain.ConversationThread,
 		ConversationID:   thread.ID,
 		Body:             body,
+		Attachments:      attachments,
 	})
 	if err != nil {
 		return domain.Thread{}, domain.Message{}, err

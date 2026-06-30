@@ -4073,12 +4073,12 @@ func TestUpdateThreadTitlePreservesCatalogOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	older, _, err := application.CreateThread(ctx, bootstrap.User.ID, forum.ID, "older title", "older body")
+	older, _, err := application.CreateThread(ctx, bootstrap.User.ID, forum.ID, "older title", "older body", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(time.Millisecond)
-	newer, _, err := application.CreateThread(ctx, bootstrap.User.ID, forum.ID, "newer title", "newer body")
+	newer, _, err := application.CreateThread(ctx, bootstrap.User.ID, forum.ID, "newer title", "newer body", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

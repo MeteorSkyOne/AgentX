@@ -829,8 +829,12 @@ export default function App() {
     }
   }
 
-  async function handleCreateThread(title: string, body: string): Promise<CreateThreadResponse> {
-    const created = await createThread(selectedChannelID as string, title, body);
+  async function handleCreateThread(
+    title: string,
+    body: string,
+    files?: File[]
+  ): Promise<CreateThreadResponse> {
+    const created = await createThread(selectedChannelID as string, title, body, { files });
     await queryClient.invalidateQueries({ queryKey: ["threads", selectedChannelID] });
     return created;
   }

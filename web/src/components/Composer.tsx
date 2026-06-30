@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent } from "react";
+import type { FormEvent, KeyboardEvent } from "react";
 import { skipToken, useQuery } from "@tanstack/react-query";
-import { AlertCircle, ArrowUp, BookOpen, FileText, Image as ImageIcon, Paperclip, Reply, Send, Terminal, X } from "lucide-react";
+import { AlertCircle, ArrowUp, BookOpen, Paperclip, Reply, Send, Terminal, X } from "lucide-react";
 import { conversationSkills, sendMessage } from "../api/client";
 import type { Agent, ConversationType, Message } from "../api/types";
 import type { QueuedPrompt } from "./shell/types";
@@ -17,17 +17,16 @@ import {
   slashCommandTokenAt,
   type SlashCommandDefinition
 } from "./composerAutocomplete";
+import { AttachmentPreviews } from "./attachments/AttachmentPreviews";
+import { revokeAttachmentPreviews } from "./attachments/draft";
+import { useDraftAttachments } from "./attachments/useDraftAttachments";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+export { selectDraftAttachmentFiles } from "./attachments/draft";
+
 interface TypingAgent {
   name: string;
-}
-
-interface DraftAttachment {
-  id: string;
-  file: File;
-  previewURL?: string;
 }
 
 interface ComposerProps {
@@ -58,8 +57,6 @@ export function Composer({
   onSent
 }: ComposerProps) {
   const [body, setBody] = useState("");
-  const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
-  const [draggingFiles, setDraggingFiles] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [steeringQueueIDs, setSteeringQueueIDs] = useState<Set<string>>(() => new Set());
@@ -70,8 +67,18 @@ export function Composer({
   const [dismissedCommandKey, setDismissedCommandKey] = useState<string | null>(null);
   const [dismissedMentionKey, setDismissedMentionKey] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const attachmentsRef = useRef<DraftAttachment[]>([]);
+  const {
+    attachments,
+    setAttachments,
+    draggingFiles,
+    fileInputRef,
+    removeAttachment,
+    clearAttachments,
+    handleFileInputChange,
+    handlePaste,
+    dragHandlers,
+    openFilePicker
+  } = useDraftAttachments(setError);
   const trimmed = body.trim();
   const commandToken = useMemo(() => slashCommandTokenAt(body, caret), [body, caret]);
   const skillsConversation = conversation && commandToken ? conversation : null;
@@ -155,81 +162,6 @@ export function Composer({
       setDismissedMentionKey(null);
     }
   }, [mentionToken]);
-
-  useEffect(() => {
-    attachmentsRef.current = attachments;
-  }, [attachments]);
-
-  useEffect(() => {
-    return () => {
-      revokeAttachmentPreviews(attachmentsRef.current);
-    };
-  }, []);
-
-  function addFiles(files: File[]) {
-    if (files.length === 0) return;
-
-    const selection = selectDraftAttachmentFiles(attachments.map((item) => item.file), files);
-    if (selection.rejected.length > 0) {
-      setError(selection.rejected.slice(0, 3).join("; "));
-    } else {
-      setError(null);
-    }
-    if (selection.accepted.length > 0) {
-      setAttachments((current) => [...current, ...selection.accepted.map(createDraftAttachment)]);
-    }
-  }
-
-  function removeAttachment(attachmentID: string) {
-    setAttachments((current) => {
-      const removed = current.find((item) => item.id === attachmentID);
-      if (removed?.previewURL) {
-        URL.revokeObjectURL(removed.previewURL);
-      }
-      return current.filter((item) => item.id !== attachmentID);
-    });
-  }
-
-  function clearAttachments(items: DraftAttachment[], revokePreviews = true) {
-    if (revokePreviews) {
-      revokeAttachmentPreviews(items);
-    }
-    setAttachments([]);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  }
-
-  function handleFileInputChange(event: ChangeEvent<HTMLInputElement>) {
-    addFiles(Array.from(event.currentTarget.files ?? []));
-    event.currentTarget.value = "";
-  }
-
-  function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const files = Array.from(event.clipboardData.files ?? []);
-    if (files.length === 0) return;
-    event.preventDefault();
-    addFiles(files);
-  }
-
-  function handleDragOver(event: DragEvent<HTMLDivElement>) {
-    if (!hasDraggedFiles(event)) return;
-    event.preventDefault();
-    setDraggingFiles(true);
-  }
-
-  function handleDragLeave(event: DragEvent<HTMLDivElement>) {
-    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-      setDraggingFiles(false);
-    }
-  }
-
-  function handleDrop(event: DragEvent<HTMLDivElement>) {
-    if (!hasDraggedFiles(event)) return;
-    event.preventDefault();
-    setDraggingFiles(false);
-    addFiles(Array.from(event.dataTransfer.files ?? []));
-  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -391,9 +323,7 @@ export function Composer({
   return (
     <div
       className="shrink-0 border-t border-border bg-background/95 px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-4"
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
+      {...dragHandlers}
     >
       {(typingLabel || queuedPrompts.length > 0) && (
         <div className="space-y-1 px-1 pb-2 text-xs text-muted-foreground">
@@ -550,46 +480,11 @@ export function Composer({
               </Button>
             </div>
           )}
-          {attachments.length > 0 && (
-            <div className="mb-2 flex max-h-28 flex-wrap gap-2 overflow-y-auto">
-              {attachments.map((attachment) => (
-                <div
-                  key={attachment.id}
-                  className="flex h-10 max-w-full items-center gap-2 rounded-md border border-border bg-muted/35 px-2 text-xs"
-                >
-                  {attachment.previewURL ? (
-                    <img
-                      src={attachment.previewURL}
-                      alt={attachment.file.name || "attachment"}
-                      className="h-7 w-7 rounded object-cover"
-                    />
-                  ) : isImageFile(attachment.file) ? (
-                    <ImageIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  )}
-                  <span className="min-w-0 max-w-48 truncate font-medium">
-                    {attachment.file.name || "attachment"}
-                  </span>
-                  <span className="shrink-0 text-muted-foreground">
-                    {formatBytes(attachment.file.size)}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 shrink-0"
-                    title="Remove attachment"
-                    aria-label="Remove attachment"
-                    disabled={submitting}
-                    onClick={() => removeAttachment(attachment.id)}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
+          <AttachmentPreviews
+            attachments={attachments}
+            onRemove={removeAttachment}
+            disabled={submitting}
+          />
           <div
             className={cn(
               "flex min-h-11 items-center gap-2 rounded-md border border-input bg-secondary/60 px-3 py-2 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-background focus-within:ring-[3px] focus-within:ring-ring/20",
@@ -632,7 +527,7 @@ export function Composer({
               title="Attach files"
               aria-label="Attach files"
               disabled={!conversation || submitting}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={openFilePicker}
             >
               <Paperclip className="h-4 w-4" />
             </Button>
@@ -689,87 +584,4 @@ function messageSenderLabel(
 function messagePreview(body: string): string {
   const preview = body.replace(/\s+/g, " ").trim();
   return preview || "(empty)";
-}
-
-const maxDraftAttachments = 5;
-const maxDraftAttachmentBytes = 10 * 1024 * 1024;
-const maxDraftAttachmentTotalBytes = 25 * 1024 * 1024;
-
-function createDraftAttachment(file: File): DraftAttachment {
-  const previewURL = isImageFile(file) ? URL.createObjectURL(file) : undefined;
-  return {
-    id: draftAttachmentID(),
-    file,
-    previewURL
-  };
-}
-
-function draftAttachmentID(): string {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-export function selectDraftAttachmentFiles(
-  existingFiles: File[],
-  incomingFiles: File[]
-): { accepted: File[]; rejected: string[] } {
-  const accepted: File[] = [];
-  const rejected: string[] = [];
-  let totalBytes = existingFiles.reduce((sum, file) => sum + file.size, 0);
-  let remainingSlots = Math.max(0, maxDraftAttachments - existingFiles.length);
-
-  for (const file of incomingFiles) {
-    const name = file.name || "Attachment";
-    if (remainingSlots <= 0) {
-      rejected.push(`${name} exceeds the ${maxDraftAttachments} file limit`);
-      continue;
-    }
-    if (file.size === 0) {
-      rejected.push(`${name} is empty`);
-      continue;
-    }
-    if (file.size > maxDraftAttachmentBytes) {
-      rejected.push(`${name} exceeds 10 MiB`);
-      continue;
-    }
-    if (totalBytes + file.size > maxDraftAttachmentTotalBytes) {
-      rejected.push(`${name} would exceed 25 MiB total`);
-      continue;
-    }
-    accepted.push(file);
-    remainingSlots -= 1;
-    totalBytes += file.size;
-  }
-
-  return { accepted, rejected };
-}
-
-function isImageFile(file: File): boolean {
-  return imageDraftContentTypes.has(file.type.toLowerCase());
-}
-
-const imageDraftContentTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-  if (bytes >= 1024) {
-    return `${Math.ceil(bytes / 1024)} KB`;
-  }
-  return `${bytes} B`;
-}
-
-function revokeAttachmentPreviews(attachments: DraftAttachment[]) {
-  for (const attachment of attachments) {
-    if (attachment.previewURL) {
-      URL.revokeObjectURL(attachment.previewURL);
-    }
-  }
-}
-
-function hasDraggedFiles(event: DragEvent<HTMLDivElement>): boolean {
-  return Array.from(event.dataTransfer.types).includes("Files");
 }

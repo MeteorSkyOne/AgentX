@@ -576,9 +576,20 @@ export function channelMetrics(
 export function createThread(
   channelID: string,
   title: string,
-  body: string
+  body: string,
+  options: { files?: File[] } = {}
 ): Promise<CreateThreadResponse> {
-  return request<CreateThreadResponse>(`/api/channels/${encodeURIComponent(channelID)}/threads`, {
+  const url = `/api/channels/${encodeURIComponent(channelID)}/threads`;
+  if (options.files && options.files.length > 0) {
+    const form = new FormData();
+    form.set("title", title);
+    form.set("body", body);
+    for (const file of options.files) {
+      form.append("files[]", file);
+    }
+    return request<CreateThreadResponse>(url, { method: "POST", body: form });
+  }
+  return request<CreateThreadResponse>(url, {
     method: "POST",
     body: JSON.stringify({ title, body })
   });

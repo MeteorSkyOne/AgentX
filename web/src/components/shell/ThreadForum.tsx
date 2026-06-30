@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { skipToken, useQuery } from "@tanstack/react-query";
-import { BookOpen, MessageSquare, Pencil, Save, Terminal, Trash2, X } from "lucide-react";
+import { BookOpen, MessageSquare, Paperclip, Pencil, Save, Terminal, Trash2, X } from "lucide-react";
 import { conversationSkills } from "../../api/client";
 import type { Agent, ConversationType, CreateThreadResponse, Thread } from "../../api/types";
 import {
@@ -14,6 +14,9 @@ import {
   slashCommandTokenAt,
   type SlashCommandDefinition
 } from "../composerAutocomplete";
+import { AttachmentPreviews } from "../attachments/AttachmentPreviews";
+import { revokeAttachmentPreviews } from "../attachments/draft";
+import { useDraftAttachments } from "../attachments/useDraftAttachments";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -33,13 +36,25 @@ export function ThreadForum({
   conversation?: { type: ConversationType; id: string };
   mentionAgents?: Pick<Agent, "id" | "name" | "handle" | "kind" | "bot_user_id">[];
   onSelectThread: (thread: Thread) => void;
-  onCreateThread: (title: string, body: string) => Promise<CreateThreadResponse>;
+  onCreateThread: (title: string, body: string, files?: File[]) => Promise<CreateThreadResponse>;
   onUpdateThread: (threadID: string, title: string) => Promise<Thread>;
   onDeleteThread: (thread: Thread) => Promise<void>;
 }) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const {
+    attachments,
+    draggingFiles,
+    fileInputRef,
+    removeAttachment,
+    clearAttachments,
+    handleFileInputChange,
+    handlePaste,
+    dragHandlers,
+    openFilePicker
+  } = useDraftAttachments(setError);
   const [editingID, setEditingID] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [pendingID, setPendingID] = useState<string | null>(null);
@@ -193,17 +208,28 @@ export function ThreadForum({
   }
 
   async function submit() {
-    if (!title.trim() || !body.trim()) return;
+    if (submitting) return;
+    if (!title.trim() || (!body.trim() && attachments.length === 0)) return;
     setError(null);
+    setSubmitting(true);
     const submittedBody = mentionDisplayNamesToHandles(body.trim(), mentionAgents);
+    const submittedAttachments = attachments;
     try {
-      const created = await onCreateThread(title, submittedBody);
+      const created = await onCreateThread(
+        title,
+        submittedBody,
+        submittedAttachments.map((attachment) => attachment.file)
+      );
       setTitle("");
       setBody("");
       setCaret(0);
+      clearAttachments(submittedAttachments, false);
+      revokeAttachmentPreviews(submittedAttachments);
       onSelectThread(created.thread);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Post failed");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -331,7 +357,20 @@ export function ThreadForum({
         </div>
       </ScrollArea>
 
-      <div className="mt-4 shrink-0 space-y-2 rounded-lg border border-border p-3">
+      <div
+        className={cn(
+          "mt-4 shrink-0 space-y-2 rounded-lg border border-border p-3 transition-colors",
+          draggingFiles && "border-primary/70 bg-primary/5"
+        )}
+        {...dragHandlers}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={handleFileInputChange}
+        />
         <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" aria-label="Post title" />
         <div className="relative">
           {commandOpen && (
@@ -403,14 +442,41 @@ export function ThreadForum({
             onClick={(event) => setCaret(event.currentTarget.selectionStart)}
             onKeyDown={handleKeyDown}
             onKeyUp={(event) => setCaret(event.currentTarget.selectionStart)}
+            onPaste={handlePaste}
             placeholder="Body"
             aria-label="Post body"
             rows={3}
             className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-base md:text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
           />
         </div>
+        <AttachmentPreviews
+          attachments={attachments}
+          onRemove={removeAttachment}
+          disabled={submitting}
+          className="mb-0"
+        />
         {error && <p className="text-sm text-destructive">{error}</p>}
-        <Button className="w-full" onClick={submit}>Create post</Button>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 shrink-0"
+            title="Attach files"
+            aria-label="Attach files"
+            disabled={submitting}
+            onClick={openFilePicker}
+          >
+            <Paperclip className="h-4 w-4" />
+          </Button>
+          <Button
+            className="flex-1"
+            onClick={submit}
+            disabled={submitting || !title.trim() || (!body.trim() && attachments.length === 0)}
+          >
+            Create post
+          </Button>
+        </div>
       </div>
     </section>
   );

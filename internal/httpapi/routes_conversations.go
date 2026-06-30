@@ -253,30 +253,41 @@ func readMultipartSendMessageRequest(w http.ResponseWriter, r *http.Request) (se
 		Body:             r.FormValue("body"),
 		ReplyToMessageID: r.FormValue("reply_to_message_id"),
 	}
-	var headers []*multipart.FileHeader
-	if r.MultipartForm != nil {
-		headers = append(headers, r.MultipartForm.File["files[]"]...)
-		headers = append(headers, r.MultipartForm.File["files"]...)
+	attachments, err := parseMultipartAttachments(r.MultipartForm)
+	if err != nil {
+		return sendMessageRequest{}, nil, err
 	}
+	return req, attachments, nil
+}
+
+// parseMultipartAttachments reads uploaded files from an already-parsed
+// multipart form. Files may be supplied under either "files[]" or "files".
+func parseMultipartAttachments(form *multipart.Form) ([]app.AttachmentUpload, error) {
+	if form == nil {
+		return nil, nil
+	}
+	var headers []*multipart.FileHeader
+	headers = append(headers, form.File["files[]"]...)
+	headers = append(headers, form.File["files"]...)
 	attachments := make([]app.AttachmentUpload, 0, len(headers))
 	for _, header := range headers {
 		file, err := header.Open()
 		if err != nil {
 			slog.Warn("failed to open uploaded attachment", "filename", header.Filename, "error", err)
-			return sendMessageRequest{}, nil, errors.New("failed to read attachment")
+			return nil, errors.New("failed to read attachment")
 		}
 		data, readErr := io.ReadAll(io.LimitReader(file, app.MaxAttachmentBytes+1))
 		closeErr := file.Close()
 		if readErr != nil {
 			slog.Warn("failed to read uploaded attachment", "filename", header.Filename, "error", readErr)
-			return sendMessageRequest{}, nil, errors.New("failed to read attachment")
+			return nil, errors.New("failed to read attachment")
 		}
 		if closeErr != nil {
 			slog.Warn("failed to close uploaded attachment", "filename", header.Filename, "error", closeErr)
-			return sendMessageRequest{}, nil, errors.New("failed to read attachment")
+			return nil, errors.New("failed to read attachment")
 		}
 		if int64(len(data)) > app.MaxAttachmentBytes {
-			return sendMessageRequest{}, nil, errors.New("attachment exceeds 10 MiB")
+			return nil, errors.New("attachment exceeds 10 MiB")
 		}
 		attachments = append(attachments, app.AttachmentUpload{
 			Filename:    header.Filename,
@@ -284,7 +295,7 @@ func readMultipartSendMessageRequest(w http.ResponseWriter, r *http.Request) (se
 			Data:        data,
 		})
 	}
-	return req, attachments, nil
+	return attachments, nil
 }
 
 type inputResponseRequest struct {
