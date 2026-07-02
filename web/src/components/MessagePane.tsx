@@ -57,6 +57,8 @@ export function MessagePane({
     onRetryMessage && streaming.length === 0 && lastMessage?.sender_type === "bot"
       ? lastMessage.id
       : undefined;
+  const hasRenderableItems = messages.length > 0 || streaming.length > 0 || Boolean(pendingQuestion);
+  const showInitialLoading = isLoading && !hasRenderableItems;
 
   useLayoutEffect(() => {
     const conversationChanged = previousConversationKeyRef.current !== conversationKey;
@@ -126,7 +128,7 @@ export function MessagePane({
     target?.scrollIntoView({ block: "center" });
   }
 
-  if (isLoading) {
+  if (showInitialLoading) {
     return (
       <section className="flex min-h-0 flex-1 items-center justify-center">
         <span className="text-sm text-muted-foreground">Loading messages...</span>
@@ -134,7 +136,7 @@ export function MessagePane({
     );
   }
 
-  if (messages.length === 0 && streaming.length === 0) {
+  if (!hasRenderableItems) {
     return (
       <section className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
         <MessageSquare className="h-12 w-12 text-muted-foreground" />

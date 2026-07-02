@@ -233,6 +233,22 @@ describe("MessagePane message timing", () => {
 });
 
 describe("MessagePane process details", () => {
+  it("keeps the message viewport mounted during a background history reload", async () => {
+    const { container, rerender } = await renderMessagePane({
+      messages: [message({ id: "msg-1", body: "still visible" })],
+      streaming: [],
+      onOpenWorkspacePath: () => undefined,
+    });
+    const viewport = container.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]');
+    expect(viewport).toBeTruthy();
+
+    await rerender({ isLoading: true });
+
+    expect(container.textContent).not.toContain("Loading messages...");
+    expect(markdownButtons(container)[0].textContent).toBe("still visible");
+    expect(container.querySelector('[data-slot="scroll-area-viewport"]')).toBe(viewport);
+  });
+
   it("does not scroll to the bottom when a stream updates while the reader is browsing earlier messages", async () => {
     const { container, rerender } = await renderMessagePane({
       messages: [message({ id: "msg-1", body: "older message" })],
@@ -627,6 +643,7 @@ async function renderMessagePane({
   preferences = { show_ttft: false, show_tps: false, hide_avatars: false },
   onOpenWorkspacePath,
   onRetryMessage,
+  isLoading = false,
 }: {
   messages: Message[];
   streaming: Array<{
@@ -642,6 +659,7 @@ async function renderMessagePane({
   preferences?: UserPreferences;
   onOpenWorkspacePath: (target: WorkspacePathTarget) => void;
   onRetryMessage?: (message: Message) => Promise<void>;
+  isLoading?: boolean;
 }): Promise<{
   container: HTMLDivElement;
   rerender: (
@@ -659,6 +677,7 @@ async function renderMessagePane({
       }>;
       preferences: UserPreferences;
       onOpenWorkspacePath: (target: WorkspacePathTarget) => void;
+      isLoading: boolean;
     }>
   ) => Promise<void>;
 }> {
@@ -666,14 +685,14 @@ async function renderMessagePane({
   document.body.appendChild(container);
   const root = createRoot(container);
   mountedRoots.push({ root, container });
-  let current = { messages, streaming, preferences, onOpenWorkspacePath, onRetryMessage };
+  let current = { messages, streaming, preferences, onOpenWorkspacePath, onRetryMessage, isLoading };
 
   async function render() {
     await act(async () => {
       root.render(
         createElement(MessagePane, {
           messages: current.messages,
-          isLoading: false,
+          isLoading: current.isLoading,
           isLoadingOlder: false,
           hasOlderMessages: false,
           streaming: current.streaming,
