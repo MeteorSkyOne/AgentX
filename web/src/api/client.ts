@@ -241,7 +241,8 @@ export function runToolUpdate(
 
 export function selfUpdate(orgID: string): Promise<SelfUpdateOverview> {
   return request<SelfUpdateOverview>(
-    `/api/organizations/${encodeURIComponent(orgID)}/self-update`
+    `/api/organizations/${encodeURIComponent(orgID)}/self-update`,
+    { cache: "no-store" }
   );
 }
 

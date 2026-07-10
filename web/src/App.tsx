@@ -108,6 +108,7 @@ import {
   handleWriteWorkspaceFile,
 } from "./app/workspaceActions";
 import { LoadingSessionView } from "./app/LoadingSessionView";
+import { useReloadOnServerVersionChange } from "./app/useReloadOnServerVersionChange";
 
 function toolUpdatesRefetchInterval(query: { state: { data?: ToolUpdateOverview } }): number {
   const hasActiveToolAction = query.state.data?.tools.some(
@@ -255,6 +256,8 @@ export default function App() {
     refetchInterval: selfUpdateRefetchInterval,
     refetchIntervalInBackground: false
   });
+
+  useReloadOnServerVersionChange(selfUpdateQuery.data?.status.current_version);
 
   const userPreferencesQuery = useQuery({
     queryKey: ["user-preferences", sessionToken],
