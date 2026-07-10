@@ -76,7 +76,7 @@ export function MetricsPanel({ project, selectedChannel, activeConversation }: M
     <section className="flex min-h-0 flex-1 flex-col bg-background" data-testid="metrics-panel">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5">
+          <div className="inline-flex rounded-xl border-2 border-border bg-muted/40 p-0.5">
             {scopeOptions.map((item) => (
               <Button
                 key={item.id}

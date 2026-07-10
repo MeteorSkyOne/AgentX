@@ -12,7 +12,7 @@ function Checkbox({
       <input
         type="checkbox"
         className={cn(
-          "peer h-4 w-4 shrink-0 appearance-none rounded-[4px] border border-input bg-background shadow-xs transition-[background-color,border-color,box-shadow] checked:border-primary checked:bg-primary hover:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+          "peer h-4 w-4 shrink-0 appearance-none rounded-[5px] border-2 border-input bg-card transition-[background-color,border-color,box-shadow] checked:bg-primary hover:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
           className
         )}
         {...props}

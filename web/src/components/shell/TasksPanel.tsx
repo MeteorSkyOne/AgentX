@@ -407,8 +407,8 @@ function TaskRow({
       role="button"
       tabIndex={0}
       className={cn(
-        "w-full cursor-pointer rounded-md border border-border bg-card p-3 text-left transition-colors hover:bg-accent/40 focus-visible:ring-[3px] focus-visible:ring-ring/30 focus-visible:outline-none",
-        selected && "border-ring bg-accent/50"
+        "w-full cursor-pointer rounded-xl border-2 border-border bg-card p-3 text-left shadow-chunk-xs transition-all hover:bg-accent/40 hover:shadow-chunk-sm focus-visible:ring-[3px] focus-visible:ring-ring/30 focus-visible:outline-none",
+        selected && "border-ring bg-accent/50 shadow-chunk-sm"
       )}
       onClick={onSelect}
       onKeyDown={(event) => {
@@ -490,7 +490,7 @@ function RunHistory({
 
 function RunRow({ run }: { run: ScheduledTaskRun }) {
   return (
-    <div className="rounded-md border border-border bg-card p-3">
+    <div className="rounded-xl border-2 border-border bg-card p-3 shadow-chunk-xs">
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <RunStatusIcon status={run.status} />

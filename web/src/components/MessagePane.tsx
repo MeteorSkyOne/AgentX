@@ -245,7 +245,7 @@ export function MessagePane({
             type="button"
             size="icon"
             variant="secondary"
-            className="absolute right-4 bottom-4 z-10 h-9 w-9 rounded-full border border-border shadow-md"
+            className="absolute right-4 bottom-4 z-10 h-9 w-9 rounded-full border-2 border-border shadow-chunk-sm"
             title="Scroll to bottom"
             aria-label="Scroll to bottom"
             onClick={scrollToBottom}

@@ -242,11 +242,11 @@ export function DesktopShell({
       <div className="flex h-full min-h-0 min-w-0 flex-1" data-testid="desktop-shell">
       {/* Project Rail */}
       <TooltipProvider delayDuration={0}>
-        <div className="flex h-full w-[72px] flex-col items-center gap-2 border-r border-sidebar-border/70 bg-sidebar py-3">
+        <div className="flex h-full w-[72px] flex-col items-center gap-2 border-r-2 border-sidebar-border bg-sidebar py-3">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground font-bold text-lg"
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border-2 border-border bg-primary font-display text-lg font-bold text-primary-foreground shadow-chunk-sm"
               >
                 AX
               </button>
@@ -266,14 +266,14 @@ export function DesktopShell({
                     <TooltipTrigger asChild>
                       <button
                         className={cn(
-                          "relative flex h-12 w-12 items-center justify-center rounded-2xl transition-all hover:rounded-xl",
+                          "relative flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-transparent transition-all hover:rounded-xl",
                           avatar?.emoji
                             ? cn("text-white", avatar.color || "bg-primary")
-                            : "bg-secondary text-secondary-foreground hover:bg-primary hover:text-primary-foreground",
+                            : "bg-card text-foreground hover:bg-primary hover:text-primary-foreground",
                           isSelected &&
                             (avatar?.emoji
-                              ? "rounded-xl ring-2 ring-ring ring-offset-2 ring-offset-sidebar"
-                              : "rounded-xl bg-primary text-primary-foreground")
+                              ? "rounded-xl border-border shadow-chunk-sm"
+                              : "rounded-xl border-border bg-primary text-primary-foreground shadow-chunk-sm")
                         )}
                         title={item.name}
                         aria-label={item.name}
@@ -300,8 +300,8 @@ export function DesktopShell({
             <TooltipTrigger asChild>
               <button
                 className={cn(
-                  "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-secondary text-muted-foreground transition-all hover:rounded-xl hover:bg-green-600 hover:text-white",
-                  projectDraftOpen && "rounded-xl bg-green-600 text-white"
+                  "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border-2 border-dashed border-muted-foreground/60 bg-transparent text-muted-foreground transition-all hover:rounded-xl hover:border-border hover:border-solid hover:bg-primary hover:text-primary-foreground",
+                  projectDraftOpen && "rounded-xl border-solid border-border bg-primary text-primary-foreground shadow-chunk-sm"
                 )}
                 title="Create project"
                 aria-label="Create project"
@@ -357,8 +357,8 @@ export function DesktopShell({
           <ResizablePanel defaultSize={18} minSize={15} maxSize={25}>
             <div className="flex h-full min-h-0 flex-col bg-sidebar">
               {/* Workspace Header */}
-              <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
-                <h2 className="truncate text-base font-semibold">
+              <div className="flex h-12 shrink-0 items-center justify-between border-b-2 border-border px-4">
+                <h2 className="truncate font-display text-base font-bold">
                   {project?.name ?? "No project"}
                 </h2>
                 <Button
@@ -432,9 +432,9 @@ export function DesktopShell({
               </ScrollArea>
 
               {/* User Info */}
-              <div className="flex shrink-0 items-center gap-2 border-t border-border bg-sidebar p-2">
-                <Avatar className="h-8 w-8">
-                  <AvatarFallback className="bg-primary text-primary-foreground text-xs">
+              <div className="flex shrink-0 items-center gap-2 border-t-2 border-border bg-sidebar p-2">
+                <Avatar className="h-8 w-8 border-2 border-border">
+                  <AvatarFallback className="bg-primary text-primary-foreground text-xs font-bold">
                     {initials(user.display_name)}
                   </AvatarFallback>
                 </Avatar>
@@ -462,7 +462,7 @@ export function DesktopShell({
         <ResizablePanel defaultSize={agentPanelOpen ? 37 : membersPanelOpen ? 62 : 82}>
           <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
             {/* Channel Header */}
-            <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
+            <div className="flex h-12 shrink-0 items-center justify-between border-b-2 border-border px-4">
               <div className="flex items-center gap-2">
                 {selectedChannel?.type === "thread" && activeThread ? (
                   <Button
@@ -484,8 +484,8 @@ export function DesktopShell({
                   <Hash className="h-5 w-5 text-muted-foreground" />
                 )}
                 <div>
-                  <h1 className="text-sm font-semibold">{title}</h1>
-                  <p className="text-xs text-muted-foreground">{subtitle}</p>
+                  <h1 className="font-display text-sm font-bold">{title}</h1>
+                  <p className="text-xs font-semibold text-muted-foreground">{subtitle}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -666,7 +666,7 @@ export function DesktopShell({
               </div>
               {terminalOpen && terminalAllowed && projectWorkspace?.id ? (
                 <div
-                  className="relative min-h-56 shrink-0 overflow-hidden border-t border-border"
+                  className="relative min-h-56 shrink-0 overflow-hidden border-t-2 border-border"
                   style={{ height: `${terminalHeightPct}%` }}
                 >
                   <div

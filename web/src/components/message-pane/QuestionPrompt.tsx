@@ -48,7 +48,7 @@ export function QuestionPrompt({
         agentID ? (
           <AgentAvatar agentID={agentID} kind={agentKind ?? "fake"} size="md" className="shrink-0" />
         ) : (
-          <Avatar className="h-10 w-10 shrink-0">
+          <Avatar className="h-10 w-10 shrink-0 border-2 border-border">
             <AvatarFallback className={cn("text-white text-sm", agentKindColor(agentKind ?? "fake"))}>?</AvatarFallback>
           </Avatar>
         )

@@ -248,7 +248,7 @@ export function MobileShell({
 }: MobileShellProps) {
   return (
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background" data-testid="mobile-shell">
-        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-2">
+        <div className="flex h-14 shrink-0 items-center gap-2 border-b-2 border-border px-2">
           {projectFilesOpen ? (
             <Button
               variant="ghost"
@@ -298,10 +298,10 @@ export function MobileShell({
             </Button>
           ) : null}
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-sm font-semibold">
+            <h1 className="truncate font-display text-sm font-bold">
               {projectFilesOpen ? "Project files" : mobileTerminalOpen ? "Terminal" : headerTitle}
             </h1>
-            <p className="truncate text-xs text-muted-foreground">
+            <p className="truncate text-xs font-semibold text-muted-foreground">
               {projectFilesOpen || mobileTerminalOpen ? projectWorkspace?.path ?? "No workspace" : headerSubtitle}
             </p>
           </div>
@@ -337,10 +337,14 @@ export function MobileShell({
             </>
           ) : showMobileProjectFilesButton && !mobileTerminalOpen ? (
             <>
+              {/* Narrow phones reach Tasks/Roadmap through the navigation drawer instead. */}
               <Button
                 variant="ghost"
                 size="icon"
-                className={cn("h-11 w-11", mainView === "tasks" && "bg-accent")}
+                className={cn(
+                  "hidden h-11 w-11 min-[430px]:inline-flex",
+                  mainView === "tasks" && "bg-accent"
+                )}
                 title="Tasks"
                 aria-label="Tasks"
                 aria-pressed={mainView === "tasks"}
@@ -352,7 +356,10 @@ export function MobileShell({
               <Button
                 variant="ghost"
                 size="icon"
-                className={cn("h-11 w-11", mainView === "roadmap" && "bg-accent")}
+                className={cn(
+                  "hidden h-11 w-11 min-[430px]:inline-flex",
+                  mainView === "roadmap" && "bg-accent"
+                )}
                 title="Roadmap"
                 aria-label="Roadmap"
                 aria-pressed={mainView === "roadmap"}
@@ -416,7 +423,7 @@ export function MobileShell({
         </div>
 
         {!projectFilesOpen && !mobileTerminalOpen && activeThread && (
-          <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
+          <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b-2 border-border px-3">
             {activeConversation && (
               <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
                 <Activity className="h-3.5 w-3.5 shrink-0" />
@@ -562,7 +569,7 @@ export function MobileShell({
           >
             <div className="flex h-full min-h-0 min-w-0 flex-col overflow-x-hidden bg-sidebar">
               <div
-                className="flex h-14 min-w-0 shrink-0 items-center justify-between gap-3 border-b border-border px-4"
+                className="flex h-14 min-w-0 shrink-0 items-center justify-between gap-3 border-b-2 border-border px-4"
                 data-testid="mobile-nav-header"
               >
                 <DialogHeader className="min-w-0 flex-1 gap-0 text-left">
@@ -624,10 +631,10 @@ export function MobileShell({
                         >
                           <span
                             className={cn(
-                              "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold",
+                              "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border-2 border-border text-xs font-bold",
                               avatar?.emoji
                                 ? cn("text-white", avatar.color || "bg-primary")
-                                : "bg-secondary text-secondary-foreground"
+                                : "bg-card text-foreground"
                             )}
                           >
                             {avatar?.emoji ? avatar.emoji : initials(item.name)}
@@ -716,12 +723,12 @@ export function MobileShell({
               </ScrollArea>
 
               <div
-                className="min-w-0 shrink-0 border-t border-border px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]"
+                className="min-w-0 shrink-0 border-t-2 border-border px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]"
                 data-testid="mobile-nav-footer"
               >
                 <div className="mb-2 flex min-w-0 items-center gap-3">
-                  <Avatar className="h-9 w-9">
-                    <AvatarFallback className="bg-primary text-xs text-primary-foreground">
+                  <Avatar className="h-9 w-9 border-2 border-border">
+                    <AvatarFallback className="bg-primary text-xs font-bold text-primary-foreground">
                       {initials(user.display_name)}
                     </AvatarFallback>
                   </Avatar>

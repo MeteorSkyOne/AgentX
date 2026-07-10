@@ -359,8 +359,8 @@ export function ThreadForum({
 
       <div
         className={cn(
-          "mt-4 shrink-0 space-y-2 rounded-lg border border-border p-3 transition-colors",
-          draggingFiles && "border-primary/70 bg-primary/5"
+          "mt-4 shrink-0 space-y-2 rounded-2xl border-2 border-border bg-card p-3 shadow-chunk-sm transition-colors",
+          draggingFiles && "border-primary bg-primary/5"
         )}
         {...dragHandlers}
       >
@@ -374,7 +374,7 @@ export function ThreadForum({
         <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" aria-label="Post title" />
         <div className="relative">
           {commandOpen && (
-            <div className="absolute bottom-full left-0 mb-2 w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden rounded-md border border-border bg-popover shadow-lg">
+            <div className="absolute bottom-full left-0 mb-2 w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border-2 border-border bg-popover shadow-chunk">
               {commandMatches.map((command, index) => (
                 <button
                   key={slashCommandKey(command)}
@@ -413,7 +413,7 @@ export function ThreadForum({
             </div>
           )}
           {mentionOpen && (
-            <div className="absolute bottom-full left-0 mb-2 w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-md border border-border bg-popover shadow-lg">
+            <div className="absolute bottom-full left-0 mb-2 w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border-2 border-border bg-popover shadow-chunk">
               {mentionMatches.map((agent, index) => (
                 <button
                   key={agent.id}
@@ -446,7 +446,7 @@ export function ThreadForum({
             placeholder="Body"
             aria-label="Post body"
             rows={3}
-            className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-base md:text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex min-h-[80px] w-full rounded-xl border-2 border-input bg-card px-3 py-2 text-base md:text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50"
           />
         </div>
         <AttachmentPreviews
