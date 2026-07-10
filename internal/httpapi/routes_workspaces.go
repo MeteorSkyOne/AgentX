@@ -100,7 +100,7 @@ func (s *Server) handleWorkspaceTree(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid path")
 		return
 	}
-	tree, err := buildWorkspaceTree(root, target)
+	tree, err := buildWorkspaceTree(root, target, boolQueryParam(r, "include_hidden"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(w, http.StatusNotFound, "directory not found")
@@ -616,7 +616,13 @@ func workspaceFileContentType(relPath string, file *os.File) string {
 
 var errWorkspaceTreePathNotDirectory = errors.New("workspace tree path is not a directory")
 
-func buildWorkspaceTree(root string, current string) (workspaceTreeEntry, error) {
+// boolQueryParam reports whether an optional query flag is set to a truthy value.
+func boolQueryParam(r *http.Request, name string) bool {
+	value := strings.TrimSpace(r.URL.Query().Get(name))
+	return value == "1" || strings.EqualFold(value, "true")
+}
+
+func buildWorkspaceTree(root string, current string, includeHidden bool) (workspaceTreeEntry, error) {
 	rel, err := filepath.Rel(root, current)
 	if err != nil {
 		return workspaceTreeEntry{}, err
@@ -652,10 +658,10 @@ func buildWorkspaceTree(root string, current string) (workspaceTreeEntry, error)
 		return children[i].Name() < children[j].Name()
 	})
 	for _, child := range children {
-		if strings.HasPrefix(child.Name(), ".") {
+		if !includeHidden && strings.HasPrefix(child.Name(), ".") {
 			continue
 		}
-		childEntry, err := buildWorkspaceTreeChild(root, filepath.Join(current, child.Name()))
+		childEntry, err := buildWorkspaceTreeChild(root, filepath.Join(current, child.Name()), includeHidden)
 		if err != nil {
 			continue
 		}
@@ -665,7 +671,7 @@ func buildWorkspaceTree(root string, current string) (workspaceTreeEntry, error)
 	return entry, nil
 }
 
-func buildWorkspaceTreeChild(root string, current string) (workspaceTreeEntry, error) {
+func buildWorkspaceTreeChild(root string, current string, includeHidden bool) (workspaceTreeEntry, error) {
 	rel, err := filepath.Rel(root, current)
 	if err != nil {
 		return workspaceTreeEntry{}, err
@@ -686,17 +692,17 @@ func buildWorkspaceTreeChild(root string, current string) (workspaceTreeEntry, e
 		return entry, nil
 	}
 	entry.Type = "directory"
-	entry.HasChildren = workspaceDirectoryHasVisibleChildren(current)
+	entry.HasChildren = workspaceDirectoryHasVisibleChildren(current, includeHidden)
 	return entry, nil
 }
 
-func workspaceDirectoryHasVisibleChildren(path string) bool {
+func workspaceDirectoryHasVisibleChildren(path string, includeHidden bool) bool {
 	children, err := os.ReadDir(path)
 	if err != nil {
 		return false
 	}
 	for _, child := range children {
-		if !strings.HasPrefix(child.Name(), ".") {
+		if includeHidden || !strings.HasPrefix(child.Name(), ".") {
 			return true
 		}
 	}

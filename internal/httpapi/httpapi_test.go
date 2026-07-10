@@ -1003,6 +1003,60 @@ func TestHTTPWorkspaceTreeLazyLoadsDirectories(t *testing.T) {
 	getJSON(t, treeURL+"?path=../secret", bootstrap.SessionToken, http.StatusBadRequest, nil)
 }
 
+func TestHTTPWorkspaceTreeIncludeHidden(t *testing.T) {
+	ts := newTestServer(t)
+
+	bootstrap := setupHTTP(t, ts.URL)
+	workspacePath := filepath.Join(t.TempDir(), "hidden-workspace")
+	var project domain.Project
+	postJSON(t, ts.URL+"/api/organizations/"+bootstrap.Organization.ID+"/projects", bootstrap.SessionToken, map[string]string{
+		"name":           "Hidden Workspace",
+		"workspace_path": workspacePath,
+	}, http.StatusOK, &project)
+
+	var workspace domain.Workspace
+	getJSON(t, ts.URL+"/api/workspaces/"+project.WorkspaceID, bootstrap.SessionToken, http.StatusOK, &workspace)
+	writeHTTPSkill(t, filepath.Join(workspace.Path, "README.md"), "readme")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, ".env"), "TOKEN=1")
+	writeHTTPSkill(t, filepath.Join(workspace.Path, ".hidden", "secret.txt"), "hidden")
+
+	treeURL := ts.URL + "/api/workspaces/" + workspace.ID + "/tree"
+
+	var withoutHidden workspaceTreeEntry
+	getJSON(t, treeURL, bootstrap.SessionToken, http.StatusOK, &withoutHidden)
+	if got := workspaceTreeChildPaths(withoutHidden); strings.Join(got, ",") != "README.md" {
+		t.Fatalf("default root children = %#v, want only README.md", got)
+	}
+
+	var withHidden workspaceTreeEntry
+	getJSON(t, treeURL+"?include_hidden=true", bootstrap.SessionToken, http.StatusOK, &withHidden)
+	if got := workspaceTreeChildPaths(withHidden); strings.Join(got, ",") != ".hidden,.env,README.md" {
+		t.Fatalf("include_hidden root children = %#v, want .hidden, .env and README.md", got)
+	}
+	if !withHidden.Children[0].HasChildren {
+		t.Fatalf(".hidden should be expandable when hidden entries are included: %#v", withHidden.Children[0])
+	}
+
+	var hiddenDir workspaceTreeEntry
+	getJSON(t, treeURL+"?path=.hidden&include_hidden=true", bootstrap.SessionToken, http.StatusOK, &hiddenDir)
+	if got := workspaceTreeChildPaths(hiddenDir); strings.Join(got, ",") != ".hidden/secret.txt" {
+		t.Fatalf(".hidden children = %#v, want secret.txt", got)
+	}
+
+	searchURL := ts.URL + "/api/workspaces/" + workspace.ID + "/search?mode=files&q=env"
+	var hiddenExcluded workspaceSearchResponse
+	getJSON(t, searchURL, bootstrap.SessionToken, http.StatusOK, &hiddenExcluded)
+	if len(hiddenExcluded.Results) != 0 {
+		t.Fatalf("default search results = %#v, want no hidden matches", hiddenExcluded.Results)
+	}
+
+	var hiddenIncluded workspaceSearchResponse
+	getJSON(t, searchURL+"&include_hidden=1", bootstrap.SessionToken, http.StatusOK, &hiddenIncluded)
+	if len(hiddenIncluded.Results) != 1 || hiddenIncluded.Results[0].Path != ".env" {
+		t.Fatalf("include_hidden search results = %#v, want .env", hiddenIncluded.Results)
+	}
+}
+
 func TestHTTPWorkspaceSearchFallbackFindsFilesAndContent(t *testing.T) {
 	ts := newTestServer(t)
 	bootstrap := setupHTTP(t, ts.URL)

@@ -57,6 +57,7 @@ type workspaceSearchOptions struct {
 	caseSensitive bool
 	regex         bool
 	wholeWord     bool
+	includeHidden bool
 	limit         int
 }
 
@@ -133,14 +134,25 @@ func parseWorkspaceSearchOptions(r *http.Request) (workspaceSearchOptions, error
 	return workspaceSearchOptions{
 		query:         query,
 		mode:          mode,
-		caseSensitive: r.URL.Query().Get("case_sensitive") == "1" || r.URL.Query().Get("case_sensitive") == "true",
-		regex:         r.URL.Query().Get("regex") == "1" || r.URL.Query().Get("regex") == "true",
-		wholeWord:     r.URL.Query().Get("whole_word") == "1" || r.URL.Query().Get("whole_word") == "true",
+		caseSensitive: boolQueryParam(r, "case_sensitive"),
+		regex:         boolQueryParam(r, "regex"),
+		wholeWord:     boolQueryParam(r, "whole_word"),
+		includeHidden: boolQueryParam(r, "include_hidden"),
 		limit:         limit,
 	}, nil
 }
 
 var errWorkspaceSearchInvalidPattern = errors.New("invalid search pattern")
+
+// workspaceSearchHiddenArgs makes ripgrep match the fallback walker when hidden
+// entries are requested: the walker knows nothing about VCS ignore rules, so
+// gitignored paths must stay searchable too.
+func workspaceSearchHiddenArgs(opts workspaceSearchOptions) []string {
+	if !opts.includeHidden {
+		return nil
+	}
+	return []string{"--hidden", "--no-ignore-vcs"}
+}
 
 func searchWorkspace(ctx context.Context, root string, opts workspaceSearchOptions) ([]workspaceSearchResult, string, bool, error) {
 	if _, err := exec.LookPath(workspaceSearchRgPath); err == nil {
@@ -174,7 +186,9 @@ func searchWorkspaceFilesWithRg(ctx context.Context, root string, opts workspace
 	}
 	searchCtx, cancel := context.WithTimeout(ctx, workspaceSearchCommandTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(searchCtx, workspaceSearchRgPath, "--files", "--color", "never", "--no-messages")
+	args := []string{"--files", "--color", "never", "--no-messages"}
+	args = append(args, workspaceSearchHiddenArgs(opts)...)
+	cmd := exec.CommandContext(searchCtx, workspaceSearchRgPath, args...)
 	cmd.Dir = root
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -220,6 +234,7 @@ func searchWorkspaceContentWithRg(ctx context.Context, root string, opts workspa
 	if opts.wholeWord {
 		args = append(args, "--word-regexp")
 	}
+	args = append(args, workspaceSearchHiddenArgs(opts)...)
 	args = append(args, "--", opts.query, ".")
 
 	searchCtx, cancel := context.WithTimeout(ctx, workspaceSearchCommandTimeout)
@@ -340,7 +355,7 @@ func searchWorkspaceFallback(ctx context.Context, root string, opts workspaceSea
 			}
 			return nil
 		}
-		if strings.HasPrefix(entry.Name(), ".") {
+		if !opts.includeHidden && strings.HasPrefix(entry.Name(), ".") {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
