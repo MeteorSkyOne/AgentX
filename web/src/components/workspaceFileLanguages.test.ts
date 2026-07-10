@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { isMarkdownFilePath, isPdfFilePath, monacoLanguageForPath } from "./workspaceFileLanguages";
+import {
+  isBinaryPreviewFilePath,
+  isImageFilePath,
+  isMarkdownFilePath,
+  isPdfFilePath,
+  monacoLanguageForPath,
+} from "./workspaceFileLanguages";
 
 describe("monacoLanguageForPath", () => {
   it.each([
@@ -47,5 +53,22 @@ describe("isPdfFilePath", () => {
     expect(isPdfFilePath("docs/manual.pdf")).toBe(true);
     expect(isPdfFilePath("docs/Manual.PDF")).toBe(true);
     expect(isPdfFilePath("docs/pdf-notes.md")).toBe(false);
+  });
+});
+
+describe("isImageFilePath", () => {
+  it("matches supported image extensions case-insensitively", () => {
+    expect(isImageFilePath("screenshots/dashboard.png")).toBe(true);
+    expect(isImageFilePath("assets/Logo.SVG")).toBe(true);
+    expect(isImageFilePath("photos/cover.jpeg")).toBe(true);
+    expect(isImageFilePath("docs/image-notes.md")).toBe(false);
+  });
+});
+
+describe("isBinaryPreviewFilePath", () => {
+  it("matches PDFs and images without matching other binary files", () => {
+    expect(isBinaryPreviewFilePath("docs/manual.pdf")).toBe(true);
+    expect(isBinaryPreviewFilePath("screenshots/dashboard.webp")).toBe(true);
+    expect(isBinaryPreviewFilePath("build/archive.bin")).toBe(false);
   });
 });

@@ -113,25 +113,31 @@ describe("WorkspaceFileEditorPane markdown controls", () => {
     expect(screen.queryByRole("button", { name: "Split Markdown view" })).toBeNull();
   });
 
-  it("selects PDF files without reading them as text", async () => {
+  it.each([
+    ["PDF", "docs/manual.pdf"],
+    ["image", "screenshots/dashboard.png"],
+  ])("selects %s files without reading them as text", async (label, path) => {
     const onReadFile = vi.fn(async () => "should not load");
 
-    render(<PdfLoadHarness onReadFile={onReadFile} />);
+    render(<BinaryPreviewLoadHarness path={path} label={label} onReadFile={onReadFile} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Open PDF" }));
+    fireEvent.click(screen.getByRole("button", { name: `Open ${label}` }));
 
-    await waitFor(() => expect(screen.getByTestId("loaded-path").textContent).toBe("docs/manual.pdf"));
+    await waitFor(() => expect(screen.getByTestId("loaded-path").textContent).toBe(path));
     expect(onReadFile).not.toHaveBeenCalled();
     expect(screen.getByTestId("loaded-body").textContent).toBe("");
   });
 
-  it("downloads files from the toolbar and disables saving PDFs", () => {
+  it.each([
+    ["PDF", "docs/manual.pdf"],
+    ["image", "screenshots/dashboard.png"],
+  ])("downloads %s files from the toolbar and disables saving", (_label, filePath) => {
     const downloadFile = vi.fn(async () => undefined);
 
     render(
       <WorkspaceFileEditorPane
         controller={controllerFixture({
-          filePath: "docs/manual.pdf",
+          filePath,
           downloadFile,
         })}
         theme="dark"
@@ -522,9 +528,13 @@ function workspaceTreeFixture() {
   };
 }
 
-function PdfLoadHarness({
+function BinaryPreviewLoadHarness({
+  path,
+  label,
   onReadFile,
 }: {
+  path: string;
+  label: string;
   onReadFile: (workspaceID: string, path: string) => Promise<string>;
 }) {
   const controller = useWorkspaceFileBrowser({
@@ -539,8 +549,8 @@ function PdfLoadHarness({
   });
   return (
     <div>
-      <button type="button" onClick={() => void controller.loadFile("docs/manual.pdf")}>
-        Open PDF
+      <button type="button" onClick={() => void controller.loadFile(path)}>
+        Open {label}
       </button>
       <div data-testid="loaded-path">{controller.filePath}</div>
       <div data-testid="loaded-body">{controller.fileBody}</div>

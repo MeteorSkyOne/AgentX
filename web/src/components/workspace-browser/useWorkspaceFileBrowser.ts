@@ -12,7 +12,7 @@ import type {
   WorkspaceSearchResult,
   WorkspaceTreeEntry,
 } from "@/api/types";
-import { isPdfFilePath } from "../workspaceFileLanguages";
+import { isBinaryPreviewFilePath } from "../workspaceFileLanguages";
 import type {
   WorkspaceFileBrowserController,
   WorkspaceFileBrowserProps,
@@ -524,7 +524,7 @@ export function useWorkspaceFileBrowser({
       tabFileRequestRef.current[newId] = requestID;
 
       try {
-        if (isPdfFilePath(targetPath)) {
+        if (isBinaryPreviewFilePath(targetPath)) {
           if (tabFileRequestRef.current[newId] !== requestID) return;
           updateTab(newId, { fileBody: "", fileLoadError: null, fileLoading: false });
           setWorkspaceStatus("Loaded");
@@ -794,8 +794,8 @@ export function useWorkspaceFileBrowser({
   const saveFile = useCallback(async () => {
     const targetPath = filePath.trim();
     if (!workspaceID || !targetPath || !activeTabId) return;
-    if (isPdfFilePath(targetPath)) {
-      setWorkspaceStatus("PDF files cannot be edited here");
+    if (isBinaryPreviewFilePath(targetPath)) {
+      setWorkspaceStatus("Preview files cannot be edited here");
       return;
     }
     setFileSaving(true);
