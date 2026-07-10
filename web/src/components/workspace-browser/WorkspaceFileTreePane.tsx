@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   CaseSensitive,
+  Eye,
+  EyeOff,
   FileSearch,
   FileText,
   FolderOpen,
@@ -73,6 +75,18 @@ export function WorkspaceFileTreePane({
           <Button
             size="icon"
             variant="ghost"
+            className={cn("h-8 w-8 shrink-0", controller.showHiddenFiles && "bg-accent")}
+            onClick={() => controller.setShowHiddenFiles(!controller.showHiddenFiles)}
+            disabled={!controller.canUseWorkspace}
+            title={controller.showHiddenFiles ? "Hide hidden files" : "Show hidden files"}
+            aria-label={controller.showHiddenFiles ? "Hide hidden files" : "Show hidden files"}
+            aria-pressed={controller.showHiddenFiles}
+          >
+            {controller.showHiddenFiles ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
             className="h-8 w-8 shrink-0"
             onClick={() => void controller.loadTree()}
             disabled={controller.workspaceTreeLoading || !controller.canUseWorkspace}
@@ -141,6 +155,7 @@ function WorkspaceSearchControls({
     controller.searchMode,
     controller.searchRegex,
     controller.searchWholeWord,
+    controller.showHiddenFiles,
     query,
   ]);
 

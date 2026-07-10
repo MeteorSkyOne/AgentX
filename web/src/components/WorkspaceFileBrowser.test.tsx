@@ -333,9 +333,47 @@ describe("WorkspaceFileEditorPane markdown controls", () => {
       case_sensitive: false,
       regex: false,
       whole_word: false,
+      include_hidden: false,
       limit: 200,
     }));
     expect(await screen.findByRole("button", { name: "src/main.go line 2" })).toBeTruthy();
+  });
+
+  it("toggles hidden files for the tree and search", async () => {
+    window.localStorage.clear();
+    const onLoadTree = vi.fn(async () => workspaceTreeFixture());
+    const onSearchWorkspace = vi.fn(async () => ({
+      query: "needle",
+      mode: "files" as const,
+      engine: "fallback" as const,
+      truncated: false,
+      results: [],
+    }));
+
+    try {
+      render(<SearchHarness onLoadTree={onLoadTree} onSearchWorkspace={onSearchWorkspace} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Show hidden files" }));
+
+      await waitFor(() =>
+        expect(onLoadTree).toHaveBeenCalledWith("w1", undefined, { include_hidden: true })
+      );
+      expect(screen.getByRole("button", { name: "Hide hidden files" })).toBeTruthy();
+      expect(window.localStorage.getItem("agentx.workspace.show_hidden_files")).toBe("true");
+
+      fireEvent.change(screen.getByRole("textbox", { name: "Search project files" }), {
+        target: { value: "needle" },
+      });
+
+      await waitFor(() =>
+        expect(onSearchWorkspace).toHaveBeenCalledWith(
+          "w1",
+          expect.objectContaining({ q: "needle", include_hidden: true })
+        )
+      );
+    } finally {
+      window.localStorage.clear();
+    }
   });
 
   it("debounces workspace search while typing", async () => {
@@ -558,14 +596,16 @@ function HistoryRaceHarness({
 
 function SearchHarness({
   onSearchWorkspace,
+  onLoadTree = async () => workspaceTreeFixture(),
 }: {
   onSearchWorkspace: NonNullable<Parameters<typeof useWorkspaceFileBrowser>[0]["onSearchWorkspace"]>;
+  onLoadTree?: Parameters<typeof useWorkspaceFileBrowser>[0]["onLoadTree"];
 }) {
   const controller = useWorkspaceFileBrowser({
     workspaceID: "w1",
     workspacePath: "/workspace/AgentX",
     autoLoadTree: false,
-    onLoadTree: async () => workspaceTreeFixture(),
+    onLoadTree,
     onSearchWorkspace,
     onReadFile: async () => "",
     onWriteFile: async () => undefined,
@@ -598,6 +638,7 @@ function controllerFixture(
     filePath,
     fileBody: "",
     tree: undefined,
+    showHiddenFiles: false,
     workspaceTreeResetKey: 0,
     workspaceTreeLoading: false,
     workspaceTreeError: null,
@@ -659,6 +700,7 @@ function controllerFixture(
     saveTabMarkdownPreviewScrollTop: vi.fn(),
     setFilePath: vi.fn(),
     setFileBody: vi.fn(),
+    setShowHiddenFiles: vi.fn(),
     setSearchQuery: vi.fn(),
     setSearchMode: vi.fn(),
     setSearchCaseSensitive: vi.fn(),

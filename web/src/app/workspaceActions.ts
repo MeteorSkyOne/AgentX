@@ -37,8 +37,12 @@ export async function handleFetchWorkspaceFileBlob(
     return fetchWorkspaceFileBlob(workspaceID, path, options);
   }
 
-export async function handleLoadWorkspaceTree(workspaceID: string, path?: string): Promise<WorkspaceTreeEntry> {
-    return workspaceTree(workspaceID, path);
+export async function handleLoadWorkspaceTree(
+    workspaceID: string,
+    path?: string,
+    options?: { include_hidden?: boolean }
+  ): Promise<WorkspaceTreeEntry> {
+    return workspaceTree(workspaceID, path, options);
   }
 
 export async function handleSearchWorkspace(
@@ -49,6 +53,7 @@ export async function handleSearchWorkspace(
       case_sensitive?: boolean;
       regex?: boolean;
       whole_word?: boolean;
+      include_hidden?: boolean;
       limit?: number;
     }
   ): Promise<WorkspaceSearchResponse> {

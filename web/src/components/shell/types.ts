@@ -170,7 +170,11 @@ export interface ShellProps {
   onRunSelfUpdate: () => Promise<SelfUpdateOverview>;
   onUpdateUserPreferences: (payload: UserPreferences) => Promise<UserPreferences>;
   onTestNotificationSettings: () => Promise<void>;
-  onLoadWorkspaceTree: (workspaceID: string, path?: string) => Promise<WorkspaceTreeEntry>;
+  onLoadWorkspaceTree: (
+    workspaceID: string,
+    path?: string,
+    options?: { include_hidden?: boolean }
+  ) => Promise<WorkspaceTreeEntry>;
   onSearchWorkspace: (
     workspaceID: string,
     options: {
@@ -179,6 +183,7 @@ export interface ShellProps {
       case_sensitive?: boolean;
       regex?: boolean;
       whole_word?: boolean;
+      include_hidden?: boolean;
       limit?: number;
     }
   ) => Promise<WorkspaceSearchResponse>;

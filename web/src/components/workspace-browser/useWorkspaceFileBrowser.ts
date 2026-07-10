@@ -36,6 +36,24 @@ import {
   workspaceTreeDirectoryLoaded,
 } from "./utils";
 
+const showHiddenFilesStorageKey = "agentx.workspace.show_hidden_files";
+
+function initialShowHiddenFiles(): boolean {
+  try {
+    return window.localStorage.getItem(showHiddenFilesStorageKey) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function storeShowHiddenFiles(value: boolean) {
+  try {
+    window.localStorage.setItem(showHiddenFilesStorageKey, String(value));
+  } catch {
+    // Ignore storage failures; the toggle still applies for this session.
+  }
+}
+
 export function useWorkspaceFileBrowser({
   workspaceID,
   workspacePath,
@@ -74,6 +92,7 @@ export function useWorkspaceFileBrowser({
   const fileViewMode = activeTab?.fileViewMode ?? "edit";
 
   const [tree, setTree] = useState<WorkspaceTreeEntry>();
+  const [showHiddenFiles, setShowHiddenFilesState] = useState(initialShowHiddenFiles);
   const [workspaceTreeResetKey, setWorkspaceTreeResetKey] = useState(0);
   const [workspaceTreeLoading, setWorkspaceTreeLoading] = useState(false);
   const [workspaceTreeError, setWorkspaceTreeError] = useState<string | null>(null);
@@ -250,7 +269,7 @@ export function useWorkspaceFileBrowser({
       setDirectoryLoadingPaths(new Set());
       setDirectoryLoadErrors({});
       try {
-        const nextTree = await onLoadTree(workspaceID);
+        const nextTree = await onLoadTree(workspaceID, undefined, { include_hidden: showHiddenFiles });
         if (workspaceTreeRequestRef.current !== requestID) return;
         setTree(nextTree);
         setWorkspaceTreeResetKey((current) => current + 1);
@@ -266,7 +285,7 @@ export function useWorkspaceFileBrowser({
         }
       }
     },
-    [onLoadTree, workspaceID]
+    [onLoadTree, showHiddenFiles, workspaceID]
   );
 
   const loadDirectory = useCallback(
@@ -286,7 +305,7 @@ export function useWorkspaceFileBrowser({
       });
 
       try {
-        const nextTree = await onLoadTree(workspaceID, targetPath);
+        const nextTree = await onLoadTree(workspaceID, targetPath, { include_hidden: showHiddenFiles });
         if (
           workspaceTreeRequestRef.current !== treeRequestID ||
           directoryRequestRef.current[targetPath] !== requestID
@@ -315,8 +334,28 @@ export function useWorkspaceFileBrowser({
         }
       }
     },
-    [onLoadTree, tree, workspaceID]
+    [onLoadTree, showHiddenFiles, tree, workspaceID]
   );
+
+  const setShowHiddenFiles = useCallback((next: boolean) => {
+    setShowHiddenFilesState(next);
+    storeShowHiddenFiles(next);
+  }, []);
+
+  // Panes that opt out of autoLoadTree never refetch on their own, so the tree
+  // has to be reloaded here when the filter changes. autoLoadTree panes already
+  // refetch because loadTree's identity changes with showHiddenFiles.
+  const loadTreeRef = useRef(loadTree);
+  loadTreeRef.current = loadTree;
+  const showHiddenFilesMountedRef = useRef(false);
+  useEffect(() => {
+    if (!showHiddenFilesMountedRef.current) {
+      showHiddenFilesMountedRef.current = true;
+      return;
+    }
+    if (autoLoadTree || !workspaceID) return;
+    void loadTreeRef.current({ quiet: true });
+  }, [autoLoadTree, showHiddenFiles, workspaceID]);
 
   const clearSearch = useCallback(() => {
     searchRequestRef.current += 1;
@@ -350,6 +389,7 @@ export function useWorkspaceFileBrowser({
           case_sensitive: searchCaseSensitive,
           regex: searchRegex,
           whole_word: searchWholeWord,
+          include_hidden: showHiddenFiles,
           limit: 200,
         });
         if (searchRequestRef.current !== requestID) return;
@@ -380,6 +420,7 @@ export function useWorkspaceFileBrowser({
       searchQuery,
       searchRegex,
       searchWholeWord,
+      showHiddenFiles,
       workspaceID,
     ]
   );
@@ -1045,6 +1086,7 @@ export function useWorkspaceFileBrowser({
     filePath,
     fileBody,
     tree,
+    showHiddenFiles,
     workspaceTreeResetKey,
     workspaceTreeLoading,
     workspaceTreeError,
@@ -1107,6 +1149,7 @@ export function useWorkspaceFileBrowser({
     saveTabMarkdownPreviewScrollTop,
     setFilePath,
     setFileBody,
+    setShowHiddenFiles,
     setSearchQuery,
     setSearchMode,
     setSearchCaseSensitive,

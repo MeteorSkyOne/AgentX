@@ -14,7 +14,11 @@ import type {
 import type { ThemeMode } from "@/theme";
 
 export interface WorkspaceFileBrowserActions {
-  onLoadTree: (workspaceID: string, path?: string) => Promise<WorkspaceTreeEntry>;
+  onLoadTree: (
+    workspaceID: string,
+    path?: string,
+    options?: { include_hidden?: boolean }
+  ) => Promise<WorkspaceTreeEntry>;
   onSearchWorkspace?: (
     workspaceID: string,
     options: {
@@ -23,6 +27,7 @@ export interface WorkspaceFileBrowserActions {
       case_sensitive?: boolean;
       regex?: boolean;
       whole_word?: boolean;
+      include_hidden?: boolean;
       limit?: number;
     }
   ) => Promise<WorkspaceSearchResponse>;
@@ -105,6 +110,7 @@ export interface WorkspaceFileBrowserController {
   filePath: string;
   fileBody: string;
   tree?: WorkspaceTreeEntry;
+  showHiddenFiles: boolean;
   workspaceTreeResetKey: number;
   workspaceTreeLoading: boolean;
   workspaceTreeError: string | null;
@@ -167,6 +173,7 @@ export interface WorkspaceFileBrowserController {
   saveTabMarkdownPreviewScrollTop: (tabId: string, scrollTop: number) => void;
   setFilePath: (path: string) => void;
   setFileBody: (body: string) => void;
+  setShowHiddenFiles: (showHiddenFiles: boolean) => void;
   setSearchQuery: (query: string) => void;
   setSearchMode: (mode: WorkspaceSearchMode) => void;
   setSearchCaseSensitive: (caseSensitive: boolean) => void;

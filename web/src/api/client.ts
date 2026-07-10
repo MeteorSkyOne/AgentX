@@ -681,10 +681,17 @@ export function setChannelAgents(
   );
 }
 
-export function workspaceTree(workspaceID: string, path = ""): Promise<WorkspaceTreeEntry> {
+export function workspaceTree(
+  workspaceID: string,
+  path = "",
+  options: { include_hidden?: boolean } = {}
+): Promise<WorkspaceTreeEntry> {
   const params = new URLSearchParams();
   if (path.trim()) {
     params.set("path", path.trim());
+  }
+  if (options.include_hidden) {
+    params.set("include_hidden", "true");
   }
   const query = params.toString();
   return request<WorkspaceTreeEntry>(
@@ -707,6 +714,7 @@ export function workspaceSearch(
     case_sensitive?: boolean;
     regex?: boolean;
     whole_word?: boolean;
+    include_hidden?: boolean;
     limit?: number;
   }
 ): Promise<WorkspaceSearchResponse> {
@@ -715,6 +723,7 @@ export function workspaceSearch(
   if (options.case_sensitive) params.set("case_sensitive", "true");
   if (options.regex) params.set("regex", "true");
   if (options.whole_word) params.set("whole_word", "true");
+  if (options.include_hidden) params.set("include_hidden", "true");
   if (options.limit) params.set("limit", String(options.limit));
   return request<WorkspaceSearchResponse>(
     `/api/workspaces/${encodeURIComponent(workspaceID)}/search?${params.toString()}`
