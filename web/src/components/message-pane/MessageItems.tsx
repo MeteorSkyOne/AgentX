@@ -295,8 +295,8 @@ function ConversationMessageItem({
         isBot && agentID ? (
           <AgentAvatar agentID={agentID} kind={agentKind ?? "fake"} size="md" className="shrink-0" />
         ) : (
-          <Avatar className="h-10 w-10 shrink-0">
-            <AvatarFallback className="text-sm">{initial}</AvatarFallback>
+          <Avatar className="h-10 w-10 shrink-0 border-2 border-border">
+            <AvatarFallback className="bg-secondary text-sm font-bold">{initial}</AvatarFallback>
           </Avatar>
         )
       )}

@@ -30,7 +30,7 @@ function ContextMenuContent({
       <ContextMenuPrimitive.Content
         data-slot="context-menu-content"
         className={cn(
-          "z-50 min-w-40 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md",
+          "z-50 min-w-40 overflow-hidden rounded-xl border-2 border-border bg-popover p-1 text-popover-foreground shadow-chunk",
           "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
           className
         )}
@@ -55,7 +55,7 @@ function ContextMenuItem({
       data-inset={inset}
       data-variant={variant}
       className={cn(
-        "relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none",
+        "relative flex cursor-default select-none items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-semibold outline-none",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         "data-[inset=true]:pl-8",
         variant === "destructive"

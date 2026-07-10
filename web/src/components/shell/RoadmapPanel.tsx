@@ -154,7 +154,7 @@ export function RoadmapPanel({ project }: { project?: Project }) {
             const isCollapsed = collapsedStages.has(entry.stage.id);
 
             return (
-              <div key={entry.stage.id} className="rounded-lg border border-border">
+              <div key={entry.stage.id} className="rounded-xl border-2 border-border bg-card shadow-chunk-xs">
                 <div className="flex items-center gap-2 px-3 py-2">
                   <button
                     className="shrink-0 text-muted-foreground hover:text-foreground"

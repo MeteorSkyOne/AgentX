@@ -12,7 +12,7 @@ function Select({ className, selectClassName, children, ...props }: SelectProps)
     <div className={cn("relative w-full", className)}>
       <select
         className={cn(
-          "h-9 w-full appearance-none rounded-md border border-input bg-background px-3 pr-9 text-sm shadow-xs transition-[background-color,border-color,box-shadow] hover:border-ring focus:border-ring focus:ring-[3px] focus:ring-ring/20 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+          "h-9 w-full appearance-none rounded-xl border-2 border-input bg-card px-3 pr-9 text-sm transition-[background-color,border-color,box-shadow] hover:border-ring focus:border-ring focus:ring-[3px] focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
           selectClassName
         )}
         {...props}

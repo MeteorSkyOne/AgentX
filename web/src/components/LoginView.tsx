@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { LogIn, UserPlus } from "lucide-react";
+import { Bot, LogIn, Sparkles, UserPlus, Zap } from "lucide-react";
 import { authStatus, login, setToken, setupAdmin } from "../api/client";
 import type { AuthResponse, AuthStatus } from "../api/types";
 import { Button } from "@/components/ui/button";
@@ -91,18 +91,45 @@ export function LoginView({ onAuthenticated }: LoginViewProps) {
     : username.trim() !== "" && password !== "";
 
   return (
-    <main className="flex min-h-dvh w-screen items-center justify-center bg-background p-4">
+    <main className="relative flex min-h-dvh w-screen items-center justify-center overflow-hidden bg-background p-4">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.35]"
+        style={{
+          backgroundImage:
+            "radial-gradient(color-mix(in oklch, var(--foreground) 18%, transparent) 1.5px, transparent 1.5px)",
+          backgroundSize: "26px 26px",
+        }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -top-6 left-[12%] hidden h-20 w-20 -rotate-6 items-center justify-center rounded-3xl border-2 border-border bg-secondary shadow-chunk sm:flex"
+      >
+        <Bot className="h-9 w-9 text-secondary-foreground" />
+      </div>
+      <div
+        aria-hidden
+        className="pointer-events-none absolute right-[10%] bottom-[14%] hidden h-16 w-16 rotate-6 items-center justify-center rounded-2xl border-2 border-border bg-accent shadow-chunk sm:flex"
+      >
+        <Zap className="h-7 w-7 text-accent-foreground" />
+      </div>
+      <div
+        aria-hidden
+        className="pointer-events-none absolute top-[18%] right-[16%] hidden h-14 w-14 -rotate-12 items-center justify-center rounded-2xl border-2 border-border bg-primary shadow-chunk-sm md:flex"
+      >
+        <Sparkles className="h-6 w-6 text-primary-foreground" />
+      </div>
       <form
-        className="flex w-full max-w-sm flex-col gap-6 rounded-xl border border-border bg-card p-6 sm:p-8"
+        className="relative flex w-full max-w-sm flex-col gap-6 rounded-2xl border-2 border-border bg-card p-6 shadow-chunk-xl sm:p-8"
         onSubmit={handleSubmit}
       >
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-lg">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-border bg-primary font-display text-lg font-bold text-primary-foreground shadow-chunk-sm">
             AX
           </div>
           <div>
-            <h1 className="text-xl font-bold">AgentX</h1>
-            <p className="text-sm text-muted-foreground">Foundation workspace</p>
+            <h1 className="font-display text-2xl font-bold">AgentX</h1>
+            <p className="text-sm font-semibold text-muted-foreground">Foundation workspace</p>
           </div>
         </div>
 

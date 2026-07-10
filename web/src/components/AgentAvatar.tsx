@@ -73,7 +73,7 @@ export function AgentAvatar({ agentID, kind, size = "md", className }: AgentAvat
 
   if (custom?.emoji) {
     return (
-      <Avatar className={cn(s.avatar, className)}>
+      <Avatar className={cn(s.avatar, "border-2 border-border", className)}>
         <AvatarFallback className={cn("text-white", custom.color || agentKindColor(kind))}>
           <span className={s.text}>{custom.emoji}</span>
         </AvatarFallback>
@@ -82,7 +82,7 @@ export function AgentAvatar({ agentID, kind, size = "md", className }: AgentAvat
   }
 
   return (
-    <Avatar className={cn(s.avatar, className)}>
+    <Avatar className={cn(s.avatar, "border-2 border-border", className)}>
       <AvatarFallback className={cn("text-white", agentKindColor(kind))}>
         <Bot className={s.icon} />
       </AvatarFallback>

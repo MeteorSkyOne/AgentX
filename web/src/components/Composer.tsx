@@ -322,7 +322,7 @@ export function Composer({
 
   return (
     <div
-      className="shrink-0 border-t border-border bg-background/95 px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-4"
+      className="shrink-0 border-t-2 border-border bg-background/95 px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-4"
       {...dragHandlers}
     >
       {(typingLabel || queuedPrompts.length > 0) && (
@@ -400,7 +400,7 @@ export function Composer({
             onChange={handleFileInputChange}
           />
           {commandOpen && (
-            <div className="absolute bottom-full left-0 mb-2 w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden rounded-md border border-border bg-popover shadow-lg">
+            <div className="absolute bottom-full left-0 mb-2 w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border-2 border-border bg-popover shadow-chunk">
               {commandMatches.map((command, index) => (
                 <button
                   key={slashCommandKey(command)}
@@ -439,7 +439,7 @@ export function Composer({
             </div>
           )}
           {mentionOpen && (
-            <div className="absolute bottom-full left-0 mb-2 w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-md border border-border bg-popover shadow-lg">
+            <div className="absolute bottom-full left-0 mb-2 w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border-2 border-border bg-popover shadow-chunk">
               {mentionMatches.map((agent, index) => (
                 <button
                   key={agent.id}
@@ -487,14 +487,14 @@ export function Composer({
           />
           <div
             className={cn(
-              "flex min-h-11 items-center gap-2 rounded-md border border-input bg-secondary/60 px-3 py-2 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-background focus-within:ring-[3px] focus-within:ring-ring/20",
-              draggingFiles && "border-primary/70 bg-primary/5 ring-[3px] ring-primary/20",
+              "flex min-h-11 items-center gap-2 rounded-2xl border-2 border-input bg-card px-3 py-2 shadow-chunk-sm transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25",
+              draggingFiles && "border-primary bg-primary/5 ring-[3px] ring-primary/25",
               commandIndicator?.status === "recognized" &&
-                "border-primary/60 bg-primary/5 focus-within:border-primary/70 focus-within:ring-primary/20",
+                "border-primary bg-primary/5 focus-within:border-primary focus-within:ring-primary/25",
               commandIndicator?.status === "pending" &&
                 "border-ring/50 bg-accent/40 focus-within:border-ring",
               commandIndicator?.status === "unknown" &&
-                "border-destructive/60 bg-destructive/5 focus-within:border-destructive/70 focus-within:ring-destructive/20"
+                "border-destructive bg-destructive/5 focus-within:border-destructive focus-within:ring-destructive/20"
             )}
           >
             {commandIndicator ? (
