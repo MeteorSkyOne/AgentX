@@ -55,3 +55,25 @@ export function isPdfFilePath(path: string): boolean {
   const fileName = path.trim().split(/[\\/]/).pop()?.toLowerCase() ?? "";
   return fileName.endsWith(".pdf");
 }
+
+const imageFileExtensions = new Set([
+  "avif",
+  "bmp",
+  "gif",
+  "ico",
+  "jpeg",
+  "jpg",
+  "png",
+  "svg",
+  "webp",
+]);
+
+export function isImageFilePath(path: string): boolean {
+  const fileName = path.trim().split(/[\\/]/).pop()?.toLowerCase() ?? "";
+  const extension = fileName.includes(".") ? fileName.split(".").pop() ?? "" : "";
+  return imageFileExtensions.has(extension);
+}
+
+export function isBinaryPreviewFilePath(path: string): boolean {
+  return isPdfFilePath(path) || isImageFilePath(path);
+}

@@ -65,7 +65,9 @@ vi.mock("@monaco-editor/react", async () => {
 beforeEach(() => {
   Object.defineProperty(URL, "createObjectURL", {
     configurable: true,
-    value: vi.fn(() => "blob:workspace-pdf"),
+    value: vi.fn((blob: Blob) =>
+      blob.type.startsWith("image/") ? "blob:workspace-image" : "blob:workspace-pdf"
+    ),
   });
   Object.defineProperty(URL, "revokeObjectURL", {
     configurable: true,
@@ -251,6 +253,26 @@ describe("WorkspaceFileEditor markdown preview", () => {
     unmount();
 
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:workspace-pdf");
+  });
+
+  it("renders image files inline from workspace blobs", async () => {
+    const fetchFileBlob = vi.fn(async () => new Blob(["image"], { type: "image/png" }));
+    const { unmount } = renderEditor({
+      filePath: "screenshots/dashboard.png",
+      fetchFileBlob,
+    });
+
+    await waitFor(() => expect(fetchFileBlob).toHaveBeenCalledWith("screenshots/dashboard.png"));
+
+    expect(screen.queryByTestId("mock-monaco-editor")).toBeNull();
+    expect(screen.getByTestId("workspace-file-image").getAttribute("src"))
+      .toBe("blob:workspace-image");
+    expect(screen.getByTestId("workspace-file-image").getAttribute("alt"))
+      .toBe("screenshots/dashboard.png");
+
+    unmount();
+
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:workspace-image");
   });
 
   it("shows PDF preview failures and retries", async () => {

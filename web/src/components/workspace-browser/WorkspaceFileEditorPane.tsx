@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { isMarkdownFilePath, isPdfFilePath } from "../workspaceFileLanguages";
+import { isBinaryPreviewFilePath, isMarkdownFilePath } from "../workspaceFileLanguages";
 import type { WorkspaceFileBrowserController, WorkspaceFileViewMode } from "./types";
 import { WorkspaceFileTabBar } from "./WorkspaceFileTabs";
 
@@ -303,7 +303,7 @@ export function WorkspaceFileToolbar({
   onOpenTree?: () => void;
 }) {
   const markdownControlsVisible = isMarkdownFilePath(controller.trimmedPath);
-  const pdfFileSelected = isPdfFilePath(controller.trimmedPath);
+  const binaryPreviewFileSelected = isBinaryPreviewFilePath(controller.trimmedPath);
 
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -391,7 +391,7 @@ export function WorkspaceFileToolbar({
         size="sm"
         className="gap-1.5"
         onClick={() => void controller.saveFile()}
-        disabled={controller.fileSaving || pdfFileSelected || !controller.canUseWorkspace || !controller.trimmedPath}
+        disabled={controller.fileSaving || binaryPreviewFileSelected || !controller.canUseWorkspace || !controller.trimmedPath}
       >
         <Save className="h-3.5 w-3.5" />
         Save file

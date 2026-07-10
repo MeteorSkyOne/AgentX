@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import Editor, { DiffEditor, type DiffOnMount, type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
-import { ChevronDown, ChevronUp, CircleAlert, FileText, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronUp, CircleAlert, FileImage, FileText, RefreshCw } from "lucide-react";
 import "@/lib/monaco";
 import type { WorkspaceFileEditorProps } from "./WorkspaceFileBrowser";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import type { WorkspacePathTarget } from "@/lib/workspacePaths";
 import type { WorkspaceGitDiff } from "@/api/types";
 import { MarkdownRenderer } from "./MarkdownRenderer";
-import { isMarkdownFilePath, isPdfFilePath, monacoLanguageForPath } from "./workspaceFileLanguages";
+import { isImageFilePath, isMarkdownFilePath, isPdfFilePath, monacoLanguageForPath } from "./workspaceFileLanguages";
 
 type WorkspaceEditorNode = HTMLDivElement & {
   __agentxSetEditorValue?: (value: string) => void;
@@ -32,6 +32,7 @@ export function WorkspaceFileEditor({
   const language = useMemo(() => monacoLanguageForPath(controller.filePath), [controller.filePath]);
   const isMarkdownFile = isMarkdownFilePath(controller.trimmedPath);
   const isPdfFile = isPdfFilePath(controller.trimmedPath);
+  const isImageFile = isImageFilePath(controller.trimmedPath);
   const viewMode = isMarkdownFile ? controller.fileViewMode : "edit";
   const editorModelPath = useMemo(() => {
     const path = controller.trimmedPath || "untitled";
@@ -190,7 +191,9 @@ export function WorkspaceFileEditor({
           onRetry={() => void controller.loadFile(controller.trimmedPath)}
         />
       )}
-      {isPdfFile ? (
+      {isImageFile ? (
+        <WorkspaceImagePreview controller={controller} />
+      ) : isPdfFile ? (
         <WorkspacePdfPreview controller={controller} />
       ) : viewMode === "preview" ? (
         <MarkdownPreview
@@ -215,11 +218,118 @@ export function WorkspaceFileEditor({
   );
 }
 
+function WorkspaceImagePreview({
+  controller,
+}: {
+  controller: WorkspaceFileEditorProps["controller"];
+}) {
+  const path = controller.trimmedPath;
+  const preview = useWorkspaceFileObjectURL(controller, "Image");
+
+  return (
+    <div
+      className="relative flex h-full min-h-0 w-full items-center justify-center overflow-auto bg-muted/20 p-4"
+      data-testid="workspace-file-image-preview"
+      role="region"
+      aria-label="Image preview"
+    >
+      {preview.loading && (
+        <div className="absolute right-3 top-3 z-10 rounded border border-border bg-background/95 px-2 py-1 text-xs text-muted-foreground shadow-sm">
+          Loading image...
+        </div>
+      )}
+      {preview.error && !preview.loading ? (
+        <div className="flex h-full min-h-[18rem] w-full items-center justify-center p-6" role="alert">
+          <div className="max-w-md rounded-md border border-destructive/30 bg-background p-4 text-center shadow-sm">
+            <CircleAlert className="mx-auto mb-3 h-8 w-8 text-destructive" />
+            <h2 className="text-sm font-semibold text-destructive">Image preview failed</h2>
+            <p className="mt-2 text-xs text-muted-foreground">{preview.error}</p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="mt-4 gap-1.5"
+              onClick={preview.retry}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Retry
+            </Button>
+          </div>
+        </div>
+      ) : preview.objectURL ? (
+        <img
+          src={preview.objectURL}
+          alt={path}
+          className="max-h-full max-w-full object-contain"
+          data-testid="workspace-file-image"
+        />
+      ) : (
+        <div className="flex h-full min-h-[18rem] w-full items-center justify-center text-muted-foreground">
+          <FileImage className="h-8 w-8" />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function WorkspacePdfPreview({
   controller,
 }: {
   controller: WorkspaceFileEditorProps["controller"];
 }) {
+  const path = controller.trimmedPath;
+  const preview = useWorkspaceFileObjectURL(controller, "PDF");
+
+  return (
+    <div
+      className="relative flex h-full min-h-0 w-full bg-muted/20"
+      data-testid="workspace-file-pdf-preview"
+      role="region"
+      aria-label="PDF preview"
+    >
+      {preview.loading && (
+        <div className="absolute right-3 top-3 z-10 rounded border border-border bg-background/95 px-2 py-1 text-xs text-muted-foreground shadow-sm">
+          Loading PDF...
+        </div>
+      )}
+      {preview.error && !preview.loading ? (
+        <div className="flex h-full min-h-[18rem] w-full items-center justify-center p-6" role="alert">
+          <div className="max-w-md rounded-md border border-destructive/30 bg-background p-4 text-center shadow-sm">
+            <CircleAlert className="mx-auto mb-3 h-8 w-8 text-destructive" />
+            <h2 className="text-sm font-semibold text-destructive">PDF preview failed</h2>
+            <p className="mt-2 text-xs text-muted-foreground">{preview.error}</p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="mt-4 gap-1.5"
+              onClick={preview.retry}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Retry
+            </Button>
+          </div>
+        </div>
+      ) : preview.objectURL ? (
+        <iframe
+          src={preview.objectURL}
+          title={`PDF preview for ${path}`}
+          className="h-full min-h-[18rem] w-full border-0 bg-background"
+          data-testid="workspace-file-pdf-frame"
+        />
+      ) : (
+        <div className="flex h-full min-h-[18rem] w-full items-center justify-center text-muted-foreground">
+          <FileText className="h-8 w-8" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function useWorkspaceFileObjectURL(
+  controller: WorkspaceFileEditorProps["controller"],
+  previewName: "Image" | "PDF"
+) {
   const [objectURL, setObjectURL] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -233,9 +343,10 @@ function WorkspacePdfPreview({
     let nextURL: string | null = null;
     setObjectURL(null);
     setError(null);
+    setLoading(false);
     if (!path) return;
     if (!canFetchFileBlob) {
-      setError("PDF preview is not available");
+      setError(`${previewName} preview is not available`);
       return;
     }
     setLoading(true);
@@ -247,7 +358,7 @@ function WorkspacePdfPreview({
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "PDF preview failed");
+          setError(err instanceof Error ? err.message : `${previewName} preview failed`);
         }
       })
       .finally(() => {
@@ -261,52 +372,14 @@ function WorkspacePdfPreview({
         URL.revokeObjectURL(nextURL);
       }
     };
-  }, [canFetchFileBlob, fetchFileBlob, path, retryKey]);
+  }, [canFetchFileBlob, fetchFileBlob, path, previewName, retryKey]);
 
-  return (
-    <div
-      className="relative flex h-full min-h-0 w-full bg-muted/20"
-      data-testid="workspace-file-pdf-preview"
-      role="region"
-      aria-label="PDF preview"
-    >
-      {loading && (
-        <div className="absolute right-3 top-3 z-10 rounded border border-border bg-background/95 px-2 py-1 text-xs text-muted-foreground shadow-sm">
-          Loading PDF...
-        </div>
-      )}
-      {error && !loading ? (
-        <div className="flex h-full min-h-[18rem] w-full items-center justify-center p-6" role="alert">
-          <div className="max-w-md rounded-md border border-destructive/30 bg-background p-4 text-center shadow-sm">
-            <CircleAlert className="mx-auto mb-3 h-8 w-8 text-destructive" />
-            <h2 className="text-sm font-semibold text-destructive">PDF preview failed</h2>
-            <p className="mt-2 text-xs text-muted-foreground">{error}</p>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="mt-4 gap-1.5"
-              onClick={() => setRetryKey((current) => current + 1)}
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              Retry
-            </Button>
-          </div>
-        </div>
-      ) : objectURL ? (
-        <iframe
-          src={objectURL}
-          title={`PDF preview for ${path}`}
-          className="h-full min-h-[18rem] w-full border-0 bg-background"
-          data-testid="workspace-file-pdf-frame"
-        />
-      ) : (
-        <div className="flex h-full min-h-[18rem] w-full items-center justify-center text-muted-foreground">
-          <FileText className="h-8 w-8" />
-        </div>
-      )}
-    </div>
-  );
+  return {
+    objectURL,
+    loading,
+    error,
+    retry: () => setRetryKey((current) => current + 1),
+  };
 }
 
 export function WorkspaceGitDiffViewer({
