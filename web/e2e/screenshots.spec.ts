@@ -29,6 +29,7 @@ test("captures diagnostic screenshots for AI review", async ({ page }, testInfo)
   const projectTree = page.getByRole("tree", { name: "Project files" });
   await expect(projectTree).toBeVisible();
   await capture(page, testInfo, testInfo.project.name.startsWith("mobile") ? "07-mobile-project-files" : "07-project-files");
+  await projectTree.getByRole("treeitem", { name: "docs" }).click();
   await projectTree.getByRole("treeitem", { name: "screenshot.md" }).click();
   await expect(page.getByTestId("project-file-editor-pane")).toBeVisible();
   await capture(page, testInfo, testInfo.project.name.startsWith("mobile") ? "08-mobile-project-file-editor" : "08-project-file-editor");
@@ -109,6 +110,43 @@ test("captures diagnostic screenshots for AI review", async ({ page }, testInfo)
     await expect(page.getByRole("dialog", { name: "Workspace file tree" })).toBeVisible();
     await capture(page, testInfo, "11-mobile-agent-file-tree-drawer");
   }
+});
+
+test("captures light-mode diagnostic screenshots for AI review", async ({ page }, testInfo) => {
+  const isMobile = testInfo.project.name.startsWith("mobile");
+
+  await preparePage(page);
+  await setLightTheme(page);
+  await capture(page, testInfo, "light-01-login");
+
+  await signIn(page, "Screenshot User");
+  await setLightTheme(page);
+  await clearDefaultChannelMessages(page);
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+  await capture(page, testInfo, "light-02-shell-ready");
+
+  const ping = `light screenshot ping ${testInfo.project.name}`;
+  await page.getByRole("textbox", { name: "Message" }).fill(ping);
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText(`Echo: ${ping}`, { exact: true })).toBeVisible();
+  await capture(page, testInfo, "light-03-message-flow");
+
+  if (isMobile) {
+    await page.getByRole("button", { name: "Navigation" }).click();
+    await expect(page.getByRole("dialog", { name: "Navigation" })).toBeVisible();
+    await capture(page, testInfo, "light-04-mobile-navigation");
+    await page.getByRole("button", { name: "Close navigation" }).click();
+  }
+
+  await page.getByRole("button", { name: "Members" }).click();
+  await expect(page.getByLabel("Channel members")).toBeVisible();
+  await capture(page, testInfo, "light-05-members-panel");
+  await page.getByLabel("Channel members").getByRole("button", { name: "Close members" }).click();
+
+  await page.getByRole("button", { name: "Agent settings" }).click();
+  await expect(page.getByLabel("Agent details")).toBeVisible();
+  await capture(page, testInfo, "light-06-agent-panel");
 });
 
 async function capture(page: Page, testInfo: TestInfo, name: string) {
