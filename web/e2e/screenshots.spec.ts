@@ -248,3 +248,28 @@ async function clearDefaultChannelMessages(page: Page) {
     );
   });
 }
+
+test("monaco probe", async ({ page }) => {
+  test.setTimeout(150_000);
+  const failures: string[] = [];
+  page.on("requestfailed", (r) => failures.push(`FAILED ${r.url()} :: ${r.failure()?.errorText}`));
+  page.on("console", (m) => { if (m.type() === "error") failures.push(`CONSOLE ${m.text()}`); });
+  page.on("pageerror", (e) => failures.push(`PAGEERROR ${e.message}`));
+
+  await preparePage(page);
+  await signIn(page, "Probe User");
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+  await page.getByRole("button", { name: "Agent settings" }).click();
+  const agentPanel = page.getByLabel("Agent details");
+  await expect(agentPanel).toBeVisible();
+  await agentPanel.getByRole("tab", { name: /Files/ }).click();
+
+  const start = Date.now();
+  let ms = -1;
+  try {
+    await expect(agentPanel.getByTestId("workspace-file-editor").locator(".monaco-editor")).toBeVisible({ timeout: 120_000 });
+    ms = Date.now() - start;
+  } catch { ms = -1; }
+  console.log(`\n>>> MONACO_VISIBLE_MS=${ms}`);
+  console.log(`>>> NETWORK_AND_CONSOLE:\n${failures.slice(0, 15).join("\n") || "(none)"}\n`);
+});
