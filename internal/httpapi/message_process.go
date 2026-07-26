@@ -107,6 +107,8 @@ func processItemSummary(item map[string]any, index int) map[string]any {
 	copyStringField(summary, item, "tool_call_id")
 	copyStringField(summary, item, "status")
 	copyStringField(summary, item, "created_at")
+	// Kept so the UI can group a subagent's work under the call that spawned it.
+	copyStringField(summary, item, "parent_tool_call_id")
 
 	if stringValue(item, "type") == "thinking" {
 		copyStringField(summary, item, "text")

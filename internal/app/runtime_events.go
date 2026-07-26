@@ -143,15 +143,16 @@ func runtimeProcessItems(evt agentruntime.Event) []domain.ProcessItem {
 	items := make([]domain.ProcessItem, 0, len(evt.Process))
 	for _, item := range evt.Process {
 		items = append(items, domain.ProcessItem{
-			Type:       item.Type,
-			Text:       item.Text,
-			ToolName:   item.ToolName,
-			ToolCallID: item.ToolCallID,
-			Status:     item.Status,
-			Input:      item.Input,
-			Output:     item.Output,
-			Raw:        item.Raw,
-			CreatedAt:  item.CreatedAt,
+			Type:             item.Type,
+			Text:             item.Text,
+			ToolName:         item.ToolName,
+			ToolCallID:       item.ToolCallID,
+			Status:           item.Status,
+			Input:            item.Input,
+			Output:           item.Output,
+			Raw:              item.Raw,
+			CreatedAt:        item.CreatedAt,
+			ParentToolCallID: item.ParentToolCallID,
 		})
 	}
 	return items

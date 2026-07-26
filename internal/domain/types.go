@@ -423,4 +423,7 @@ type ProcessItem struct {
 	Output     any    `json:"output,omitempty"`
 	Raw        any    `json:"raw,omitempty"`
 	CreatedAt  string `json:"created_at,omitempty"`
+	// ParentToolCallID is set on items produced by a subagent, naming the tool
+	// call that spawned it. Empty for the main agent's own items.
+	ParentToolCallID string `json:"parent_tool_call_id,omitempty"`
 }

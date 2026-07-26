@@ -172,21 +172,61 @@ function ProcessBlock({
   messageID?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const displayItems = useMemo(() => groupProcessFragments(mergeToolProcessItems(items)), [items]);
+  const { mainItems, subagentGroups } = useMemo(() => partitionSubagentItems(items), [items]);
+  const displayItems = useMemo(() => groupProcessFragments(mergeToolProcessItems(mainItems)), [mainItems]);
+  if (displayItems.length === 0 && subagentGroups.length === 0) {
+    return null;
+  }
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground py-1">
         {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         <Brain className="h-3 w-3" />
         <span>Process</span>
-        <span className="text-[10px] text-muted-foreground/70">{displayItems.length}</span>
+        <span className="text-[10px] text-muted-foreground/70">
+          {displayItems.length + subagentGroups.length}
+        </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="space-y-2 border-l border-border/60 pl-3 py-1">
           {displayItems.map((item, index) => (
             <ProcessEntryRow key={processEntryKey(item, index)} item={item} messageID={messageID} />
           ))}
+          {subagentGroups.map((group) => (
+            <SubagentSection key={group.parentToolCallID} group={group} messageID={messageID} />
+          ))}
         </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+/** A subagent's own work, shown under the call that spawned it. */
+function SubagentSection({ group, messageID }: { group: SubagentGroup; messageID?: string }) {
+  const [open, setOpen] = useState(false);
+  const displayItems = useMemo(() => mergeToolProcessItems(group.items), [group.items]);
+  const toolCount = displayItems.filter((item) => item.type !== "thinking").length;
+  const label = toolCount === 1 ? "1 tool" : `${toolCount} tools`;
+
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className="rounded-md border border-border/60 bg-muted/15 p-2.5 text-xs"
+    >
+      <CollapsibleTrigger className="flex w-full min-w-0 items-center gap-2 text-left text-muted-foreground hover:text-foreground">
+        {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-purple-500/10 text-purple-400">
+          <Bot className="h-3.5 w-3.5" />
+        </span>
+        <span className="font-medium text-foreground">Subagent</span>
+        <span className="min-w-0 truncate text-[11px]">{group.description}</span>
+        <span className="ml-auto shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px]">{label}</span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="space-y-2 pt-2">
+        {displayItems.map((item, index) => (
+          <ProcessRow key={processItemKey(item, index)} item={item} messageID={messageID} />
+        ))}
       </CollapsibleContent>
     </Collapsible>
   );
@@ -766,21 +806,74 @@ function getSubagentSummary(process: ProcessItem[]): SubagentInfo[] {
   const subagents: SubagentInfo[] = [];
   for (const item of process) {
     if (item.type === "tool_call" && item.tool_name === "Agent" && item.tool_call_id) {
-      const input = item.input as Record<string, unknown> | null;
-      const description = truncateSubagentDescription(
-        (typeof input?.description === "string" ? input.description : null) ??
-        (typeof input?.subagent_type === "string" ? input.subagent_type : null) ??
-        (typeof input?.prompt === "string" ? input.prompt : null) ??
-        "Subagent"
-      );
       subagents.push({
         toolCallID: item.tool_call_id,
-        description,
+        description: subagentDescription(item),
         active: !completedIDs.has(item.tool_call_id),
       });
     }
   }
   return subagents;
+}
+
+export interface SubagentGroup {
+  parentToolCallID: string;
+  description: string;
+  items: ProcessItem[];
+}
+
+/**
+ * Splits a subagent's own process items away from the main agent's, so each
+ * subagent's work can be shown under the call that spawned it instead of
+ * flattened into the main timeline.
+ */
+export function partitionSubagentItems(items: ProcessItem[]): {
+  mainItems: ProcessItem[];
+  subagentGroups: SubagentGroup[];
+} {
+  const mainItems: ProcessItem[] = [];
+  const grouped = new Map<string, ProcessItem[]>();
+
+  for (const item of items) {
+    const parent = item.parent_tool_call_id;
+    if (!parent) {
+      mainItems.push(item);
+      continue;
+    }
+    const existing = grouped.get(parent);
+    if (existing) {
+      existing.push(item);
+    } else {
+      grouped.set(parent, [item]);
+    }
+  }
+
+  const descriptions = new Map<string, string>();
+  for (const item of mainItems) {
+    if (item.type === "tool_call" && item.tool_call_id) {
+      descriptions.set(item.tool_call_id, subagentDescription(item));
+    }
+  }
+
+  const subagentGroups: SubagentGroup[] = [];
+  for (const [parentToolCallID, groupItems] of grouped) {
+    subagentGroups.push({
+      parentToolCallID,
+      description: descriptions.get(parentToolCallID) ?? "Subagent",
+      items: groupItems,
+    });
+  }
+  return { mainItems, subagentGroups };
+}
+
+function subagentDescription(item: ProcessItem): string {
+  const input = item.input as Record<string, unknown> | null;
+  return truncateSubagentDescription(
+    (typeof input?.description === "string" ? input.description : null) ??
+    (typeof input?.subagent_type === "string" ? input.subagent_type : null) ??
+    (typeof input?.prompt === "string" ? input.prompt : null) ??
+    "Subagent"
+  );
 }
 
 function truncateSubagentDescription(text: string, maxLen = 60): string {

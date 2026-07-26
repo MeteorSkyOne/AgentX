@@ -21,6 +21,8 @@ export interface ProcessItem {
   created_at?: string;
   process_index?: number;
   has_detail?: boolean;
+  /** Set on items produced by a subagent, naming the tool call that spawned it. */
+  parent_tool_call_id?: string;
 }
 
 export interface MessageProcessItemDetail {
