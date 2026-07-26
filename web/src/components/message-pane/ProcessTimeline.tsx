@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  Square,
   Wrench,
 } from "lucide-react";
 import { fetchMessageProcessItem } from "@/api/client";
@@ -31,6 +32,7 @@ export function StreamingItem({
   hideAvatar,
   workspacePath,
   onOpenWorkspacePath,
+  onStopSubagent,
 }: {
   item: StreamingMessage;
   agentName?: string;
@@ -39,6 +41,7 @@ export function StreamingItem({
   hideAvatar?: boolean;
   workspacePath?: string;
   onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
+  onStopSubagent?: (toolCallID: string) => Promise<void>;
 }) {
   const isError = Boolean(item.error);
   const label = isError ? "System" : agentName ?? "Agent";
@@ -88,12 +91,13 @@ export function StreamingItem({
           onOpenWorkspacePath={onOpenWorkspacePath}
           className={messageBodyClassName}
           defaultProcessOpen
+          onStopSubagent={onStopSubagent}
         />
         {(workingLabel || subagents.length > 0) && (
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-[11px] font-medium text-muted-foreground">
               {workingLabel && <span>{workingLabel}</span>}
-              <SubagentBadge subagents={subagents} />
+              <SubagentBadge subagents={subagents} onStopSubagent={onStopSubagent} />
             </div>
           </div>
         )}
@@ -102,7 +106,45 @@ export function StreamingItem({
   );
 }
 
-function SubagentBadge({ subagents }: { subagents: SubagentInfo[] }) {
+/** Asks the backend to stop a running subagent; the completed signal that the
+ * CLI emits in response is what flips the UI to done. */
+function StopSubagentButton({
+  toolCallID,
+  onStopSubagent,
+}: {
+  toolCallID: string;
+  onStopSubagent: (toolCallID: string) => Promise<void>;
+}) {
+  const [stopping, setStopping] = useState(false);
+  return (
+    <button
+      type="button"
+      title="Stop subagent"
+      disabled={stopping}
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded bg-destructive/10 px-1.5 py-0.5 text-[11px] font-medium text-destructive transition-colors hover:bg-destructive/20",
+        stopping && "opacity-50"
+      )}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setStopping(true);
+        void onStopSubagent(toolCallID).catch(() => setStopping(false));
+      }}
+    >
+      <Square className="h-2.5 w-2.5 fill-current" />
+      <span>{stopping ? "stopping…" : "stop"}</span>
+    </button>
+  );
+}
+
+function SubagentBadge({
+  subagents,
+  onStopSubagent,
+}: {
+  subagents: SubagentInfo[];
+  onStopSubagent?: (toolCallID: string) => Promise<void>;
+}) {
   const [open, setOpen] = useState(false);
   const activeCount = subagents.filter((s) => s.active).length;
   const totalCount = subagents.length;
@@ -153,7 +195,10 @@ function SubagentBadge({ subagents }: { subagents: SubagentInfo[] }) {
                   <CheckCircle2 className="h-2.5 w-2.5" />
                 )}
               </span>
-              <span>{sa.description}</span>
+              <span className="min-w-0 flex-1 truncate">{sa.description}</span>
+              {sa.active && onStopSubagent && (
+                <StopSubagentButton toolCallID={sa.toolCallID} onStopSubagent={onStopSubagent} />
+              )}
             </div>
           ))}
         </div>
@@ -164,16 +209,19 @@ function SubagentBadge({ subagents }: { subagents: SubagentInfo[] }) {
 
 function ProcessBlock({
   items,
+  subagentGroups = [],
   defaultOpen = true,
   messageID,
+  onStopSubagent,
 }: {
   items: ProcessItem[];
+  subagentGroups?: SubagentGroup[];
   defaultOpen?: boolean;
   messageID?: string;
+  onStopSubagent?: (toolCallID: string) => Promise<void>;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const { mainItems, subagentGroups } = useMemo(() => partitionSubagentItems(items), [items]);
-  const displayItems = useMemo(() => groupProcessFragments(mergeToolProcessItems(mainItems)), [mainItems]);
+  const displayItems = useMemo(() => groupProcessFragments(mergeToolProcessItems(items)), [items]);
   if (displayItems.length === 0 && subagentGroups.length === 0) {
     return null;
   }
@@ -193,7 +241,12 @@ function ProcessBlock({
             <ProcessEntryRow key={processEntryKey(item, index)} item={item} messageID={messageID} />
           ))}
           {subagentGroups.map((group) => (
-            <SubagentSection key={group.parentToolCallID} group={group} messageID={messageID} />
+            <SubagentSection
+              key={group.parentToolCallID}
+              group={group}
+              messageID={messageID}
+              onStopSubagent={onStopSubagent}
+            />
           ))}
         </div>
       </CollapsibleContent>
@@ -202,7 +255,15 @@ function ProcessBlock({
 }
 
 /** A subagent's own work, shown under the call that spawned it. */
-function SubagentSection({ group, messageID }: { group: SubagentGroup; messageID?: string }) {
+function SubagentSection({
+  group,
+  messageID,
+  onStopSubagent,
+}: {
+  group: SubagentGroup;
+  messageID?: string;
+  onStopSubagent?: (toolCallID: string) => Promise<void>;
+}) {
   const [open, setOpen] = useState(false);
   const displayItems = useMemo(() => mergeToolProcessItems(group.items), [group.items]);
   const toolCount = displayItems.filter((item) => item.type !== "thinking").length;
@@ -214,15 +275,30 @@ function SubagentSection({ group, messageID }: { group: SubagentGroup; messageID
       onOpenChange={setOpen}
       className="rounded-md border border-border/60 bg-muted/15 p-2.5 text-xs"
     >
-      <CollapsibleTrigger className="flex w-full min-w-0 items-center gap-2 text-left text-muted-foreground hover:text-foreground">
-        {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-purple-500/10 text-purple-400">
-          <Bot className="h-3.5 w-3.5" />
-        </span>
-        <span className="font-medium text-foreground">Subagent</span>
-        <span className="min-w-0 truncate text-[11px]">{group.description}</span>
-        <span className="ml-auto shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px]">{label}</span>
-      </CollapsibleTrigger>
+      <div className="flex w-full min-w-0 items-center gap-2">
+        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 text-left text-muted-foreground hover:text-foreground">
+          {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-purple-500/10 text-purple-400">
+            <Bot className={cn("h-3.5 w-3.5", group.active && "animate-pulse")} />
+          </span>
+          <span className="font-medium text-foreground">Subagent</span>
+          <span className="min-w-0 truncate text-[11px]">{group.description}</span>
+          {group.active ? (
+            <span className="ml-auto flex shrink-0 items-center gap-1 rounded bg-blue-500/10 px-1.5 py-0.5 text-[11px] text-blue-400">
+              running
+            </span>
+          ) : (
+            <span className="ml-auto flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[11px]">
+              <CheckCircle2 className="h-2.5 w-2.5 text-emerald-400" />
+              done
+            </span>
+          )}
+          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px]">{label}</span>
+        </CollapsibleTrigger>
+        {group.active && onStopSubagent && (
+          <StopSubagentButton toolCallID={group.parentToolCallID} onStopSubagent={onStopSubagent} />
+        )}
+      </div>
       <CollapsibleContent className="space-y-2 pt-2">
         {displayItems.map((item, index) => (
           <ProcessRow key={processItemKey(item, index)} item={item} messageID={messageID} />
@@ -676,13 +752,23 @@ function toolFragmentNames(items: DisplayProcessItem[]): string {
 interface TextProcessSegment {
   text: string;
   processItems: ProcessItem[];
+  subagentGroups: SubagentGroup[];
 }
 
 const processBreakPattern = /<!-- process-break:(\d+) -->/g;
 
-function splitByProcessBreaks(text: string, allProcessItems: ProcessItem[]): TextProcessSegment[] | null {
+function splitByProcessBreaks(
+  text: string,
+  mainItems: ProcessItem[],
+  mainCounts: number[],
+  subagentGroups: SubagentGroup[]
+): TextProcessSegment[] | null {
   const matches = [...text.matchAll(processBreakPattern)];
   if (matches.length === 0) return null;
+
+  // Break markers count every process item, subagent work included; translate
+  // them into positions within the main agent's own items.
+  const toMainCount = (n: number) => mainCounts[Math.max(0, Math.min(n, mainCounts.length - 1))];
 
   const segments: TextProcessSegment[] = [];
   let lastTextEnd = 0;
@@ -691,13 +777,16 @@ function splitByProcessBreaks(text: string, allProcessItems: ProcessItem[]): Tex
   for (const match of matches) {
     const matchStart = match.index;
     const matchEnd = matchStart + match[0].length;
-    const processCount = parseInt(match[1], 10);
+    const processCount = toMainCount(parseInt(match[1], 10));
 
     const rawText = text.slice(lastTextEnd, matchStart);
     const trimmed = rawText.replace(/^\n+|\n+$/g, "");
     segments.push({
       text: trimmed,
-      processItems: allProcessItems.slice(lastProcessEnd, processCount),
+      processItems: mainItems.slice(lastProcessEnd, processCount),
+      subagentGroups: subagentGroups.filter(
+        (group) => group.anchor >= lastProcessEnd && group.anchor < processCount
+      ),
     });
 
     lastTextEnd = matchEnd;
@@ -707,7 +796,8 @@ function splitByProcessBreaks(text: string, allProcessItems: ProcessItem[]): Tex
   const trailing = text.slice(lastTextEnd).replace(/^\n+|\n+$/g, "");
   segments.push({
     text: trailing,
-    processItems: allProcessItems.slice(lastProcessEnd),
+    processItems: mainItems.slice(lastProcessEnd),
+    subagentGroups: subagentGroups.filter((group) => group.anchor >= lastProcessEnd),
   });
 
   return segments;
@@ -721,6 +811,7 @@ export function InterleavedMessageBody({
   onOpenWorkspacePath,
   className,
   defaultProcessOpen = false,
+  onStopSubagent,
 }: {
   text: string;
   processItems: ProcessItem[];
@@ -729,14 +820,22 @@ export function InterleavedMessageBody({
   onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
   className?: string;
   defaultProcessOpen?: boolean;
+  onStopSubagent?: (toolCallID: string) => Promise<void>;
 }) {
-  const segments = splitByProcessBreaks(text, processItems);
+  const { mainItems, subagentGroups, mainCounts } = partitionSubagentItems(processItems);
+  const segments = splitByProcessBreaks(text, mainItems, mainCounts, subagentGroups);
 
   if (!segments) {
     return (
       <>
-        {processItems.length > 0 && (
-          <ProcessBlock items={processItems} defaultOpen={defaultProcessOpen} messageID={messageID} />
+        {(mainItems.length > 0 || subagentGroups.length > 0) && (
+          <ProcessBlock
+            items={mainItems}
+            subagentGroups={subagentGroups}
+            defaultOpen={defaultProcessOpen}
+            messageID={messageID}
+            onStopSubagent={onStopSubagent}
+          />
         )}
         {text.trim() !== "" && (
           <div className={className} data-testid="message-body">
@@ -760,8 +859,14 @@ export function InterleavedMessageBody({
               />
             </div>
           )}
-          {segment.processItems.length > 0 && (
-            <ProcessBlock items={segment.processItems} defaultOpen={defaultProcessOpen} messageID={messageID} />
+          {(segment.processItems.length > 0 || segment.subagentGroups.length > 0) && (
+            <ProcessBlock
+              items={segment.processItems}
+              subagentGroups={segment.subagentGroups}
+              defaultOpen={defaultProcessOpen}
+              messageID={messageID}
+              onStopSubagent={onStopSubagent}
+            />
           )}
         </Fragment>
       ))}
@@ -795,21 +900,56 @@ interface SubagentInfo {
   active: boolean;
 }
 
-function getSubagentSummary(process: ProcessItem[]): SubagentInfo[] {
-  const completedIDs = new Set<string>();
-  for (const item of process) {
-    if (item.type === "tool_result" && item.tool_call_id) {
-      completedIDs.add(item.tool_call_id);
-    }
+/** Codex spawns subagents via "Agent"; Claude Code via "Task". */
+function isSubagentToolName(toolName?: string): boolean {
+  return toolName === "Agent" || toolName === "Task";
+}
+
+/**
+ * Whether the subagent behind a spawning call is still running. Task lifecycle
+ * signals are authoritative when present — a background task's spawning call
+ * resolves at launch, not at completion. Without signals (Codex, older
+ * messages), an unresolved spawning call is the best available indicator.
+ */
+function subagentIsActive(
+  toolCallID: string,
+  startedIDs: Set<string>,
+  finishedIDs: Set<string>,
+  resolvedIDs: Set<string>
+): boolean {
+  if (startedIDs.has(toolCallID) || finishedIDs.has(toolCallID)) {
+    return !finishedIDs.has(toolCallID);
   }
+  return !resolvedIDs.has(toolCallID);
+}
+
+function collectSubagentSignals(process: ProcessItem[]): {
+  startedIDs: Set<string>;
+  finishedIDs: Set<string>;
+  resolvedIDs: Set<string>;
+} {
+  const startedIDs = new Set<string>();
+  const finishedIDs = new Set<string>();
+  const resolvedIDs = new Set<string>();
+  for (const item of process) {
+    if (!item.tool_call_id) continue;
+    if (item.type === "subagent_started") startedIDs.add(item.tool_call_id);
+    if (item.type === "subagent_completed") finishedIDs.add(item.tool_call_id);
+    if (item.type === "tool_result") resolvedIDs.add(item.tool_call_id);
+  }
+  return { startedIDs, finishedIDs, resolvedIDs };
+}
+
+export function getSubagentSummary(process: ProcessItem[]): SubagentInfo[] {
+  const { startedIDs, finishedIDs, resolvedIDs } = collectSubagentSignals(process);
 
   const subagents: SubagentInfo[] = [];
   for (const item of process) {
-    if (item.type === "tool_call" && item.tool_name === "Agent" && item.tool_call_id) {
+    if (item.type === "tool_call" && isSubagentToolName(item.tool_name) && item.tool_call_id) {
       subagents.push({
         toolCallID: item.tool_call_id,
         description: subagentDescription(item),
-        active: !completedIDs.has(item.tool_call_id),
+        active: subagentIsActive(item.tool_call_id, startedIDs, finishedIDs, resolvedIDs),
       });
     }
   }
@@ -820,50 +960,68 @@ export interface SubagentGroup {
   parentToolCallID: string;
   description: string;
   items: ProcessItem[];
+  /** Index into mainItems where this group belongs: its spawning call, or where its work started. */
+  anchor: number;
+  /** Whether the subagent is still running. */
+  active: boolean;
 }
 
 /**
- * Splits a subagent's own process items away from the main agent's, so each
+ * Splits every subagent's process items away from the main agent's, so each
  * subagent's work can be shown under the call that spawned it instead of
- * flattened into the main timeline.
+ * flattened into the main timeline. Operates on the whole message at once —
+ * process-break slicing happens afterwards over mainItems, using mainCounts to
+ * translate break positions, so one subagent never splinters across blocks.
  */
 export function partitionSubagentItems(items: ProcessItem[]): {
   mainItems: ProcessItem[];
   subagentGroups: SubagentGroup[];
+  /** mainCounts[i] = how many of the first i process items belong to the main agent. */
+  mainCounts: number[];
 } {
   const mainItems: ProcessItem[] = [];
-  const grouped = new Map<string, ProcessItem[]>();
+  const mainCounts: number[] = [0];
+  const grouped = new Map<string, { items: ProcessItem[]; anchor: number }>();
 
   for (const item of items) {
     const parent = item.parent_tool_call_id;
-    if (!parent) {
+    if (item.type === "subagent_started" || item.type === "subagent_completed") {
+      // Pure state signals — consumed below for the active flag, never shown
+      // as timeline rows. They still occupy a break-marker position.
+    } else if (!parent) {
       mainItems.push(item);
-      continue;
-    }
-    const existing = grouped.get(parent);
-    if (existing) {
-      existing.push(item);
     } else {
-      grouped.set(parent, [item]);
+      const existing = grouped.get(parent);
+      if (existing) {
+        existing.items.push(item);
+      } else {
+        grouped.set(parent, { items: [item], anchor: mainItems.length });
+      }
     }
+    mainCounts.push(mainItems.length);
   }
 
-  const descriptions = new Map<string, string>();
-  for (const item of mainItems) {
-    if (item.type === "tool_call" && item.tool_call_id) {
-      descriptions.set(item.tool_call_id, subagentDescription(item));
+  const { startedIDs, finishedIDs, resolvedIDs } = collectSubagentSignals(items);
+
+  const spawningCalls = new Map<string, { description: string; anchor: number }>();
+  mainItems.forEach((item, index) => {
+    if (item.type === "tool_call" && item.tool_call_id && !spawningCalls.has(item.tool_call_id)) {
+      spawningCalls.set(item.tool_call_id, { description: subagentDescription(item), anchor: index });
     }
-  }
+  });
 
   const subagentGroups: SubagentGroup[] = [];
-  for (const [parentToolCallID, groupItems] of grouped) {
+  for (const [parentToolCallID, group] of grouped) {
+    const spawn = spawningCalls.get(parentToolCallID);
     subagentGroups.push({
       parentToolCallID,
-      description: descriptions.get(parentToolCallID) ?? "Subagent",
-      items: groupItems,
+      description: spawn?.description ?? "Subagent",
+      items: group.items,
+      anchor: spawn?.anchor ?? group.anchor,
+      active: subagentIsActive(parentToolCallID, startedIDs, finishedIDs, resolvedIDs),
     });
   }
-  return { mainItems, subagentGroups };
+  return { mainItems, subagentGroups, mainCounts };
 }
 
 function subagentDescription(item: ProcessItem): string {

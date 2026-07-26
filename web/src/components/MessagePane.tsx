@@ -35,6 +35,7 @@ export function MessagePane({
   onRetryMessage,
   onLoadOlder,
   onRespondToQuestion,
+  onStopSubagent,
   conversationKey,
   workspacePath,
   onOpenWorkspacePath,
@@ -223,6 +224,7 @@ export function MessagePane({
                     hideAvatar={preferences.hide_avatars}
                     workspacePath={workspacePath}
                     onOpenWorkspacePath={onOpenWorkspacePath}
+                    onStopSubagent={onStopSubagent}
                   />
                 );
               })}

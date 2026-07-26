@@ -45,6 +45,7 @@ import {
   workspace,
   runToolUpdate,
   respondToInputRequest,
+  stopSubagent,
   retryAgentRun,
   steerQueuedPrompt,
   deleteQueuedPrompt
@@ -897,6 +898,11 @@ export default function App() {
     setPendingQuestion(null);
   }
 
+  async function handleStopSubagent(toolCallID: string) {
+    if (!activeConversation) return;
+    await stopSubagent(activeConversation.type, activeConversation.id, toolCallID);
+  }
+
   async function handleSteerQueuedPrompt(queueID: string) {
     if (!activeConversation) return;
     await steerQueuedPrompt(activeConversation.type, activeConversation.id, queueID);
@@ -1062,6 +1068,7 @@ export default function App() {
       pendingQuestion={pendingQuestion}
       queuedPrompts={queuedPrompts}
       onRespondToQuestion={handleRespondToQuestion}
+          onStopSubagent={handleStopSubagent}
       onSteerQueuedPrompt={handleSteerQueuedPrompt}
       onDeleteQueuedPrompt={handleDeleteQueuedPrompt}
       connectionStatus={connectionStatus}

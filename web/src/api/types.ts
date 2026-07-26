@@ -10,7 +10,12 @@ export type JsonValue =
   | { [key: string]: JsonValue };
 
 export interface ProcessItem {
-  type: "thinking" | "tool_call" | "tool_result";
+  /**
+   * subagent_started / subagent_completed are state signals for the subagent
+   * spawned by tool_call_id: its spawning call's own result arrives at launch
+   * time, so it cannot indicate when the subagent actually finished.
+   */
+  type: "thinking" | "tool_call" | "tool_result" | "subagent_started" | "subagent_completed";
   text?: string;
   tool_name?: string;
   tool_call_id?: string;

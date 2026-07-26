@@ -115,6 +115,7 @@ interface DesktopShellProps {
   onRetryMessage?: ShellProps["onRetryMessage"];
   onLoadOlderMessages: ShellProps["onLoadOlderMessages"];
   onRespondToQuestion: ShellProps["onRespondToQuestion"];
+  onStopSubagent: ShellProps["onStopSubagent"];
   onSteerQueuedPrompt: ShellProps["onSteerQueuedPrompt"];
   onDeleteQueuedPrompt: ShellProps["onDeleteQueuedPrompt"];
   onMessageSent: ShellProps["onMessageSent"];
@@ -213,6 +214,7 @@ export function DesktopShell({
   onRetryMessage,
   onLoadOlderMessages,
   onRespondToQuestion,
+  onStopSubagent,
   onSteerQueuedPrompt,
   onDeleteQueuedPrompt,
   onMessageSent,
@@ -656,6 +658,7 @@ export function DesktopShell({
                     onRetryMessage={onRetryMessage}
                     onLoadOlderMessages={onLoadOlderMessages}
                     onRespondToQuestion={onRespondToQuestion}
+                    onStopSubagent={onStopSubagent}
                     onSteerQueuedPrompt={onSteerQueuedPrompt}
               onDeleteQueuedPrompt={onDeleteQueuedPrompt}
                     onMessageSent={onMessageSent}

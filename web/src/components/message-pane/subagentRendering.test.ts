@@ -38,7 +38,11 @@ afterEach(() => {
   container = null;
 });
 
-function render(process: ProcessItem[], text = "done") {
+function render(
+  process: ProcessItem[],
+  text = "done",
+  onStopSubagent?: (toolCallID: string) => Promise<void>
+) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -48,6 +52,7 @@ function render(process: ProcessItem[], text = "done") {
         text,
         processItems: process,
         defaultProcessOpen: true,
+        onStopSubagent,
       })
     );
   });
@@ -79,9 +84,124 @@ describe("subagent rendering", () => {
     expect(el.textContent).not.toContain("find . -name");
   });
 
+  it("offers a stop button for a running subagent and reports its tool call", () => {
+    const stopped: string[] = [];
+    const onStop = (toolCallID: string) => {
+      stopped.push(toolCallID);
+      return Promise.resolve();
+    };
+    const el = render(
+      [
+        {
+          type: "tool_call",
+          tool_name: "Task",
+          tool_call_id: "toolu_bg",
+          input: { description: "Deep dive" },
+        },
+        { type: "subagent_started", tool_call_id: "toolu_bg" },
+        { type: "tool_call", tool_name: "Bash", parent_tool_call_id: "toolu_bg", input: {} },
+      ],
+      "body text",
+      onStop
+    );
+
+    const button = el.querySelector('button[title="Stop subagent"]') as HTMLButtonElement | null;
+    expect(button).not.toBeNull();
+    act(() => {
+      button!.click();
+    });
+    expect(stopped).toEqual(["toolu_bg"]);
+    expect(button!.textContent).toContain("stopping");
+  });
+
+  it("hides the stop button once the subagent is done", () => {
+    const el = render(
+      [
+        {
+          type: "tool_call",
+          tool_name: "Task",
+          tool_call_id: "toolu_bg",
+          input: { description: "Deep dive" },
+        },
+        { type: "subagent_started", tool_call_id: "toolu_bg" },
+        { type: "tool_call", tool_name: "Bash", parent_tool_call_id: "toolu_bg", input: {} },
+        { type: "subagent_completed", tool_call_id: "toolu_bg", status: "completed" },
+      ],
+      "body text",
+      () => Promise.resolve()
+    );
+
+    expect(el.querySelector('button[title="Stop subagent"]')).toBeNull();
+  });
+
   it("renders nothing for an empty process list", () => {
     const el = render([], "");
     expect(el.textContent).toBe("");
+  });
+
+  it("keeps one subagent group with its description when process breaks split the timeline", () => {
+    // Break markers count every process item (subagent work included); the
+    // subagent's items span the break, but its group must render once, in the
+    // block holding the spawning call.
+    const el = render(
+      [
+        {
+          type: "tool_call",
+          tool_name: "Task",
+          tool_call_id: "toolu_parent",
+          input: { description: "Count Go files" },
+        },
+        {
+          type: "tool_call",
+          tool_name: "Bash",
+          tool_call_id: "toolu_c1",
+          parent_tool_call_id: "toolu_parent",
+          input: { command: "echo one" },
+        },
+        {
+          type: "tool_call",
+          tool_name: "Bash",
+          tool_call_id: "toolu_c2",
+          parent_tool_call_id: "toolu_parent",
+          input: { command: "echo two" },
+        },
+        { type: "tool_result", tool_call_id: "toolu_parent" },
+      ],
+      "before\n\n<!-- process-break:2 -->\n\nafter"
+    );
+
+    expect(el.textContent?.match(/Subagent/g)).toHaveLength(1);
+    expect(el.textContent).toContain("Count Go files");
+  });
+
+  it("shows a subagent's real state from lifecycle signals", () => {
+    const base: ProcessItem[] = [
+      {
+        type: "tool_call",
+        tool_name: "Task",
+        tool_call_id: "toolu_bg",
+        input: { description: "Deep dive" },
+      },
+      { type: "tool_result", tool_call_id: "toolu_bg" },
+      { type: "subagent_started", tool_call_id: "toolu_bg" },
+      { type: "tool_call", tool_name: "Bash", parent_tool_call_id: "toolu_bg", input: {} },
+    ];
+
+    const runningEl = render(base, "body text");
+    expect(runningEl.textContent).toContain("running");
+    expect(runningEl.textContent).not.toContain("done");
+
+    act(() => {
+      root?.unmount();
+    });
+    container?.remove();
+
+    const doneEl = render(
+      [...base, { type: "subagent_completed", tool_call_id: "toolu_bg", status: "completed" }],
+      "body text"
+    );
+    expect(doneEl.textContent).toContain("done");
+    expect(doneEl.textContent).not.toContain("running");
   });
 
   it("still renders main-agent tools directly", () => {

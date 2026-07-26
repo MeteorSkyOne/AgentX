@@ -232,6 +232,7 @@ export interface ShellProps {
   onRetryMessage?: (message: Message) => Promise<void>;
   onLoadOlderMessages: () => boolean;
   onRespondToQuestion?: (questionID: string, answer: string) => Promise<void>;
+  onStopSubagent?: (toolCallID: string) => Promise<void>;
   onSteerQueuedPrompt?: (queueID: string) => Promise<void>;
   onDeleteQueuedPrompt?: (queueID: string) => Promise<void>;
   onMessageSent: (message: Message) => void;

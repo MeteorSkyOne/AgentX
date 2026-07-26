@@ -1010,6 +1010,20 @@ export function respondToInputRequest(
   );
 }
 
+export function stopSubagent(
+  type: ConversationType,
+  id: string,
+  toolCallID: string
+): Promise<void> {
+  return request<void>(
+    `/api/conversations/${encodeURIComponent(type)}/${encodeURIComponent(id)}/subagents/stop`,
+    {
+      method: "POST",
+      body: JSON.stringify({ tool_call_id: toolCallID })
+    }
+  );
+}
+
 export function retryAgentRun(
   type: ConversationType,
   id: string,

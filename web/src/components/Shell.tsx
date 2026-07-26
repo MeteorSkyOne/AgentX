@@ -113,6 +113,7 @@ export function Shell({
   onRetryMessage,
   onLoadOlderMessages,
   onRespondToQuestion,
+  onStopSubagent,
   onSteerQueuedPrompt,
   onDeleteQueuedPrompt,
   onMessageSent,
@@ -990,6 +991,7 @@ export function Shell({
           onRetryMessage={onRetryMessage}
           onLoadOlderMessages={onLoadOlderMessages}
           onRespondToQuestion={onRespondToQuestion}
+          onStopSubagent={onStopSubagent}
           onSteerQueuedPrompt={onSteerQueuedPrompt}
           onDeleteQueuedPrompt={onDeleteQueuedPrompt}
           onMessageSent={onMessageSent}
@@ -1108,6 +1110,7 @@ export function Shell({
           onRetryMessage={onRetryMessage}
           onLoadOlderMessages={onLoadOlderMessages}
           onRespondToQuestion={onRespondToQuestion}
+          onStopSubagent={onStopSubagent}
           onSteerQueuedPrompt={onSteerQueuedPrompt}
           onDeleteQueuedPrompt={onDeleteQueuedPrompt}
           onMessageSent={onMessageSent}

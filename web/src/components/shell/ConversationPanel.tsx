@@ -31,6 +31,7 @@ export function ConversationPanel({
   onRetryMessage,
   onLoadOlderMessages,
   onRespondToQuestion,
+  onStopSubagent,
   onSteerQueuedPrompt,
   onDeleteQueuedPrompt,
   onMessageSent,
@@ -60,6 +61,7 @@ export function ConversationPanel({
   onRetryMessage?: ShellProps["onRetryMessage"];
   onLoadOlderMessages: ShellProps["onLoadOlderMessages"];
   onRespondToQuestion?: (questionID: string, answer: string) => Promise<void>;
+  onStopSubagent?: (toolCallID: string) => Promise<void>;
   onSteerQueuedPrompt?: (queueID: string) => Promise<void>;
   onDeleteQueuedPrompt?: (queueID: string) => Promise<void>;
   onMessageSent: ShellProps["onMessageSent"];
@@ -162,6 +164,7 @@ export function ConversationPanel({
         onRetryMessage={onRetryMessage}
         onLoadOlder={onLoadOlderMessages}
         onRespondToQuestion={onRespondToQuestion}
+        onStopSubagent={onStopSubagent}
         onReplyMessage={selectReplyTarget}
         conversationKey={conversationKey}
         workspacePath={workspacePath}

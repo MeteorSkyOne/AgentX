@@ -37,6 +37,7 @@ export interface MessagePaneProps {
   onRetryMessage?: (message: Message) => Promise<void>;
   onLoadOlder: () => boolean;
   onRespondToQuestion?: (questionID: string, answer: string) => Promise<void>;
+  onStopSubagent?: (toolCallID: string) => Promise<void>;
   conversationKey?: string;
   workspacePath?: string;
   onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
