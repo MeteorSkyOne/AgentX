@@ -1,6 +1,7 @@
 .worktrees
 .worktrees/
 /agentx
+/agentx.old
 /bin/
 /internal/webdist/dist/
 web/dist/
