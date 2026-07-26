@@ -20,6 +20,10 @@ import (
 var (
 	claudeResultSettleDelay = 100 * time.Millisecond
 	claudeResultMaxWait     = 30 * time.Second
+	// claudeBackgroundIdleTimeout bounds a turn that is being held open for a
+	// background subagent. It is refreshed by any output, so it only trips when
+	// the process has genuinely gone silent.
+	claudeBackgroundIdleTimeout = 5 * time.Minute
 )
 
 type inputAnswer struct {
@@ -62,6 +66,9 @@ func newPersistentSession(proc *procpool.ManagedProcess, key string, rt *Runtime
 }
 
 func (s *persistentSession) waitForSystemEvent(ctx context.Context) error {
+	s.process.AttachReader()
+	defer s.process.DetachReader()
+
 	timeout := time.NewTimer(10 * time.Second)
 	defer timeout.Stop()
 	for {
@@ -113,6 +120,7 @@ func (s *persistentSession) Send(ctx context.Context, input runtime.Input) error
 	s.mu.Lock()
 	s.turnHeld = true
 	s.mu.Unlock()
+	s.process.AttachReader()
 
 	if modeOverride != "" {
 		s.sendSetPermissionMode(modeOverride)
@@ -179,6 +187,7 @@ func (s *persistentSession) ContextUsage(ctx context.Context) (*runtime.ContextU
 	s.mu.Lock()
 	s.turnHeld = true
 	s.mu.Unlock()
+	s.process.AttachReader()
 	defer s.releaseTurn()
 
 	requestID := id.New("ctx")
@@ -227,6 +236,7 @@ func (s *persistentSession) Close(ctx context.Context) error {
 		s.sendSetPermissionMode(s.baseMode)
 	}
 	if turnHeld {
+		s.process.DetachReader()
 		s.process.ReleaseTurn()
 	}
 	s.closeEventStream()
@@ -371,6 +381,7 @@ func (s *persistentSession) InitiateStop() {
 	s.mu.Unlock()
 
 	if turnHeld {
+		s.process.DetachReader()
 		s.process.ReleaseTurn()
 	}
 	s.rt.pool.Detach(s.process)
@@ -390,6 +401,7 @@ func (s *persistentSession) readEvents(ctx context.Context) {
 	for {
 		settleC := state.settleC()
 		maxWaitC := state.maxWaitC()
+		backgroundC := state.backgroundC()
 		select {
 		case <-ctx.Done():
 			s.emit(runtime.Event{Type: runtime.EventFailed, Error: ctx.Err().Error()})
@@ -398,6 +410,11 @@ func (s *persistentSession) readEvents(ctx context.Context) {
 			s.emit(state.completionEvent())
 			return
 		case <-maxWaitC:
+			s.emit(state.completionEvent())
+			return
+		case <-backgroundC:
+			slog.Warn("claudepersist: background subagent went silent, completing turn",
+				"key", s.key, "pending_tasks", state.background.PendingCount())
 			s.emit(state.completionEvent())
 			return
 		case <-s.process.Done():
@@ -449,6 +466,7 @@ func (s *persistentSession) handleLine(line []byte, state *claudeTurnState) (boo
 
 	switch claude.StringValue(payload, "type") {
 	case "system":
+		state.trackSystemMessage(payload)
 		return false, nil
 
 	case "assistant", "user":
@@ -458,6 +476,18 @@ func (s *persistentSession) handleLine(line []byte, state *claudeTurnState) (boo
 			text = ""
 		}
 		if text == "" && thinking == "" && len(process) == 0 {
+			return false, nil
+		}
+
+		// Output produced by a subagent is streamed for visibility but kept out
+		// of the main agent's reply: its text belongs to the subagent, and its
+		// tool calls must not gate the main turn's completion.
+		if parent := claude.StringValue(payload, "parent_tool_use_id"); parent != "" {
+			for i := range process {
+				process[i].ParentToolCallID = parent
+			}
+			state.processItemCount += len(process)
+			s.emit(runtime.Event{Type: runtime.EventDelta, Thinking: thinking, Process: process})
 			return false, nil
 		}
 		if thinking != "" && thinking == state.lastThinkingText {
@@ -474,11 +504,14 @@ func (s *persistentSession) handleLine(line []byte, state *claudeTurnState) (boo
 			state.lastThinkingText = thinking
 		}
 		state.processItemCount += len(process)
-		if text != "" {
+		// Whitespace-only text carries no content; folding it in would emit an
+		// empty process break and leave a stray marker in the stored message.
+		if strings.TrimSpace(text) != "" {
 			needsBreak := state.sawToolsSinceText && state.textBuf.Len() > 0
 			if needsBreak {
+				// Prefix the marker onto text so the delta carries it too, then
+				// write once — writing it separately would duplicate it.
 				marker := fmt.Sprintf("\n\n<!-- process-break:%d -->\n\n", state.processItemCount)
-				state.textBuf.WriteString(marker)
 				text = marker + text
 			} else if state.textBuf.Len() > 0 {
 				state.textBuf.WriteByte('\n')
@@ -530,13 +563,34 @@ type claudeTurnState struct {
 	lastThinkingText  string
 	processItemCount  int
 	pendingCompletion *runtime.Event
-	completionText    string
 	settleTimer       *time.Timer
 	maxWaitTimer      *time.Timer
+
+	background      *claude.BackgroundTracker
+	backgroundTimer *time.Timer
 }
 
 func newClaudeTurnState() *claudeTurnState {
-	return &claudeTurnState{openTools: map[string]struct{}{}}
+	return &claudeTurnState{
+		openTools:  map[string]struct{}{},
+		background: claude.NewBackgroundTracker(),
+	}
+}
+
+// trackSystemMessage maintains the background task set from Claude Code's task
+// lifecycle messages.
+func (s *claudeTurnState) trackSystemMessage(payload map[string]any) {
+	if s.background.TrackSystemMessage(payload) {
+		// The main agent is about to be woken up to report on the finished
+		// task, so whatever result we are holding is not the last word.
+		s.pendingCompletion = nil
+	}
+}
+
+// waitingOnBackground reports whether the turn must stay open regardless of any
+// result message already received.
+func (s *claudeTurnState) waitingOnBackground() bool {
+	return s.background.Waiting()
 }
 
 func (s *claudeTurnState) text() string {
@@ -575,13 +629,23 @@ func (s *claudeTurnState) hasOpenTools() bool {
 
 func (s *claudeTurnState) deferCompletion(evt runtime.Event) {
 	s.pendingCompletion = &evt
-	s.completionText = s.text()
+	s.background.NoteResult()
+	// Reset rather than create-once: a turn that spans background subagents
+	// sees several results, and the cap applies to the most recent one.
 	if s.maxWaitTimer == nil {
 		s.maxWaitTimer = time.NewTimer(claudeResultMaxWait)
+		return
 	}
+	resetTimer(s.maxWaitTimer, claudeResultMaxWait)
 }
 
 func (s *claudeTurnState) updateCompletionTimers() {
+	if s.waitingOnBackground() {
+		s.stopSettleTimer()
+		s.touchBackgroundTimer()
+		return
+	}
+	s.stopBackgroundTimer()
 	if s.pendingCompletion == nil || s.hasOpenTools() {
 		s.stopSettleTimer()
 		return
@@ -590,13 +654,7 @@ func (s *claudeTurnState) updateCompletionTimers() {
 		s.settleTimer = time.NewTimer(claudeResultSettleDelay)
 		return
 	}
-	if !s.settleTimer.Stop() {
-		select {
-		case <-s.settleTimer.C:
-		default:
-		}
-	}
-	s.settleTimer.Reset(claudeResultSettleDelay)
+	resetTimer(s.settleTimer, claudeResultSettleDelay)
 }
 
 func (s *claudeTurnState) settleC() <-chan time.Time {
@@ -606,11 +664,52 @@ func (s *claudeTurnState) settleC() <-chan time.Time {
 	return s.settleTimer.C
 }
 
+// maxWaitC is disabled while background work is outstanding: that cap exists to
+// bound the wait for stragglers after a result, not to cut a subagent short.
 func (s *claudeTurnState) maxWaitC() <-chan time.Time {
-	if s.maxWaitTimer == nil {
+	if s.maxWaitTimer == nil || s.waitingOnBackground() {
 		return nil
 	}
 	return s.maxWaitTimer.C
+}
+
+// backgroundC fires when a turn held open for background work has gone quiet
+// for too long, so a stuck subagent cannot hang the turn forever.
+func (s *claudeTurnState) backgroundC() <-chan time.Time {
+	if s.backgroundTimer == nil {
+		return nil
+	}
+	return s.backgroundTimer.C
+}
+
+func (s *claudeTurnState) touchBackgroundTimer() {
+	if s.backgroundTimer == nil {
+		s.backgroundTimer = time.NewTimer(claudeBackgroundIdleTimeout)
+		return
+	}
+	resetTimer(s.backgroundTimer, claudeBackgroundIdleTimeout)
+}
+
+func (s *claudeTurnState) stopBackgroundTimer() {
+	if s.backgroundTimer == nil {
+		return
+	}
+	drainTimer(s.backgroundTimer)
+	s.backgroundTimer = nil
+}
+
+func resetTimer(timer *time.Timer, d time.Duration) {
+	drainTimer(timer)
+	timer.Reset(d)
+}
+
+func drainTimer(timer *time.Timer) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
 }
 
 func (s *claudeTurnState) completionEvent() runtime.Event {
@@ -634,6 +733,7 @@ func (s *claudeTurnState) completionEvent() runtime.Event {
 		}
 	}
 	s.stopSettleTimer()
+	s.stopBackgroundTimer()
 	if s.maxWaitTimer != nil {
 		s.maxWaitTimer.Stop()
 	}
@@ -644,12 +744,7 @@ func (s *claudeTurnState) stopSettleTimer() {
 	if s.settleTimer == nil {
 		return
 	}
-	if !s.settleTimer.Stop() {
-		select {
-		case <-s.settleTimer.C:
-		default:
-		}
-	}
+	drainTimer(s.settleTimer)
 	s.settleTimer = nil
 }
 
@@ -768,6 +863,7 @@ func (s *persistentSession) releaseTurn() {
 	s.turnHeld = false
 	s.mu.Unlock()
 	if held {
+		s.process.DetachReader()
 		s.process.ReleaseTurn()
 	}
 }

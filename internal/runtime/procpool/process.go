@@ -16,6 +16,10 @@ import (
 	"time"
 )
 
+// deliverTimeout bounds how long dispatch waits for an attached reader before
+// treating a line as unclaimed.
+const deliverTimeout = 250 * time.Millisecond
+
 type ManagedProcess struct {
 	Key  string
 	cmd  *exec.Cmd
@@ -27,7 +31,10 @@ type ManagedProcess struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	rawLines    chan []byte
 	stdoutLines chan []byte
+	readers     atomic.Int32
+	fallback    atomic.Value
 	done        chan struct{}
 	alive       atomic.Bool
 	turnHeld    atomic.Bool
@@ -75,6 +82,7 @@ func startProcess(pool *ProcessPool, key string, cmd *exec.Cmd) (*ManagedProcess
 		stdin:       stdin,
 		ctx:         ctx,
 		cancel:      cancel,
+		rawLines:    make(chan []byte, 64),
 		stdoutLines: make(chan []byte, 64),
 		done:        make(chan struct{}),
 		turnMu:      make(chan struct{}, 1),
@@ -83,6 +91,7 @@ func startProcess(pool *ProcessPool, key string, cmd *exec.Cmd) (*ManagedProcess
 	mp.lastUsedAt.Store(time.Now())
 	mp.turnMu <- struct{}{}
 
+	go mp.dispatch()
 	go mp.readStdout(stdout)
 	go mp.readStderr(stderr)
 	go mp.waitForExit()
@@ -153,6 +162,75 @@ func (mp *ManagedProcess) StdoutLines() <-chan []byte {
 	return mp.stdoutLines
 }
 
+// AttachReader marks that a caller is consuming StdoutLines. Lines that arrive
+// while no reader is attached are handed to the fallback handler instead of
+// being buffered for whoever reads next.
+func (mp *ManagedProcess) AttachReader() {
+	mp.readers.Add(1)
+}
+
+func (mp *ManagedProcess) DetachReader() {
+	if mp.readers.Add(-1) < 0 {
+		mp.readers.Store(0)
+	}
+}
+
+// SetFallbackHandler installs the handler for lines nobody is reading. It runs
+// on the dispatch goroutine, so it must not block.
+func (mp *ManagedProcess) SetFallbackHandler(h func(line []byte)) {
+	if h == nil {
+		mp.fallback.Store((func([]byte))(nil))
+		return
+	}
+	mp.fallback.Store(h)
+}
+
+func (mp *ManagedProcess) fallbackHandler() func([]byte) {
+	h, _ := mp.fallback.Load().(func([]byte))
+	return h
+}
+
+// dispatch is the sole producer of stdoutLines. It routes each line to the
+// attached reader when there is one, and to the fallback handler otherwise.
+func (mp *ManagedProcess) dispatch() {
+	defer close(mp.stdoutLines)
+	for line := range mp.rawLines {
+		h := mp.fallbackHandler()
+		if mp.deliver(line, h == nil) {
+			continue
+		}
+		mp.lastUsedAt.Store(time.Now())
+		h(line)
+	}
+}
+
+// deliver hands a line to the attached reader, reporting whether it landed.
+// With no fallback handler installed there is nowhere else for the line to go,
+// so it waits for a reader as this type always used to.
+//
+// Otherwise the send is bounded: it covers the race where the reader detaches
+// mid-send, and a dropped line is far better than a stalled dispatch goroutine,
+// since a stall would stop the fallback from answering control requests.
+func (mp *ManagedProcess) deliver(line []byte, waitForReader bool) bool {
+	if mp.readers.Load() <= 0 && !waitForReader {
+		return false
+	}
+	var timeout <-chan time.Time
+	if !waitForReader {
+		timer := time.NewTimer(deliverTimeout)
+		defer timer.Stop()
+		timeout = timer.C
+	}
+	select {
+	case mp.stdoutLines <- line:
+		return true
+	case <-timeout:
+		return false
+	case <-mp.ctx.Done():
+		return true
+	}
+}
+
 func (mp *ManagedProcess) Alive() bool {
 	return mp.alive.Load()
 }
@@ -185,6 +263,7 @@ func (mp *ManagedProcess) LastUsedAt() time.Time {
 }
 
 func (mp *ManagedProcess) readStdout(r io.Reader) {
+	defer close(mp.rawLines)
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 	for scanner.Scan() {
@@ -195,7 +274,7 @@ func (mp *ManagedProcess) readStdout(r io.Reader) {
 		copied := make([]byte, len(line))
 		copy(copied, line)
 		select {
-		case mp.stdoutLines <- copied:
+		case mp.rawLines <- copied:
 		case <-mp.ctx.Done():
 			return
 		}
@@ -212,7 +291,6 @@ func (mp *ManagedProcess) readStderr(r io.Reader) {
 func (mp *ManagedProcess) waitForExit() {
 	_ = mp.cmd.Wait()
 	mp.alive.Store(false)
-	close(mp.stdoutLines)
 	close(mp.done)
 	mp.pool.remove(mp)
 	slog.Info("procpool: process exited", "key", mp.Key)

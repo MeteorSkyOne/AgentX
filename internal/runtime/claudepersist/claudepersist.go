@@ -63,6 +63,7 @@ func (r *Runtime) StartSession(ctx context.Context, req runtime.StartSessionRequ
 			proc.Kill()
 			return nil, err
 		}
+		proc.SetFallbackHandler(newBackgroundFallback(proc, key))
 	}
 	return sess, nil
 }
