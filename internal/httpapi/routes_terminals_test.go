@@ -158,7 +158,7 @@ func TestWorkspaceTerminalWebSocketReportsProtocolErrors(t *testing.T) {
 func createTerminalTestUserSession(t *testing.T, ctx context.Context, env testEnv, orgID string, role domain.Role) string {
 	t.Helper()
 	password := "terminal-password-123"
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
 	if err != nil {
 		t.Fatal(err)
 	}

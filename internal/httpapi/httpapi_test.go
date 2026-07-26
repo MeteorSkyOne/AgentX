@@ -602,7 +602,7 @@ func TestHTTPServerSettingsAuthorizeAndPersistTLS(t *testing.T) {
 	getJSON(t, env.server.URL+"/api/organizations/not-a-real-org/server-settings", bootstrap.SessionToken, http.StatusNotFound, nil)
 
 	memberPassword := "member-password-123"
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte(memberPassword), bcrypt.DefaultCost)
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(memberPassword), bcrypt.MinCost)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -679,7 +679,7 @@ func TestHTTPServerRestartAuthorizeAndTriggers(t *testing.T) {
 	postJSON(t, env.server.URL+"/api/organizations/not-a-real-org/server-settings/restart", bootstrap.SessionToken, nil, http.StatusNotFound, nil)
 
 	memberPassword := "member-password-123"
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte(memberPassword), bcrypt.DefaultCost)
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(memberPassword), bcrypt.MinCost)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2293,6 +2293,11 @@ func newTestEnvWithOptions(t *testing.T, opts app.Options) testEnv {
 	}
 	if opts.DataDir == "" {
 		opts.DataDir = t.TempDir()
+	}
+	if opts.PasswordHashCost == 0 {
+		// bcrypt at DefaultCost takes seconds under -race; MinCost keeps
+		// setupApp within the short per-test context deadlines.
+		opts.PasswordHashCost = bcrypt.MinCost
 	}
 	a := app.New(st, bus, opts)
 	t.Cleanup(a.StopTerminalManager)

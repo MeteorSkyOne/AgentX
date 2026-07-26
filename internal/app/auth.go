@@ -99,7 +99,7 @@ func (a *App) bootstrapAdmin(ctx context.Context, req SetupAdminRequest) (Bootst
 	if err := validatePassword(req.Password); err != nil {
 		return BootstrapResult{}, err
 	}
-	passwordHashBytes, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	passwordHashBytes, err := bcrypt.GenerateFromPassword([]byte(req.Password), a.passwordHashCost())
 	if err != nil {
 		return BootstrapResult{}, err
 	}
@@ -331,7 +331,7 @@ func (a *App) ResetAdmin(ctx context.Context, req ResetAdminRequest) (domain.Use
 	if err := validatePassword(req.Password); err != nil {
 		return domain.User{}, err
 	}
-	passwordHashBytes, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	passwordHashBytes, err := bcrypt.GenerateFromPassword([]byte(req.Password), a.passwordHashCost())
 	if err != nil {
 		return domain.User{}, err
 	}
@@ -387,6 +387,14 @@ func (a *App) UserForToken(ctx context.Context, token string) (domain.User, erro
 		return domain.User{}, err
 	}
 	return user, nil
+}
+
+func (a *App) passwordHashCost() int {
+	cost := a.opts.PasswordHashCost
+	if cost < bcrypt.MinCost || cost > bcrypt.MaxCost {
+		return bcrypt.DefaultCost
+	}
+	return cost
 }
 
 func normalizeUsername(value string) (string, error) {
