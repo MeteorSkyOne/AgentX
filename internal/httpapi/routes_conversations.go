@@ -307,6 +307,51 @@ type retryRunRequest struct {
 	AgentID string `json:"agent_id"`
 }
 
+type stopSubagentRequest struct {
+	ToolCallID string `json:"tool_call_id"`
+}
+
+func (s *Server) handleStopSubagent(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	conversationType, ok := parseConversationType(chi.URLParam(r, "type"))
+	if !ok {
+		writeError(w, http.StatusBadRequest, "unknown conversation type")
+		return
+	}
+
+	conversationID := chi.URLParam(r, "id")
+	organizationID, ok, err := s.authorizedConversationOrganizationID(r, userID, conversationType, conversationID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	} else if !ok {
+		writeError(w, http.StatusNotFound, "conversation not found")
+		return
+	}
+
+	var req stopSubagentRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "malformed JSON")
+		return
+	}
+	if strings.TrimSpace(req.ToolCallID) == "" {
+		writeError(w, http.StatusBadRequest, "tool_call_id is required")
+		return
+	}
+
+	if err := s.app.StopSubagent(r.Context(), organizationID, conversationType, conversationID, req.ToolCallID); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleInputResponse(w http.ResponseWriter, r *http.Request) {
 	userID, ok := userIDFromContext(r.Context())
 	if !ok {

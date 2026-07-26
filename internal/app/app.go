@@ -309,6 +309,44 @@ func (a *App) RespondToInputRequest(_ context.Context, conversationType domain.C
 	return pq.session.RespondToInputRequest(questionID, answer)
 }
 
+// StopSubagent cancels the running subagent spawned by the given tool call,
+// searching the conversation's active runs for a session that supports it.
+func (a *App) StopSubagent(ctx context.Context, organizationID string, conversationType domain.ConversationType, conversationID string, toolCallID string) error {
+	var sessions []agentruntime.SubagentStopper
+	a.activeRunsMu.Lock()
+	for key, runs := range a.activeRuns {
+		if key.conversationType != conversationType || key.conversationID != conversationID {
+			continue
+		}
+		for _, run := range runs {
+			run.mu.Lock()
+			session := run.session
+			org := run.organizationID
+			run.mu.Unlock()
+			if org != organizationID || session == nil {
+				continue
+			}
+			if stopper, ok := session.(agentruntime.SubagentStopper); ok {
+				sessions = append(sessions, stopper)
+			}
+		}
+	}
+	a.activeRunsMu.Unlock()
+
+	if len(sessions) == 0 {
+		return errors.New("no active agent run supports stopping subagents")
+	}
+	var lastErr error
+	for _, stopper := range sessions {
+		if err := stopper.StopSubagent(ctx, toolCallID); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+	return lastErr
+}
+
 func (a *App) registerActiveAgentRun(key activeRunKey, run *activeAgentRun) {
 	a.runtimeResetMu.Lock()
 	defer a.runtimeResetMu.Unlock()

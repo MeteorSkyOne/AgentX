@@ -49,19 +49,23 @@ type persistentSession struct {
 	pendingControlInput map[string]any
 	modeOverride        string
 	baseMode            string
+	// taskByToolUse maps a spawning tool call to its running background task,
+	// so StopSubagent can be invoked from outside the turn goroutine.
+	taskByToolUse map[string]string
 }
 
 func newPersistentSession(proc *procpool.ManagedProcess, key string, rt *Runtime) *persistentSession {
 	fallbackID := "claude:" + key
 	return &persistentSession{
-		process:      proc,
-		key:          key,
-		rt:           rt,
-		events:       make(chan runtime.Event, 64),
-		sessionID:    fallbackID,
-		alive:        true,
-		done:         make(chan struct{}),
-		pendingInput: make(chan inputAnswer, 1),
+		process:       proc,
+		key:           key,
+		rt:            rt,
+		events:        make(chan runtime.Event, 64),
+		sessionID:     fallbackID,
+		alive:         true,
+		done:          make(chan struct{}),
+		pendingInput:  make(chan inputAnswer, 1),
+		taskByToolUse: map[string]string{},
 	}
 }
 
@@ -166,6 +170,57 @@ func (s *persistentSession) RespondToInputRequest(questionID string, answer stri
 	default:
 		return errors.New("no pending input request")
 	}
+}
+
+// recordTaskSignals mirrors the turn's task lifecycle into a session-level map
+// so StopSubagent, called from outside the turn goroutine, can resolve which
+// task a tool call spawned.
+func (s *persistentSession) recordTaskSignals(outcome claude.TrackOutcome) {
+	if len(outcome.Started) == 0 && len(outcome.Finished) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, signal := range outcome.Started {
+		if signal.ToolUseID != "" {
+			s.taskByToolUse[signal.ToolUseID] = signal.TaskID
+		}
+	}
+	for _, signal := range outcome.Finished {
+		if signal.ToolUseID != "" {
+			delete(s.taskByToolUse, signal.ToolUseID)
+		}
+	}
+}
+
+// StopSubagent asks Claude Code to stop the background task spawned by the
+// given tool call. The CLI acknowledges by emitting the task's terminal
+// lifecycle messages, which flow through the normal turn handling — the
+// subagent flips to done in the UI and the turn drains as usual.
+func (s *persistentSession) StopSubagent(_ context.Context, toolCallID string) error {
+	s.mu.Lock()
+	taskID, ok := s.taskByToolUse[toolCallID]
+	alive := s.alive
+	s.mu.Unlock()
+	if !alive {
+		return procpool.ErrProcessDead
+	}
+	if !ok {
+		return errors.New("no running subagent for this tool call")
+	}
+	msg := map[string]any{
+		"type":       "control_request",
+		"request_id": id.New("ctrl"),
+		"request": map[string]any{
+			"subtype": "stop_task",
+			"task_id": taskID,
+		},
+	}
+	if err := s.process.WriteJSON(msg); err != nil {
+		return err
+	}
+	slog.Info("claudepersist: requested subagent stop", "key", s.key, "task_id", taskID, "tool_call_id", toolCallID)
+	return nil
 }
 
 func (s *persistentSession) ContextUsage(ctx context.Context) (*runtime.ContextUsage, error) {
@@ -466,7 +521,12 @@ func (s *persistentSession) handleLine(line []byte, state *claudeTurnState) (boo
 
 	switch claude.StringValue(payload, "type") {
 	case "system":
-		state.trackSystemMessage(payload)
+		outcome := state.trackSystemMessage(payload)
+		s.recordTaskSignals(outcome)
+		if items := claude.SubagentSignalItems(outcome); len(items) > 0 {
+			state.processItemCount += len(items)
+			s.emit(runtime.Event{Type: runtime.EventDelta, Process: items})
+		}
 		return false, nil
 
 	case "assistant", "user":
@@ -563,8 +623,12 @@ type claudeTurnState struct {
 	lastThinkingText  string
 	processItemCount  int
 	pendingCompletion *runtime.Event
-	settleTimer       *time.Timer
-	maxWaitTimer      *time.Timer
+	// usageAcc holds token usage from results that are no longer the pending
+	// completion — a turn spanning background subagents sees several results,
+	// and each one's usage must survive into the final tally.
+	usageAcc     *runtime.Usage
+	settleTimer  *time.Timer
+	maxWaitTimer *time.Timer
 
 	background      *claude.BackgroundTracker
 	backgroundTimer *time.Timer
@@ -579,12 +643,25 @@ func newClaudeTurnState() *claudeTurnState {
 
 // trackSystemMessage maintains the background task set from Claude Code's task
 // lifecycle messages.
-func (s *claudeTurnState) trackSystemMessage(payload map[string]any) {
-	if s.background.TrackSystemMessage(payload) {
+func (s *claudeTurnState) trackSystemMessage(payload map[string]any) claude.TrackOutcome {
+	outcome := s.background.TrackSystemMessage(payload)
+	if outcome.Drained {
 		// The main agent is about to be woken up to report on the finished
-		// task, so whatever result we are holding is not the last word.
-		s.pendingCompletion = nil
+		// task, so whatever result we are holding is not the last word — but
+		// its usage still counts toward the turn.
+		s.retirePendingCompletion()
 	}
+	return outcome
+}
+
+// retirePendingCompletion discards a held result as stale while folding its
+// usage into the turn's tally.
+func (s *claudeTurnState) retirePendingCompletion() {
+	if s.pendingCompletion == nil {
+		return
+	}
+	s.usageAcc = claude.MergeUsage(s.usageAcc, s.pendingCompletion.Usage)
+	s.pendingCompletion = nil
 }
 
 // waitingOnBackground reports whether the turn must stay open regardless of any
@@ -603,8 +680,6 @@ func (s *claudeTurnState) appendText(text string) {
 	}
 	s.textBuf.WriteString(text)
 }
-
-
 
 func (s *claudeTurnState) trackProcess(process []runtime.ProcessItem) {
 	for _, item := range process {
@@ -628,6 +703,7 @@ func (s *claudeTurnState) hasOpenTools() bool {
 }
 
 func (s *claudeTurnState) deferCompletion(evt runtime.Event) {
+	s.retirePendingCompletion()
 	s.pendingCompletion = &evt
 	s.background.NoteResult()
 	// Reset rather than create-once: a turn that spans background subagents
@@ -732,6 +808,7 @@ func (s *claudeTurnState) completionEvent() runtime.Event {
 			evt.Text = accumulated
 		}
 	}
+	evt.Usage = claude.MergeUsage(s.usageAcc, evt.Usage)
 	s.stopSettleTimer()
 	s.stopBackgroundTimer()
 	if s.maxWaitTimer != nil {

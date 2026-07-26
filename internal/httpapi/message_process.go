@@ -110,8 +110,12 @@ func processItemSummary(item map[string]any, index int) map[string]any {
 	// Kept so the UI can group a subagent's work under the call that spawned it.
 	copyStringField(summary, item, "parent_tool_call_id")
 
-	if stringValue(item, "type") == "thinking" {
+	switch stringValue(item, "type") {
+	case "thinking":
 		copyStringField(summary, item, "text")
+		return summary
+	case "subagent_started", "subagent_completed":
+		// Pure state signals: everything they carry survives the summary.
 		return summary
 	}
 	summary["has_detail"] = true

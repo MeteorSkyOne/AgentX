@@ -2,12 +2,14 @@ package claudepersist
 
 import (
 	"context"
+	"encoding/json"
 	"os/exec"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/meteorsky/agentx/internal/runtime"
+	"github.com/meteorsky/agentx/internal/runtime/claude"
 	"github.com/meteorsky/agentx/internal/runtime/procpool"
 )
 
@@ -73,7 +75,7 @@ echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_t
 echo '{"type":"assistant","message":{"content":[{"type":"text","text":"launched"}]}}'
 echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_task1","content":"Async agent launched"}]}}'
 echo '{"type":"system","subtype":"task_started","task_id":"task-1","tool_use_id":"toolu_task1","subagent_type":"Explore"}'
-echo '{"type":"result","result":"launched","subtype":"success"}'
+echo '{"type":"result","result":"launched","subtype":"success","usage":{"input_tokens":10,"output_tokens":5}}'
 sleep 0.4
 echo '{"type":"assistant","parent_tool_use_id":"toolu_task1","message":{"content":[{"type":"text","text":"SUBAGENT INTERNAL CHATTER"}]}}'
 echo '{"type":"assistant","parent_tool_use_id":"toolu_task1","message":{"content":[{"type":"tool_use","id":"toolu_sub1","name":"Bash","input":{}}]}}'
@@ -81,7 +83,7 @@ sleep 0.2
 echo '{"type":"system","subtype":"task_notification","task_id":"task-1","status":"completed","summary":"did the thing"}'
 sleep 0.3
 echo '{"type":"assistant","message":{"content":[{"type":"text","text":"the subagent finished and here is the report"}]}}'
-echo '{"type":"result","result":"the subagent finished and here is the report","subtype":"success"}'
+echo '{"type":"result","result":"the subagent finished and here is the report","subtype":"success","usage":{"input_tokens":3,"output_tokens":7}}'
 sleep 10
 `
 	events := runTurn(t, "bg-turn", script)
@@ -96,17 +98,32 @@ sleep 10
 	if strings.Contains(completed.Text, "SUBAGENT INTERNAL CHATTER") {
 		t.Errorf("subagent chatter leaked into the main reply: %q", completed.Text)
 	}
+	if completed.Usage == nil || completed.Usage.InputTokens == nil || *completed.Usage.InputTokens != 13 {
+		t.Errorf("expected usage summed across both results, got %#v", completed.Usage)
+	}
+	if completed.Usage == nil || completed.Usage.OutputTokens == nil || *completed.Usage.OutputTokens != 12 {
+		t.Errorf("expected output tokens summed across both results, got %#v", completed.Usage)
+	}
 
-	var tagged int
+	var tagged, started, finished int
 	for _, evt := range events {
 		for _, item := range evt.Process {
 			if item.ParentToolCallID == "toolu_task1" {
 				tagged++
 			}
+			if item.Type == "subagent_started" && item.ToolCallID == "toolu_task1" {
+				started++
+			}
+			if item.Type == "subagent_completed" && item.ToolCallID == "toolu_task1" {
+				finished++
+			}
 		}
 	}
 	if tagged == 0 {
 		t.Error("expected subagent process items to be tagged with their parent tool call")
+	}
+	if started != 1 || finished != 1 {
+		t.Errorf("expected one started and one completed subagent signal, got %d/%d", started, finished)
 	}
 }
 
@@ -163,6 +180,65 @@ sleep 30
 	}
 	if elapsed > 10*time.Second {
 		t.Errorf("silent background task hung the turn for %s", elapsed)
+	}
+}
+
+// StopSubagent resolves the spawning tool call to its task and asks the CLI to
+// stop it via a stop_task control request.
+func TestStopSubagentWritesStopTaskControlRequest(t *testing.T) {
+	pool := procpool.New(procpool.Options{IdleTimeout: 1 * time.Hour})
+	t.Cleanup(func() { pool.Shutdown(context.Background()) })
+
+	// cat echoes stdin back to stdout, letting the test read what was written.
+	proc, _, err := pool.GetOrCreate("stop-subagent", func(ctx context.Context) *exec.Cmd {
+		return exec.CommandContext(ctx, "cat")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rt := &Runtime{opts: Options{Command: "cat"}, pool: pool}
+	sess := newPersistentSession(proc, "stop-subagent", rt)
+	sess.recordTaskSignals(claude.TrackOutcome{
+		Started: []claude.TaskSignal{{TaskID: "task-1", ToolUseID: "toolu_task1"}},
+	})
+
+	if err := sess.StopSubagent(context.Background(), "toolu_unknown"); err == nil {
+		t.Error("expected an error for a tool call with no running subagent")
+	}
+
+	proc.AttachReader()
+	defer proc.DetachReader()
+	if err := sess.StopSubagent(context.Background(), "toolu_task1"); err != nil {
+		t.Fatalf("StopSubagent: %v", err)
+	}
+
+	select {
+	case line := <-proc.StdoutLines():
+		var msg map[string]any
+		if err := json.Unmarshal(line, &msg); err != nil {
+			t.Fatalf("control request is not JSON: %v (%s)", err, line)
+		}
+		if got := claude.StringValue(msg, "type"); got != "control_request" {
+			t.Errorf("expected control_request, got %q", got)
+		}
+		request, _ := msg["request"].(map[string]any)
+		if got := claude.StringValue(request, "subtype"); got != "stop_task" {
+			t.Errorf("expected stop_task subtype, got %q", got)
+		}
+		if got := claude.StringValue(request, "task_id"); got != "task-1" {
+			t.Errorf("expected task-1, got %q", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no control request reached the process")
+	}
+
+	// A finished task can no longer be stopped.
+	sess.recordTaskSignals(claude.TrackOutcome{
+		Finished: []claude.TaskSignal{{TaskID: "task-1", ToolUseID: "toolu_task1", Status: "completed"}},
+	})
+	if err := sess.StopSubagent(context.Background(), "toolu_task1"); err == nil {
+		t.Error("expected an error after the subagent finished")
 	}
 }
 

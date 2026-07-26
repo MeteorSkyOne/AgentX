@@ -38,10 +38,12 @@ func (h *lineHandler) HandleLine(line []byte) ([]runtime.Event, error) {
 	h.setSessionID(stringValue(payload, "session_id"))
 	switch stringValue(payload, "type") {
 	case "system":
-		if h.background.TrackSystemMessage(payload) {
-			// The main agent is about to be woken up to report on the finished
-			// task, so the result we are holding is not the last word.
-			h.pendingCompletion = nil
+		// A held result that turns out stale is harmless here: completion only
+		// happens in Finish, and mergeCompletion keeps the newest text while
+		// summing usage, so the held result must survive a task draining.
+		outcome := h.background.TrackSystemMessage(payload)
+		if items := SubagentSignalItems(outcome); len(items) > 0 {
+			return []runtime.Event{{Type: runtime.EventDelta, Process: items}}, nil
 		}
 		return nil, nil
 	case "assistant", "user":
@@ -135,11 +137,13 @@ func mergeCompletion(held *runtime.Event, next runtime.Event) *runtime.Event {
 	if held == nil {
 		return &next
 	}
-	next.Usage = mergeUsage(held.Usage, next.Usage)
+	next.Usage = MergeUsage(held.Usage, next.Usage)
 	return &next
 }
 
-func mergeUsage(a *runtime.Usage, b *runtime.Usage) *runtime.Usage {
+// MergeUsage sums token counts, durations, and cost across two results of the
+// same turn, preferring the newer result's model. Either side may be nil.
+func MergeUsage(a *runtime.Usage, b *runtime.Usage) *runtime.Usage {
 	if a == nil {
 		return b
 	}

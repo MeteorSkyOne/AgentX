@@ -208,6 +208,12 @@ type Shutdowner interface {
 	Shutdown(ctx context.Context) error
 }
 
+// SubagentStopper cancels a running subagent, identified by the tool call
+// that spawned it, without interrupting the main agent's turn.
+type SubagentStopper interface {
+	StopSubagent(ctx context.Context, toolCallID string) error
+}
+
 type ProcessResetter interface {
 	ResetProcesses(ctx context.Context) error
 }
