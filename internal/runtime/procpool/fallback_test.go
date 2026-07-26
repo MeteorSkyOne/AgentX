@@ -2,6 +2,7 @@ package procpool
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -97,6 +98,52 @@ func TestLinesWaitForReaderWhenNoFallbackInstalled(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("line emitted before a reader attached was lost")
+	}
+}
+
+// A reader that is attached but momentarily not consuming — a turn blocked on
+// a user's answer — must not lose lines to the fallback handler, even once the
+// channel buffers fill up.
+func TestSlowAttachedReaderDoesNotLoseLinesToFallback(t *testing.T) {
+	pool := New(Options{IdleTimeout: 1 * time.Hour})
+	defer pool.Shutdown(context.Background())
+
+	proc, _, err := pool.GetOrCreate("slow-reader", echoStartFunc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fellBack := make(chan string, 256)
+	proc.SetFallbackHandler(func(line []byte) {
+		fellBack <- string(line)
+	})
+
+	proc.AttachReader()
+	defer proc.DetachReader()
+
+	// More lines than the raw + stdout channel buffers combined, so dispatch
+	// has to block on a full channel while the reader stays idle.
+	const total = 200
+	for i := 0; i < total; i++ {
+		if err := proc.WriteBytes([]byte(fmt.Sprintf("line-%d\n", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(600 * time.Millisecond)
+
+	deadline := time.After(5 * time.Second)
+	for received := 0; received < total; received++ {
+		select {
+		case <-proc.StdoutLines():
+		case <-deadline:
+			t.Fatalf("received only %d of %d lines before timing out", received, total)
+		}
+	}
+
+	select {
+	case line := <-fellBack:
+		t.Fatalf("line diverted to fallback while a reader was attached: %q", line)
+	default:
 	}
 }
 

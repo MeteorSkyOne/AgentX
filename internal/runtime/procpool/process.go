@@ -16,9 +16,9 @@ import (
 	"time"
 )
 
-// deliverTimeout bounds how long dispatch waits for an attached reader before
-// treating a line as unclaimed.
-const deliverTimeout = 250 * time.Millisecond
+// deliverRecheckInterval is how often a blocked dispatch re-checks whether a
+// reader is still attached before routing a line to the fallback handler.
+const deliverRecheckInterval = 250 * time.Millisecond
 
 type ManagedProcess struct {
 	Key  string
@@ -208,26 +208,34 @@ func (mp *ManagedProcess) dispatch() {
 // With no fallback handler installed there is nowhere else for the line to go,
 // so it waits for a reader as this type always used to.
 //
-// Otherwise the send is bounded: it covers the race where the reader detaches
-// mid-send, and a dropped line is far better than a stalled dispatch goroutine,
-// since a stall would stop the fallback from answering control requests.
+// While a reader is attached the send also waits indefinitely, even if the
+// reader is momentarily not consuming (e.g. a turn blocked on a user's answer
+// to AskUserQuestion): dropping the line would silently lose agent output. The
+// wait is chunked so a reader that detaches mid-send is noticed and the line
+// is rerouted to the fallback instead of stalling dispatch forever.
 func (mp *ManagedProcess) deliver(line []byte, waitForReader bool) bool {
-	if mp.readers.Load() <= 0 && !waitForReader {
-		return false
-	}
-	var timeout <-chan time.Time
-	if !waitForReader {
-		timer := time.NewTimer(deliverTimeout)
-		defer timer.Stop()
-		timeout = timer.C
-	}
-	select {
-	case mp.stdoutLines <- line:
-		return true
-	case <-timeout:
-		return false
-	case <-mp.ctx.Done():
-		return true
+	for {
+		if !waitForReader && mp.readers.Load() <= 0 {
+			return false
+		}
+		if waitForReader {
+			select {
+			case mp.stdoutLines <- line:
+				return true
+			case <-mp.ctx.Done():
+				return true
+			}
+		}
+		timer := time.NewTimer(deliverRecheckInterval)
+		select {
+		case mp.stdoutLines <- line:
+			timer.Stop()
+			return true
+		case <-timer.C:
+		case <-mp.ctx.Done():
+			timer.Stop()
+			return true
+		}
 	}
 }
 

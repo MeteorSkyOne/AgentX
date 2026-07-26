@@ -23,10 +23,20 @@ func newBackgroundFallback(proc *procpool.ManagedProcess, key string) func([]byt
 		if err := json.Unmarshal(line, &payload); err != nil {
 			return
 		}
-		slog.Debug("claudepersist: line arrived with no reader attached", "key", key,
-			"type", claude.StringValue(payload, "type"),
-			"subtype", claude.StringValue(payload, "subtype"))
-		if claude.StringValue(payload, "type") != "control_request" {
+		payloadType := claude.StringValue(payload, "type")
+		if payloadType != "control_request" {
+			// Anything the agent says outside a turn is lost — typically the
+			// follow-up report of a subagent whose turn already timed out. That
+			// is real output disappearing, so make it visible in the logs.
+			switch payloadType {
+			case "assistant", "user", "result":
+				slog.Warn("claudepersist: discarding agent output that arrived outside any turn",
+					"key", key, "type", payloadType,
+					"parent_tool_use_id", claude.StringValue(payload, "parent_tool_use_id"))
+			default:
+				slog.Debug("claudepersist: line arrived with no reader attached", "key", key,
+					"type", payloadType, "subtype", claude.StringValue(payload, "subtype"))
+			}
 			return
 		}
 		requestID := claude.StringValue(payload, "request_id")
