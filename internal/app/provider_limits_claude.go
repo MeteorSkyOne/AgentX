@@ -127,14 +127,20 @@ func claudeWindowsFromStatusPayload(payload map[string]any) []ProviderLimitWindo
 	if limits == nil {
 		return nil
 	}
-	return claudeWindowsFromLimitMap(limits, "used_percentage", "usedPercent", "used_percent", "utilization")
+	windows := claudeWindowsFromLimitMap(limits, "used_percentage", "usedPercent", "used_percent", "utilization")
+	if len(windows) == 0 {
+		return nil
+	}
+	return append(windows, claudeScopedWindows(limits, payload)...)
 }
 
 func claudeWindowsFromUsagePayload(payload map[string]any) []ProviderLimitWindow {
+	container := payload
 	if usage := asMap(payload["usage"]); usage != nil {
-		payload = usage
+		container = usage
 	}
-	return claudeWindowsFromLimitMap(payload, "utilization", "used_percentage", "usedPercent", "used_percent")
+	windows := claudeWindowsFromLimitMap(container, "utilization", "used_percentage", "usedPercent", "used_percent")
+	return append(windows, claudeScopedWindows(container, payload)...)
 }
 
 func claudeWindowsFromLimitMap(limits map[string]any, usedKeys ...string) []ProviderLimitWindow {
@@ -184,6 +190,97 @@ func claudeWindowFromMap(fallback string, windowMinutes int, values map[string]a
 		WindowMinutes: windowMinutes,
 		ResetsAt:      resetsAt,
 	}, true
+}
+
+// claudeScopedWindows reads the structured "limits" array that Claude returns next to the
+// aggregate windows and keeps the entries scoped to a single model (Fable, Opus, Sonnet),
+// which the aggregate five_hour/seven_day windows do not cover.
+func claudeScopedWindows(containers ...map[string]any) []ProviderLimitWindow {
+	for _, container := range containers {
+		entries, ok := container["limits"].([]any)
+		if !ok {
+			continue
+		}
+		windows := make([]ProviderLimitWindow, 0, len(entries))
+		seen := make(map[string]struct{}, len(entries))
+		for _, raw := range entries {
+			entry := asMap(raw)
+			if entry == nil {
+				continue
+			}
+			model := claudeScopedModelName(entry)
+			if model == "" {
+				continue
+			}
+			window, ok := claudeScopedWindow(entry, model)
+			if !ok {
+				continue
+			}
+			if _, duplicate := seen[window.Kind]; duplicate {
+				continue
+			}
+			seen[window.Kind] = struct{}{}
+			windows = append(windows, window)
+		}
+		if len(windows) > 0 {
+			return windows
+		}
+	}
+	return nil
+}
+
+func claudeScopedModelName(entry map[string]any) string {
+	scope := asMap(entry["scope"])
+	if scope == nil {
+		return ""
+	}
+	model := asMap(scope["model"])
+	if model == nil {
+		return ""
+	}
+	return sanitizedAuthField(stringField(model, "display_name", "displayName", "name", "id"))
+}
+
+func claudeScopedWindow(entry map[string]any, model string) (ProviderLimitWindow, bool) {
+	windowMinutes := claudeScopedWindowMinutes(entry)
+	if windowMinutes <= 0 {
+		return ProviderLimitWindow{}, false
+	}
+	window, ok := claudeWindowFromMap("scoped", windowMinutes, entry, "percent", "utilization", "used_percentage", "usedPercent", "used_percent")
+	if !ok {
+		return ProviderLimitWindow{}, false
+	}
+	window.Kind += "_" + claudeScopedModelSlug(model)
+	window.Label += " · " + model
+	return window, true
+}
+
+func claudeScopedWindowMinutes(entry map[string]any) int {
+	group := strings.ToLower(strings.TrimSpace(stringField(entry, "group", "kind")))
+	switch {
+	case strings.HasPrefix(group, "weekly"), strings.HasPrefix(group, "seven_day"):
+		return claudeWeeklyWindowMinutes
+	case strings.HasPrefix(group, "session"), strings.HasPrefix(group, "five_hour"):
+		return claudeFiveHourWindowMinutes
+	default:
+		return 0
+	}
+}
+
+func claudeScopedModelSlug(model string) string {
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range strings.ToLower(strings.TrimSpace(model)) {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+			lastUnderscore = false
+		case !lastUnderscore && b.Len() > 0:
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	return strings.TrimSuffix(b.String(), "_")
 }
 
 func (s *providerLimitService) readClaudeUsageAPI(ctx context.Context, env map[string]string) (map[string]any, error) {

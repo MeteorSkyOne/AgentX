@@ -178,6 +178,60 @@ JSON
 	assertProviderLimitJSONRedacted(t, got, "person@example.com", "Secret Org", "secret-token")
 }
 
+func TestClaudeUsagePayloadIncludesScopedModelWindows(t *testing.T) {
+	var payload map[string]any
+	raw := `{
+		"five_hour": {"utilization": 20, "resets_at": "2030-01-01T00:00:00Z"},
+		"seven_day": {"utilization": 10, "resets_at": "2030-01-08T00:00:00Z"},
+		"seven_day_opus": null,
+		"limits": [
+			{"kind": "session", "group": "session", "percent": 20, "resets_at": "2030-01-01T00:00:00Z", "scope": null},
+			{"kind": "weekly_all", "group": "weekly", "percent": 10, "resets_at": "2030-01-08T00:00:00Z", "scope": null},
+			{"kind": "weekly_scoped", "group": "weekly", "percent": 15, "resets_at": "2030-01-08T00:00:00Z", "scope": {"model": {"id": null, "display_name": "Fable"}}}
+		]
+	}`
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+
+	windows := claudeWindowsFromUsagePayload(payload)
+	if len(windows) != 3 {
+		t.Fatalf("windows = %#v, want five-hour, weekly and Fable weekly", windows)
+	}
+	fable := windows[2]
+	if fable.Kind != "seven_day_fable" || fable.Label != "Weekly · Fable" || fable.WindowMinutes != claudeWeeklyWindowMinutes {
+		t.Fatalf("fable window = %#v", fable)
+	}
+	if fable.UsedPercent == nil || *fable.UsedPercent != 15 {
+		t.Fatalf("fable used percent = %#v", fable.UsedPercent)
+	}
+	if fable.ResetsAt == nil || !fable.ResetsAt.Equal(time.Date(2030, 1, 8, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("fable resets at = %#v", fable.ResetsAt)
+	}
+}
+
+func TestClaudeStatusPayloadIncludesScopedModelWindows(t *testing.T) {
+	var payload map[string]any
+	raw := `{
+		"loggedIn": true,
+		"rate_limits": {
+			"five_hour": {"used_percentage": 42, "resets_at": 1893456000},
+			"seven_day": {"used_percentage": 15, "resets_at": 1894060800},
+			"limits": [
+				{"kind": "weekly_scoped", "group": "weekly", "percent": 33, "resets_at": 1894060800, "scope": {"model": {"display_name": "Fable"}}}
+			]
+		}
+	}`
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+
+	windows := claudeWindowsFromStatusPayload(payload)
+	if len(windows) != 3 || windows[2].Kind != "seven_day_fable" || windows[2].UsedPercent == nil || *windows[2].UsedPercent != 33 {
+		t.Fatalf("windows = %#v", windows)
+	}
+}
+
 func TestProviderLimitServiceClaudeReadsStatusRateLimits(t *testing.T) {
 	script := writeExecutable(t, "claude", `#!/bin/sh
 cat <<'JSON'
