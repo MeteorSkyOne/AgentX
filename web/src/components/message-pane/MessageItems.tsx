@@ -107,7 +107,7 @@ export function TeamDiscussionItem({
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="min-w-0 border-l-2 border-border pl-2">
       <CollapsibleTrigger asChild>
-        <button className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-muted-foreground hover:bg-accent/40 hover:text-foreground">
+        <button className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground">
           {open ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
           <MessageSquare className="h-4 w-4 shrink-0" />
           <span className="min-w-0 flex-1 truncate">{title}</span>
@@ -288,7 +288,7 @@ function ConversationMessageItem({
 
   return (
     <div
-      className="group flex min-w-0 max-w-full gap-3 rounded-md px-1 py-1 hover:bg-accent/30 md:gap-4 md:px-2"
+      className="group flex min-w-0 max-w-full gap-3 rounded-md px-1 py-1 transition-colors hover:bg-muted/50 md:gap-4 md:px-2"
       data-message-id={message.id}
     >
       {!hideAvatar && (
