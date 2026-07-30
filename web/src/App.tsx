@@ -218,7 +218,11 @@ export default function App() {
   const threadsQuery = useQuery({
     queryKey: ["threads", selectedChannelID],
     queryFn: () => channelThreads(selectedChannelID as string),
-    enabled: hasSession && selectedChannel?.type === "thread"
+    enabled: hasSession && selectedChannel?.type === "thread",
+    // Threads have no realtime event, so poll to surface posts created elsewhere
+    // (scheduled forum post tasks, other members).
+    refetchInterval: 20000,
+    refetchIntervalInBackground: false
   });
 
   const agentsQuery = useQuery({

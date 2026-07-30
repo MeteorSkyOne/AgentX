@@ -1,7 +1,19 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { CalendarClock, CheckCircle2, Clock3, Pencil, Play, Plus, Trash2, XCircle } from "lucide-react";
 import {
+  CalendarClock,
+  CheckCircle2,
+  Clock3,
+  ExternalLink,
+  History,
+  Pencil,
+  Play,
+  Plus,
+  Trash2,
+  XCircle,
+} from "lucide-react";
+import {
+  channelThreads,
   createScheduledTask,
   deleteScheduledTask,
   runScheduledTask,
@@ -30,6 +42,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -41,6 +54,8 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
+const RUN_HISTORY_LIMIT = 100;
+
 type TaskDraft = {
   name: string;
   kind: ScheduledTaskKind;
@@ -48,6 +63,10 @@ type TaskDraft = {
   schedule: string;
   timezone: string;
   conversationKey: string;
+  forumChannelID: string;
+  postTitle: string;
+  freshContext: boolean;
+  notify: boolean;
   agentID: string;
   workspaceID: string;
   prompt: string;
@@ -69,6 +88,8 @@ export function TasksPanel({
   threads,
   activeConversation,
   agents,
+  onOpenChannel,
+  onOpenThread,
 }: {
   project?: Project;
   projectWorkspace?: Workspace;
@@ -76,11 +97,14 @@ export function TasksPanel({
   threads: Thread[];
   activeConversation?: ActiveConversation;
   agents: Agent[];
+  onOpenChannel?: (channel: Channel) => void;
+  onOpenThread?: (thread: Thread) => void;
 }) {
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<ScheduledTask | null>(null);
   const [selectedTaskID, setSelectedTaskID] = useState("");
+  const [historyTaskID, setHistoryTaskID] = useState("");
   const [draft, setDraft] = useState<TaskDraft>(() => blankDraft(projectWorkspace?.id));
   const [actionError, setActionError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -93,28 +117,45 @@ export function TasksPanel({
   });
   const tasks = tasksQuery.data ?? [];
   const selectedTask = tasks.find((task) => task.id === selectedTaskID) ?? tasks[0];
+  const historyTask = tasks.find((task) => task.id === historyTaskID);
   const runsQuery = useQuery({
     queryKey: ["scheduled-task-runs", selectedTask?.id],
     queryFn: () => scheduledTaskRuns(selectedTask!.id),
     enabled: Boolean(selectedTask?.id),
     refetchInterval: selectedTask ? 5000 : false,
   });
+  const historyQuery = useQuery({
+    queryKey: ["scheduled-task-runs", historyTask?.id, RUN_HISTORY_LIMIT],
+    queryFn: () => scheduledTaskRuns(historyTask!.id, RUN_HISTORY_LIMIT),
+    enabled: Boolean(historyTask?.id),
+    refetchInterval: historyTask ? 5000 : false,
+  });
   const conversationOptions = useMemo(
     () => buildConversationOptions(channels, threads, activeConversation),
     [channels, threads, activeConversation]
   );
+  const forumChannels = useMemo(() => channels.filter((channel) => channel.type === "thread"), [channels]);
   const enabledAgents = useMemo(() => agents.filter((agent) => agent.enabled), [agents]);
 
   function openCreateDialog() {
     setEditingTask(null);
-    setDraft(blankDraft(projectWorkspace?.id, defaultConversationKey(conversationOptions)));
+    setDraft(
+      blankDraft(projectWorkspace?.id, defaultConversationKey(conversationOptions), forumChannels[0]?.id)
+    );
     setActionError(null);
     setDialogOpen(true);
   }
 
   function openEditDialog(task: ScheduledTask) {
     setEditingTask(task);
-    setDraft(draftFromTask(task, projectWorkspace?.id, defaultConversationKey(conversationOptions)));
+    setDraft(
+      draftFromTask(
+        task,
+        projectWorkspace?.id,
+        defaultConversationKey(conversationOptions),
+        forumChannels[0]?.id
+      )
+    );
     setActionError(null);
     setDialogOpen(true);
   }
@@ -182,6 +223,45 @@ export function TasksPanel({
     }
   }
 
+  async function openRunTarget(task: ScheduledTask, run: ScheduledTaskRun) {
+    setActionError(null);
+    try {
+      if (run.thread_id) {
+        const channelID = task.kind === "forum_post" ? task.conversation_id : undefined;
+        const thread = await resolveThread(queryClient, run.thread_id, channelID, threads);
+        if (thread) onOpenThread?.(thread);
+        return;
+      }
+      if (task.conversation_type === "thread" && task.conversation_id) {
+        const thread = await resolveThread(queryClient, task.conversation_id, undefined, threads);
+        if (thread) onOpenThread?.(thread);
+        return;
+      }
+      if (task.conversation_type === "channel" && task.conversation_id) {
+        const channel = channels.find((item) => item.id === task.conversation_id);
+        if (channel) onOpenChannel?.(channel);
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Open run target failed");
+    }
+  }
+
+  // Only offer navigation when the target can actually be resolved: forum posts
+  // load threads from their forum channel, everything else must already be known.
+  function runTargetLabel(task: ScheduledTask, run: ScheduledTaskRun): string | undefined {
+    if (run.thread_id) {
+      if (task.kind === "forum_post" && task.conversation_id) return "Open post";
+      return threads.some((thread) => thread.id === run.thread_id) ? "Open post" : undefined;
+    }
+    if (task.conversation_type === "thread") {
+      return threads.some((thread) => thread.id === task.conversation_id) ? "Open thread" : undefined;
+    }
+    if (task.conversation_type === "channel") {
+      return channels.some((channel) => channel.id === task.conversation_id) ? "Open channel" : undefined;
+    }
+    return undefined;
+  }
+
   return (
     <section className="flex min-h-0 flex-1 flex-col bg-background" data-testid="tasks-panel">
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
@@ -219,6 +299,7 @@ export function TasksPanel({
                   onEdit={() => openEditDialog(task)}
                   onToggle={() => void toggleTask(task)}
                   onRun={() => void runNow(task)}
+                  onHistory={() => setHistoryTaskID(task.id)}
                   onDelete={() => void removeTask(task)}
                 />
               ))
@@ -226,7 +307,14 @@ export function TasksPanel({
           </div>
         </ScrollArea>
 
-        <RunHistory task={selectedTask} runs={runsQuery.data ?? []} loading={runsQuery.isLoading} />
+        <RunHistory
+          task={selectedTask}
+          runs={runsQuery.data ?? []}
+          loading={runsQuery.isLoading}
+          onShowAll={selectedTask ? () => setHistoryTaskID(selectedTask.id) : undefined}
+          onOpenTarget={openRunTarget}
+          runTargetLabel={runTargetLabel}
+        />
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -256,6 +344,7 @@ export function TasksPanel({
                   }
                 >
                   <option value="agent_prompt">Agent prompt</option>
+                  <option value="forum_post">Forum post</option>
                   <option value="shell_command">Shell command</option>
                 </Select>
               </div>
@@ -287,52 +376,7 @@ export function TasksPanel({
               Enabled
             </label>
 
-            {draft.kind === "agent_prompt" ? (
-              <>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label htmlFor="task-conversation">Conversation</Label>
-                    <Select
-                      id="task-conversation"
-                      value={draft.conversationKey}
-                      onChange={(event) =>
-                        setDraft((current) => ({ ...current, conversationKey: event.target.value }))
-                      }
-                    >
-                      {conversationOptions.map((option) => (
-                        <option key={option.key} value={option.key}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="task-agent">Agent</Label>
-                    <Select
-                      id="task-agent"
-                      value={draft.agentID}
-                      onChange={(event) => setDraft((current) => ({ ...current, agentID: event.target.value }))}
-                    >
-                      <option value="">All bound agents</option>
-                      {enabledAgents.map((agent) => (
-                        <option key={agent.id} value={agent.id}>
-                          {agent.name}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="task-prompt">Prompt</Label>
-                  <Textarea
-                    id="task-prompt"
-                    rows={7}
-                    value={draft.prompt}
-                    onChange={(event) => setDraft((current) => ({ ...current, prompt: event.target.value }))}
-                  />
-                </div>
-              </>
-            ) : (
+            {draft.kind === "shell_command" ? (
               <>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
                   <div className="grid gap-2">
@@ -367,16 +411,174 @@ export function TasksPanel({
                   />
                 </div>
               </>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {draft.kind === "forum_post" ? (
+                    <div className="grid gap-2">
+                      <Label htmlFor="task-forum">Forum</Label>
+                      <Select
+                        id="task-forum"
+                        value={draft.forumChannelID}
+                        onChange={(event) =>
+                          setDraft((current) => ({ ...current, forumChannelID: event.target.value }))
+                        }
+                      >
+                        {forumChannels.length === 0 && <option value="">No forum channels</option>}
+                        {forumChannels.map((channel) => (
+                          <option key={channel.id} value={channel.id}>
+                            #{channel.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  ) : (
+                    <div className="grid gap-2">
+                      <Label htmlFor="task-conversation">Conversation</Label>
+                      <Select
+                        id="task-conversation"
+                        value={draft.conversationKey}
+                        onChange={(event) =>
+                          setDraft((current) => ({ ...current, conversationKey: event.target.value }))
+                        }
+                      >
+                        {conversationOptions.map((option) => (
+                          <option key={option.key} value={option.key}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  )}
+                  <div className="grid gap-2">
+                    <Label htmlFor="task-agent">Agent</Label>
+                    <Select
+                      id="task-agent"
+                      value={draft.agentID}
+                      onChange={(event) => setDraft((current) => ({ ...current, agentID: event.target.value }))}
+                    >
+                      <option value="">All bound agents</option>
+                      {enabledAgents.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                </div>
+
+                {draft.kind === "forum_post" ? (
+                  <div className="grid gap-2">
+                    <Label htmlFor="task-post-title">Post title</Label>
+                    <Input
+                      id="task-post-title"
+                      value={draft.postTitle}
+                      onChange={(event) => setDraft((current) => ({ ...current, postTitle: event.target.value }))}
+                      placeholder="${task} · ${datetime}"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Placeholders: {"${task}"}, {"${date}"}, {"${time}"}, {"${datetime}"}. Each run opens a new
+                      post, so it always starts from an empty conversation.
+                    </p>
+                  </div>
+                ) : (
+                  <label className="flex items-start gap-2 text-sm">
+                    <Checkbox
+                      className="mt-0.5"
+                      checked={draft.freshContext}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, freshContext: event.target.checked }))
+                      }
+                    />
+                    <span>
+                      Fresh context
+                      <span className="block text-xs text-muted-foreground">
+                        Reset the agent session before each run, so no conversation history is sent.
+                      </span>
+                    </span>
+                  </label>
+                )}
+
+                <label className="flex items-start gap-2 text-sm">
+                  <Checkbox
+                    className="mt-0.5"
+                    checked={draft.notify}
+                    onChange={(event) => setDraft((current) => ({ ...current, notify: event.target.checked }))}
+                  />
+                  <span>
+                    Notify on reply
+                    <span className="block text-xs text-muted-foreground">
+                      Send webhook and browser notifications when this task's agents reply. Turn it off for
+                      routine upkeep runs.
+                    </span>
+                  </span>
+                </label>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="task-prompt">Prompt</Label>
+                  <Textarea
+                    id="task-prompt"
+                    rows={7}
+                    value={draft.prompt}
+                    onChange={(event) => setDraft((current) => ({ ...current, prompt: event.target.value }))}
+                  />
+                </div>
+              </>
             )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={pending}>
               Cancel
             </Button>
-            <Button onClick={() => void saveTask()} disabled={pending || !draft.name.trim() || !draft.schedule.trim()}>
+            <Button
+              onClick={() => void saveTask()}
+              disabled={
+                pending ||
+                !draft.name.trim() ||
+                !draft.schedule.trim() ||
+                (draft.kind === "forum_post" && !draft.forumChannelID)
+              }
+            >
               Save
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(historyTask)} onOpenChange={(open) => !open && setHistoryTaskID("")}>
+        <DialogContent className="max-h-[92vh] overflow-hidden sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Run history</DialogTitle>
+            <DialogDescription>
+              {historyTask ? `${historyTask.name} · last ${RUN_HISTORY_LIMIT} runs` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[65vh]">
+            <div className="space-y-3 pr-3">
+              {historyQuery.isLoading ? (
+                <div className="py-8 text-center text-sm text-muted-foreground">Loading runs...</div>
+              ) : (historyQuery.data ?? []).length === 0 ? (
+                <div className="py-8 text-center text-sm text-muted-foreground">No runs yet</div>
+              ) : (
+                (historyQuery.data ?? []).map((run) => (
+                  <RunRow
+                    key={run.id}
+                    run={run}
+                    detailed
+                    openLabel={historyTask ? runTargetLabel(historyTask, run) : undefined}
+                    onOpenTarget={
+                      historyTask
+                        ? () => {
+                            setHistoryTaskID("");
+                            void openRunTarget(historyTask, run);
+                          }
+                        : undefined
+                    }
+                  />
+                ))
+              )}
+            </div>
+          </ScrollArea>
         </DialogContent>
       </Dialog>
     </section>
@@ -391,6 +593,7 @@ function TaskRow({
   onEdit,
   onToggle,
   onRun,
+  onHistory,
   onDelete,
 }: {
   task: ScheduledTask;
@@ -400,6 +603,7 @@ function TaskRow({
   onEdit: () => void;
   onToggle: () => void;
   onRun: () => void;
+  onHistory: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -425,9 +629,11 @@ function TaskRow({
             <Badge variant={task.enabled ? "secondary" : "outline"}>{task.enabled ? "Enabled" : "Paused"}</Badge>
           </div>
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            <span>{task.kind === "agent_prompt" ? "Agent prompt" : "Shell command"}</span>
+            <span>{taskKindLabel(task.kind)}</span>
             <span>{task.schedule}</span>
             <span>{task.timezone}</span>
+            {task.fresh_context && <span>fresh context</span>}
+            {task.kind !== "shell_command" && !task.notify && <span>muted</span>}
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
             {task.next_run_at ? `Next ${formatDateTime(task.next_run_at)}` : "No scheduled run"}
@@ -439,6 +645,9 @@ function TaskRow({
           </IconButton>
           <IconButton title={task.enabled ? "Pause" : "Enable"} disabled={pending} onClick={onToggle}>
             <Clock3 className="h-4 w-4" />
+          </IconButton>
+          <IconButton title="Run history" onClick={onHistory}>
+            <History className="h-4 w-4" />
           </IconButton>
           <IconButton title="Edit" disabled={pending} onClick={onEdit}>
             <Pencil className="h-4 w-4" />
@@ -463,14 +672,28 @@ function RunHistory({
   task,
   runs,
   loading,
+  onShowAll,
+  onOpenTarget,
+  runTargetLabel,
 }: {
   task?: ScheduledTask;
   runs: ScheduledTaskRun[];
   loading: boolean;
+  onShowAll?: () => void;
+  onOpenTarget: (task: ScheduledTask, run: ScheduledTaskRun) => void | Promise<void>;
+  runTargetLabel: (task: ScheduledTask, run: ScheduledTaskRun) => string | undefined;
 }) {
   return (
     <aside className="min-h-0 bg-muted/10">
-      <div className="flex h-12 items-center border-b border-border px-4 text-sm font-semibold">Runs</div>
+      <div className="flex h-12 items-center justify-between border-b border-border px-4 text-sm font-semibold">
+        <span>Runs</span>
+        {onShowAll && (
+          <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs font-medium" onClick={onShowAll}>
+            <History className="h-3.5 w-3.5" />
+            View all
+          </Button>
+        )}
+      </div>
       <ScrollArea className="h-[calc(100%-3rem)]">
         <div className="space-y-3 p-3">
           {!task ? (
@@ -480,7 +703,14 @@ function RunHistory({
           ) : runs.length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">No runs yet</div>
           ) : (
-            runs.map((run) => <RunRow key={run.id} run={run} />)
+            runs.map((run) => (
+              <RunRow
+                key={run.id}
+                run={run}
+                openLabel={runTargetLabel(task, run)}
+                onOpenTarget={() => void onOpenTarget(task, run)}
+              />
+            ))
           )}
         </div>
       </ScrollArea>
@@ -488,7 +718,18 @@ function RunHistory({
   );
 }
 
-function RunRow({ run }: { run: ScheduledTaskRun }) {
+function RunRow({
+  run,
+  detailed,
+  openLabel,
+  onOpenTarget,
+}: {
+  run: ScheduledTaskRun;
+  detailed?: boolean;
+  openLabel?: string;
+  onOpenTarget?: () => void;
+}) {
+  const duration = formatDuration(run.started_at, run.finished_at);
   return (
     <div className="rounded-xl border-2 border-border bg-card p-3 shadow-chunk-xs">
       <div className="flex items-center justify-between gap-2">
@@ -496,9 +737,28 @@ function RunRow({ run }: { run: ScheduledTaskRun }) {
           <RunStatusIcon status={run.status} />
           <span className="truncate text-sm font-medium">{run.status}</span>
         </div>
-        <Badge variant="outline">{run.trigger}</Badge>
+        <div className="flex shrink-0 items-center gap-1">
+          <Badge variant="outline">{run.trigger}</Badge>
+          {openLabel && onOpenTarget && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 text-xs font-medium"
+              title={openLabel}
+              onClick={onOpenTarget}
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              {openLabel}
+            </Button>
+          )}
+        </div>
       </div>
-      <div className="mt-2 text-xs text-muted-foreground">{formatDateTime(run.started_at)}</div>
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span>{formatDateTime(run.started_at)}</span>
+        {duration && <span>{duration}</span>}
+        {detailed && run.scheduled_for && <span>due {formatDateTime(run.scheduled_for)}</span>}
+        {typeof run.exit_code === "number" && <span>exit {run.exit_code}</span>}
+      </div>
       {run.error && <div className="mt-2 text-xs text-destructive">{run.error}</div>}
       {run.stdout && <OutputBlock label="stdout" value={run.stdout} />}
       {run.stderr && <OutputBlock label="stderr" value={run.stderr} />}
@@ -550,7 +810,13 @@ function RunStatusIcon({ status }: { status: string }) {
   return <Clock3 className="h-4 w-4 text-muted-foreground" />;
 }
 
-function blankDraft(workspaceID = "", conversationKey = ""): TaskDraft {
+function taskKindLabel(kind: ScheduledTaskKind): string {
+  if (kind === "agent_prompt") return "Agent prompt";
+  if (kind === "forum_post") return "Forum post";
+  return "Shell command";
+}
+
+function blankDraft(workspaceID = "", conversationKey = "", forumChannelID = ""): TaskDraft {
   return {
     name: "",
     kind: "agent_prompt",
@@ -558,6 +824,10 @@ function blankDraft(workspaceID = "", conversationKey = ""): TaskDraft {
     schedule: "0 9 * * *",
     timezone: "UTC",
     conversationKey,
+    forumChannelID,
+    postTitle: "",
+    freshContext: false,
+    notify: true,
     agentID: "",
     workspaceID,
     prompt: "",
@@ -566,9 +836,14 @@ function blankDraft(workspaceID = "", conversationKey = ""): TaskDraft {
   };
 }
 
-function draftFromTask(task: ScheduledTask, workspaceID = "", fallbackConversationKey = ""): TaskDraft {
+function draftFromTask(
+  task: ScheduledTask,
+  workspaceID = "",
+  fallbackConversationKey = "",
+  fallbackForumChannelID = ""
+): TaskDraft {
   const conversationKey =
-    task.conversation_type && task.conversation_id
+    task.kind !== "forum_post" && task.conversation_type && task.conversation_id
       ? conversationKeyFor(task.conversation_type, task.conversation_id)
       : fallbackConversationKey;
   return {
@@ -578,6 +853,10 @@ function draftFromTask(task: ScheduledTask, workspaceID = "", fallbackConversati
     schedule: task.schedule,
     timezone: task.timezone || "UTC",
     conversationKey,
+    forumChannelID: task.kind === "forum_post" ? task.conversation_id ?? "" : fallbackForumChannelID,
+    postTitle: task.post_title ?? "",
+    freshContext: task.fresh_context,
+    notify: task.notify,
     agentID: task.agent_id ?? "",
     workspaceID: task.workspace_id ?? workspaceID,
     prompt: task.prompt ?? "",
@@ -588,18 +867,23 @@ function draftFromTask(task: ScheduledTask, workspaceID = "", fallbackConversati
 
 function payloadFromDraft(draft: TaskDraft): ScheduledTaskPayload {
   const conversation = parseConversationKey(draft.conversationKey);
+  const isForumPost = draft.kind === "forum_post";
+  const isShell = draft.kind === "shell_command";
   return {
     name: draft.name.trim(),
     kind: draft.kind,
     enabled: draft.enabled,
     schedule: draft.schedule.trim(),
     timezone: draft.timezone.trim() || "UTC",
-    conversation_type: draft.kind === "agent_prompt" ? conversation?.type ?? "" : "",
-    conversation_id: draft.kind === "agent_prompt" ? conversation?.id ?? "" : "",
-    agent_id: draft.kind === "agent_prompt" ? draft.agentID : "",
+    conversation_type: isShell ? "" : isForumPost ? "channel" : conversation?.type ?? "",
+    conversation_id: isShell ? "" : isForumPost ? draft.forumChannelID : conversation?.id ?? "",
+    agent_id: isShell ? "" : draft.agentID,
     workspace_id: draft.workspaceID.trim(),
-    prompt: draft.kind === "agent_prompt" ? draft.prompt : "",
-    command: draft.kind === "shell_command" ? draft.command : "",
+    prompt: isShell ? "" : draft.prompt,
+    command: isShell ? draft.command : "",
+    post_title: isForumPost ? draft.postTitle.trim() : "",
+    fresh_context: draft.kind === "agent_prompt" ? draft.freshContext : false,
+    notify: isShell ? true : draft.notify,
     timeout_seconds: Number(draft.timeoutSeconds) || 600,
   };
 }
@@ -652,10 +936,37 @@ function parseConversationKey(value: string): { type: ConversationType; id: stri
   return null;
 }
 
+async function resolveThread(
+  queryClient: QueryClient,
+  threadID: string,
+  channelID: string | undefined,
+  known: Thread[]
+): Promise<Thread | undefined> {
+  const local = known.find((thread) => thread.id === threadID);
+  if (local || !channelID) return local;
+  const list = await queryClient.fetchQuery({
+    queryKey: ["threads", channelID],
+    queryFn: () => channelThreads(channelID),
+  });
+  return list.find((thread) => thread.id === threadID);
+}
+
 function formatDateTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+function formatDuration(startedAt: string, finishedAt?: string): string | undefined {
+  if (!finishedAt) return undefined;
+  const start = new Date(startedAt).getTime();
+  const end = new Date(finishedAt).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return undefined;
+  const seconds = Math.round((end - start) / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
 async function invalidateTasks(queryClient: QueryClient, projectID: string, taskID: string) {

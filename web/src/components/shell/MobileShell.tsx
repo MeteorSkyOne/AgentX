@@ -485,6 +485,8 @@ export function MobileShell({
               threads={threads}
               activeConversation={activeConversation}
               agents={activeAgents}
+              onOpenChannel={onSelectChannel}
+              onOpenThread={onSelectThread}
             />
           ) : mainView === "roadmap" ? (
             <RoadmapPanel project={project} />

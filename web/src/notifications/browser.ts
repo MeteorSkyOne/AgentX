@@ -44,6 +44,7 @@ export function shouldShowBrowserNotification(
   return (
     message.sender_type === "bot" &&
     !isTeamDiscussionMessage(message) &&
+    message.metadata?.suppress_notifications !== true &&
     browserNotificationPermission(runtime) === "granted" &&
     pageIsInactive(runtime)
   );

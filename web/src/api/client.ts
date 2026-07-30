@@ -407,6 +407,9 @@ export type ScheduledTaskPayload = {
   workspace_id?: string;
   prompt?: string;
   command?: string;
+  post_title?: string;
+  fresh_context?: boolean;
+  notify?: boolean;
   timeout_seconds: number;
 };
 

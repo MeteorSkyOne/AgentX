@@ -64,6 +64,7 @@ export interface MessageMetadata {
   metrics?: MessageMetricsSummary;
   team?: TeamMetadata;
   error?: string;
+  suppress_notifications?: boolean;
   [key: string]: JsonValue | ProcessItem[] | MessageMetricsSummary | TeamMetadata | undefined;
 }
 
@@ -258,7 +259,7 @@ export interface Project {
   updated_at: string;
 }
 
-export type ScheduledTaskKind = "agent_prompt" | "shell_command";
+export type ScheduledTaskKind = "agent_prompt" | "forum_post" | "shell_command";
 export type ScheduledTaskTrigger = "scheduled" | "manual";
 export type ScheduledTaskRunStatus = "running" | "completed" | "failed" | "skipped";
 
@@ -277,6 +278,9 @@ export interface ScheduledTask {
   workspace_id?: string;
   prompt?: string;
   command?: string;
+  post_title?: string;
+  fresh_context: boolean;
+  notify: boolean;
   timeout_seconds: number;
   created_by: string;
   last_run_id?: string;
@@ -305,6 +309,7 @@ export interface ScheduledTaskRun {
   stderr?: string;
   output_truncated: boolean;
   message_id?: string;
+  thread_id?: string;
 }
 
 export type RoadmapStageStatus = "active" | "completed";

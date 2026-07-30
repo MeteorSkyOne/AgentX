@@ -21,6 +21,7 @@ describe("browser notifications", () => {
     expect(shouldShowBrowserNotification(teamMessage("discussion"), runtime)).toBe(false);
     expect(shouldShowBrowserNotification(teamMessage("leader"), runtime)).toBe(false);
     expect(shouldShowBrowserNotification(teamMessage("summary"), runtime)).toBe(true);
+    expect(shouldShowBrowserNotification(mutedMessage(), runtime)).toBe(false);
     expect(
       shouldShowBrowserNotification(message("bot"), {
         Notification: notificationClass("granted"),
@@ -145,6 +146,14 @@ function teamMessage(phase: "leader" | "discussion" | "summary"): Message {
         turn: 1
       }
     }
+  };
+}
+
+function mutedMessage(): Message {
+  return {
+    ...message("bot"),
+    id: "msg_muted",
+    metadata: { suppress_notifications: true }
   };
 }
 
