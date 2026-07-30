@@ -552,6 +552,9 @@ func TestHTTPScheduledTaskEndpointsCreateRunAndListHistory(t *testing.T) {
 	if task.ID == "" || task.Kind != domain.ScheduledTaskKindAgentPrompt {
 		t.Fatalf("task = %#v", task)
 	}
+	if !task.Notify {
+		t.Fatalf("task notify = %v, want true when the field is omitted", task.Notify)
+	}
 
 	var tasks []domain.ScheduledTask
 	getJSON(t, ts.URL+"/api/projects/"+bootstrap.Project.ID+"/scheduled-tasks", bootstrap.SessionToken, http.StatusOK, &tasks)
@@ -570,6 +573,65 @@ func TestHTTPScheduledTaskEndpointsCreateRunAndListHistory(t *testing.T) {
 		getJSON(t, ts.URL+"/api/scheduled-tasks/"+task.ID+"/runs", bootstrap.SessionToken, http.StatusOK, &runs)
 		return len(runs) == 1 && runs[0].Status == domain.ScheduledTaskRunStatusCompleted && runs[0].MessageID != ""
 	})
+
+	var updated domain.ScheduledTask
+	patchJSON(t, ts.URL+"/api/scheduled-tasks/"+task.ID, bootstrap.SessionToken, map[string]any{
+		"fresh_context": true,
+		"notify":        false,
+	}, http.StatusOK, &updated)
+	if !updated.FreshContext || updated.Notify {
+		t.Fatalf("updated task = %#v, want fresh context and notify off", updated)
+	}
+}
+
+func TestHTTPScheduledForumPostTaskCreatesThreadPerRun(t *testing.T) {
+	ts := newTestServer(t)
+	bootstrap := setupHTTP(t, ts.URL)
+
+	var forum domain.Channel
+	postJSON(t, ts.URL+"/api/projects/"+bootstrap.Project.ID+"/channels", bootstrap.SessionToken, map[string]any{
+		"name": "reports",
+		"type": "thread",
+	}, http.StatusOK, &forum)
+	putJSON(t, ts.URL+"/api/channels/"+forum.ID+"/agents", bootstrap.SessionToken, map[string]any{
+		"agents": []map[string]any{{"agent_id": bootstrap.Agent.ID}},
+	}, http.StatusOK, nil)
+
+	var task domain.ScheduledTask
+	postJSON(t, ts.URL+"/api/projects/"+bootstrap.Project.ID+"/scheduled-tasks", bootstrap.SessionToken, map[string]any{
+		"name":            "Daily report",
+		"kind":            "forum_post",
+		"enabled":         false,
+		"schedule":        "@daily",
+		"timezone":        "UTC",
+		"conversation_id": forum.ID,
+		"agent_id":        bootstrap.Agent.ID,
+		"workspace_id":    bootstrap.ProjectWorkspace.ID,
+		"prompt":          "write the report",
+		"post_title":      "Report ${date}",
+		"timeout_seconds": 60,
+	}, http.StatusOK, &task)
+	if task.Kind != domain.ScheduledTaskKindForumPost || task.ConversationType != domain.ConversationChannel {
+		t.Fatalf("task = %#v", task)
+	}
+
+	var run domain.ScheduledTaskRun
+	postJSON(t, ts.URL+"/api/scheduled-tasks/"+task.ID+"/runs", bootstrap.SessionToken, map[string]any{}, http.StatusOK, &run)
+
+	var runs []domain.ScheduledTaskRun
+	requireEventually(t, 2*time.Second, func() bool {
+		getJSON(t, ts.URL+"/api/scheduled-tasks/"+task.ID+"/runs", bootstrap.SessionToken, http.StatusOK, &runs)
+		return len(runs) == 1 && runs[0].Status == domain.ScheduledTaskRunStatusCompleted && runs[0].ThreadID != ""
+	})
+
+	var threads []domain.Thread
+	getJSON(t, ts.URL+"/api/channels/"+forum.ID+"/threads", bootstrap.SessionToken, http.StatusOK, &threads)
+	if len(threads) != 1 || threads[0].ID != runs[0].ThreadID {
+		t.Fatalf("threads = %#v, want the thread from run %s", threads, runs[0].ThreadID)
+	}
+	if threads[0].Title != "Report "+time.Now().UTC().Format("2006-01-02") {
+		t.Fatalf("thread title = %q", threads[0].Title)
+	}
 }
 
 func TestHTTPSendMessageRejectsUnknownChannelWithoutCreatingOrphan(t *testing.T) {

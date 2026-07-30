@@ -145,6 +145,335 @@ func TestScheduledAgentPromptCreatesSystemMessageAndRunsAgent(t *testing.T) {
 	}
 }
 
+func TestScheduledForumPostCreatesThreadPerRun(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	forum, err := app.CreateChannel(ctx, bootstrap.Project.ID, "reports", domain.ChannelTypeThread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SetChannelAgents(ctx, forum.ID, []domain.ChannelAgent{
+		{AgentID: bootstrap.Agent.ID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := app.CreateScheduledTask(ctx, ScheduledTaskCreateRequest{
+		UserID:         bootstrap.User.ID,
+		ProjectID:      bootstrap.Project.ID,
+		Name:           "Daily report",
+		Kind:           domain.ScheduledTaskKindForumPost,
+		Enabled:        false,
+		Schedule:       "@daily",
+		Timezone:       "UTC",
+		ConversationID: forum.ID,
+		AgentID:        bootstrap.Agent.ID,
+		WorkspaceID:    bootstrap.ProjectWorkspace.ID,
+		Prompt:         "write the report",
+		PostTitle:      "Report ${date}",
+		TimeoutSeconds: 60,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.ConversationType != domain.ConversationChannel {
+		t.Fatalf("conversation type = %q, want channel", task.ConversationType)
+	}
+
+	for i := 0; i < 2; i++ {
+		run, err := app.RunScheduledTaskNow(ctx, task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		requireEventuallyApp(t, 2*time.Second, func() bool {
+			runs, err := app.ScheduledTaskRuns(ctx, task.ID, 10)
+			if err != nil {
+				return false
+			}
+			for _, item := range runs {
+				if item.ID == run.ID {
+					return item.Status == domain.ScheduledTaskRunStatusCompleted && item.ThreadID != ""
+				}
+			}
+			return false
+		})
+	}
+
+	threads, err := app.ListThreads(ctx, forum.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(threads) != 2 {
+		t.Fatalf("threads len = %d, want 2: %#v", len(threads), threads)
+	}
+	expectedTitle := "Report " + time.Now().UTC().Format("2006-01-02")
+	for _, thread := range threads {
+		if thread.Title != expectedTitle {
+			t.Fatalf("thread title = %q, want %q", thread.Title, expectedTitle)
+		}
+		messages, err := app.ListMessages(ctx, domain.ConversationThread, thread.ID, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(messages) != 2 {
+			t.Fatalf("thread %s messages = %#v, want prompt and reply", thread.ID, messages)
+		}
+		if messages[0].SenderType != domain.SenderSystem || messages[0].Body != "write the report" {
+			t.Fatalf("post message = %#v", messages[0])
+		}
+		if messages[1].SenderType != domain.SenderBot || messages[1].Body != "Echo: write the report" {
+			t.Fatalf("reply message = %#v", messages[1])
+		}
+	}
+
+	runs, err := app.ScheduledTaskRuns(ctx, task.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 || runs[0].ThreadID == "" || runs[0].ThreadID == runs[1].ThreadID {
+		t.Fatalf("runs = %#v, want two runs with distinct thread ids", runs)
+	}
+}
+
+func TestScheduledTaskNotifyTogglesReplyNotifications(t *testing.T) {
+	ctx := context.Background()
+	requests := make(chan webhookRequest, 4)
+	webhookServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		requests <- webhookRequest{header: r.Header.Clone(), requestURI: r.RequestURI, body: body}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer webhookServer.Close()
+
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+	if _, err := app.UpdateNotificationSettings(ctx, bootstrap.Organization.ID, NotificationSettingsUpdateRequest{
+		WebhookEnabled: true,
+		WebhookURL:     webhookServer.URL + "/${title}/${body}",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	newTask := func(name string, notify *bool) domain.ScheduledTask {
+		task, err := app.CreateScheduledTask(ctx, ScheduledTaskCreateRequest{
+			UserID:           bootstrap.User.ID,
+			ProjectID:        bootstrap.Project.ID,
+			Name:             name,
+			Kind:             domain.ScheduledTaskKindAgentPrompt,
+			Schedule:         "@daily",
+			Timezone:         "UTC",
+			ConversationType: domain.ConversationChannel,
+			ConversationID:   bootstrap.Channel.ID,
+			AgentID:          bootstrap.Agent.ID,
+			WorkspaceID:      bootstrap.ProjectWorkspace.ID,
+			Prompt:           name,
+			Notify:           notify,
+			TimeoutSeconds:   60,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return task
+	}
+
+	// Omitting notify keeps the historical notifying behavior.
+	loud := newTask("loud run", nil)
+	if !loud.Notify {
+		t.Fatalf("default notify = %v, want true", loud.Notify)
+	}
+	quiet := newTask("quiet run", boolPtr(false))
+	if quiet.Notify {
+		t.Fatalf("quiet notify = %v, want false", quiet.Notify)
+	}
+
+	runAndWait := func(task domain.ScheduledTask) domain.ScheduledTaskRun {
+		run, err := app.RunScheduledTaskNow(ctx, task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		requireEventuallyApp(t, 2*time.Second, func() bool {
+			runs, err := app.ScheduledTaskRuns(ctx, task.ID, 5)
+			if err != nil || len(runs) == 0 {
+				return false
+			}
+			return runs[0].ID == run.ID && runs[0].Status == domain.ScheduledTaskRunStatusCompleted
+		})
+		return run
+	}
+
+	quietRun := runAndWait(quiet)
+	loudRun := runAndWait(loud)
+
+	var got webhookRequest
+	select {
+	case got = <-requests:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the notifying task webhook")
+	}
+	if !strings.Contains(got.requestURI, "loud%20run") {
+		t.Fatalf("requestURI = %q, want the loud task reply; the muted task must not deliver", got.requestURI)
+	}
+	select {
+	case extra := <-requests:
+		t.Fatalf("unexpected second webhook: %q", extra.requestURI)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	// The reply itself carries the marker so the frontend skips it too and the
+	// suppression survives a reload.
+	messages, err := app.ListMessages(ctx, domain.ConversationChannel, bootstrap.Channel.ID, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var quietReply, loudReply *domain.Message
+	for i := range messages {
+		if messages[i].SenderType != domain.SenderBot {
+			continue
+		}
+		switch messages[i].Body {
+		case "Echo: quiet run":
+			quietReply = &messages[i]
+		case "Echo: loud run":
+			loudReply = &messages[i]
+		}
+	}
+	if quietReply == nil || loudReply == nil {
+		t.Fatalf("missing bot replies for runs %s/%s: %#v", quietRun.ID, loudRun.ID, messages)
+	}
+	if !suppressesNotifications(*quietReply) {
+		t.Fatalf("quiet reply metadata = %#v, want suppression marker", quietReply.Metadata)
+	}
+	if suppressesNotifications(*loudReply) {
+		t.Fatalf("loud reply metadata = %#v, want no suppression marker", loudReply.Metadata)
+	}
+}
+
+func TestScheduledForumPostRejectsTextChannel(t *testing.T) {
+	ctx := context.Background()
+	app, _, bootstrap := newConversationTestApp(t, ctx)
+
+	_, err := app.CreateScheduledTask(ctx, ScheduledTaskCreateRequest{
+		UserID:         bootstrap.User.ID,
+		ProjectID:      bootstrap.Project.ID,
+		Name:           "Bad forum post",
+		Kind:           domain.ScheduledTaskKindForumPost,
+		Schedule:       "@daily",
+		Timezone:       "UTC",
+		ConversationID: bootstrap.Channel.ID,
+		WorkspaceID:    bootstrap.ProjectWorkspace.ID,
+		Prompt:         "report",
+		TimeoutSeconds: 60,
+	})
+	if !errors.Is(err, ErrInvalidInput) || !strings.Contains(InvalidInputMessage(err), "forum channel") {
+		t.Fatalf("err = %v, want forum channel invalid input", err)
+	}
+}
+
+func TestScheduledAgentPromptFreshContextDropsHistoryAndResumedSession(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	capture := &capturingRuntime{sends: make(chan capturedInput, 4)}
+	app := New(st, eventbus.New(), Options{
+		AdminToken:       "secret",
+		DataDir:          t.TempDir(),
+		DefaultAgentKind: domain.AgentKindFake,
+		Runtimes: map[string]agentruntime.Runtime{
+			domain.AgentKindFake: capture,
+		},
+	})
+	defer shutdownAppForTest(t, app)
+	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.Messages().Create(ctx, domain.Message{
+		ID:               "msg_earlier_chatter",
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		SenderType:       domain.SenderUser,
+		SenderID:         bootstrap.User.ID,
+		Kind:             domain.MessageText,
+		Body:             "earlier chatter",
+		CreatedAt:        time.Now().UTC().Add(-time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Sessions().SetAgentSession(ctx, bootstrap.Agent.ID, domain.ConversationChannel, bootstrap.Channel.ID, "provider-session-1", "completed"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, freshContext := range []bool{false, true} {
+		task, err := app.CreateScheduledTask(ctx, ScheduledTaskCreateRequest{
+			UserID:           bootstrap.User.ID,
+			ProjectID:        bootstrap.Project.ID,
+			Name:             "Scheduled ping",
+			Kind:             domain.ScheduledTaskKindAgentPrompt,
+			Schedule:         "@daily",
+			Timezone:         "UTC",
+			ConversationType: domain.ConversationChannel,
+			ConversationID:   bootstrap.Channel.ID,
+			AgentID:          bootstrap.Agent.ID,
+			WorkspaceID:      bootstrap.ProjectWorkspace.ID,
+			Prompt:           "scheduled ping",
+			FreshContext:     freshContext,
+			TimeoutSeconds:   60,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if task.FreshContext != freshContext {
+			t.Fatalf("task fresh context = %v, want %v", task.FreshContext, freshContext)
+		}
+		run, err := app.RunScheduledTaskNow(ctx, task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var input capturedInput
+		select {
+		case input = <-capture.sends:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for runtime input (fresh_context=%v)", freshContext)
+		}
+		carriesHistory := strings.Contains(input.input.Context, "earlier chatter")
+		if freshContext {
+			if carriesHistory {
+				t.Fatalf("fresh context run still carries history: %q", input.input.Context)
+			}
+			if input.previousSessionID != "" {
+				t.Fatalf("fresh context run resumed provider session %q", input.previousSessionID)
+			}
+		} else {
+			if !carriesHistory {
+				t.Fatalf("default run dropped history: %q", input.input.Context)
+			}
+			if input.previousSessionID != "provider-session-1" {
+				t.Fatalf("previous session id = %q, want provider-session-1", input.previousSessionID)
+			}
+		}
+
+		requireEventuallyApp(t, 2*time.Second, func() bool {
+			runs, err := app.ScheduledTaskRuns(ctx, task.ID, 5)
+			if err != nil || len(runs) == 0 {
+				return false
+			}
+			return runs[0].ID == run.ID && runs[0].Status == domain.ScheduledTaskRunStatusCompleted
+		})
+	}
+}
+
 func TestCronScheduledTaskRecordsFailedRunWhenShuttingDown(t *testing.T) {
 	ctx := context.Background()
 	app, _, bootstrap := newConversationTestApp(t, ctx)
@@ -5137,6 +5466,10 @@ func (s *capturingSession) Events() <-chan agentruntime.Event {
 }
 
 func stringPtr(value string) *string {
+	return &value
+}
+
+func boolPtr(value bool) *bool {
 	return &value
 }
 

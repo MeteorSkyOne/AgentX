@@ -17,12 +17,13 @@ func (r scheduledTaskRepo) Create(ctx context.Context, task domain.ScheduledTask
 INSERT INTO scheduled_tasks (
   id, org_id, project_id, name, kind, enabled, schedule, timezone,
   conversation_type, conversation_id, agent_id, workspace_id, prompt, command,
-  timeout_seconds, created_by, last_run_id, last_run_status, last_run_at,
-  last_finished_at, next_run_at, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  post_title, fresh_context, notify, timeout_seconds, created_by, last_run_id, last_run_status,
+  last_run_at, last_finished_at, next_run_at, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		task.ID, task.OrganizationID, task.ProjectID, task.Name, string(task.Kind), boolToInt(task.Enabled),
 		task.Schedule, task.Timezone, nullableString(string(task.ConversationType)), nullableString(task.ConversationID),
-		nullableString(task.AgentID), nullableString(task.WorkspaceID), task.Prompt, task.Command, task.TimeoutSeconds,
+		nullableString(task.AgentID), nullableString(task.WorkspaceID), task.Prompt, task.Command,
+		task.PostTitle, boolToInt(task.FreshContext), boolToInt(task.Notify), task.TimeoutSeconds,
 		task.CreatedBy, nullableString(task.LastRunID), nullableString(task.LastRunStatus), nullableTime(task.LastRunAt),
 		nullableTime(task.LastFinishedAt), nullableTime(task.NextRunAt), formatTime(task.CreatedAt), formatTime(task.UpdatedAt),
 	)
@@ -34,12 +35,13 @@ func (r scheduledTaskRepo) Update(ctx context.Context, task domain.ScheduledTask
 UPDATE scheduled_tasks
 SET name = ?, kind = ?, enabled = ?, schedule = ?, timezone = ?,
     conversation_type = ?, conversation_id = ?, agent_id = ?, workspace_id = ?,
-    prompt = ?, command = ?, timeout_seconds = ?, next_run_at = ?, updated_at = ?
+    prompt = ?, command = ?, post_title = ?, fresh_context = ?, notify = ?, timeout_seconds = ?,
+    next_run_at = ?, updated_at = ?
 WHERE id = ?`,
 		task.Name, string(task.Kind), boolToInt(task.Enabled), task.Schedule, task.Timezone,
 		nullableString(string(task.ConversationType)), nullableString(task.ConversationID), nullableString(task.AgentID),
-		nullableString(task.WorkspaceID), task.Prompt, task.Command, task.TimeoutSeconds, nullableTime(task.NextRunAt),
-		formatTime(task.UpdatedAt), task.ID,
+		nullableString(task.WorkspaceID), task.Prompt, task.Command, task.PostTitle, boolToInt(task.FreshContext),
+		boolToInt(task.Notify), task.TimeoutSeconds, nullableTime(task.NextRunAt), formatTime(task.UpdatedAt), task.ID,
 	)
 	return err
 }
@@ -90,11 +92,12 @@ func (r scheduledTaskRepo) CreateRun(ctx context.Context, run domain.ScheduledTa
 	_, err := r.q.ExecContext(ctx, `
 INSERT INTO scheduled_task_runs (
   id, task_id, org_id, project_id, kind, trigger, scheduled_for, started_at,
-  finished_at, status, error, exit_code, stdout, stderr, output_truncated, message_id
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  finished_at, status, error, exit_code, stdout, stderr, output_truncated, message_id, thread_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.ID, run.TaskID, run.OrganizationID, run.ProjectID, string(run.Kind), string(run.Trigger),
 		nullableTime(run.ScheduledFor), formatTime(run.StartedAt), nullableTime(run.FinishedAt), string(run.Status),
-		run.Error, nullableInt(run.ExitCode), run.Stdout, run.Stderr, boolToInt(run.OutputTruncated), nullableString(run.MessageID),
+		run.Error, nullableInt(run.ExitCode), run.Stdout, run.Stderr, boolToInt(run.OutputTruncated),
+		nullableString(run.MessageID), nullableString(run.ThreadID),
 	)
 	return err
 }
@@ -102,10 +105,12 @@ INSERT INTO scheduled_task_runs (
 func (r scheduledTaskRepo) UpdateRun(ctx context.Context, run domain.ScheduledTaskRun) error {
 	_, err := r.q.ExecContext(ctx, `
 UPDATE scheduled_task_runs
-SET finished_at = ?, status = ?, error = ?, exit_code = ?, stdout = ?, stderr = ?, output_truncated = ?, message_id = ?
+SET finished_at = ?, status = ?, error = ?, exit_code = ?, stdout = ?, stderr = ?,
+    output_truncated = ?, message_id = ?, thread_id = ?
 WHERE id = ?`,
 		nullableTime(run.FinishedAt), string(run.Status), run.Error, nullableInt(run.ExitCode),
-		run.Stdout, run.Stderr, boolToInt(run.OutputTruncated), nullableString(run.MessageID), run.ID,
+		run.Stdout, run.Stderr, boolToInt(run.OutputTruncated), nullableString(run.MessageID),
+		nullableString(run.ThreadID), run.ID,
 	)
 	return err
 }
@@ -116,7 +121,7 @@ func (r scheduledTaskRepo) ListRunsByTask(ctx context.Context, taskID string, li
 	}
 	rows, err := r.q.QueryContext(ctx, `
 SELECT id, task_id, org_id, project_id, kind, trigger, scheduled_for, started_at,
-  finished_at, status, error, exit_code, stdout, stderr, output_truncated, message_id
+  finished_at, status, error, exit_code, stdout, stderr, output_truncated, message_id, thread_id
 FROM scheduled_task_runs
 WHERE task_id = ?
 ORDER BY started_at DESC
@@ -131,8 +136,8 @@ LIMIT ?`, taskID, limit)
 func scheduledTaskSelectSQL() string {
 	return `SELECT id, org_id, project_id, name, kind, enabled, schedule, timezone,
   conversation_type, conversation_id, agent_id, workspace_id, prompt, command,
-  timeout_seconds, created_by, last_run_id, last_run_status, last_run_at,
-  last_finished_at, next_run_at, created_at, updated_at
+  post_title, fresh_context, notify, timeout_seconds, created_by, last_run_id, last_run_status,
+  last_run_at, last_finished_at, next_run_at, created_at, updated_at
 FROM scheduled_tasks`
 }
 
@@ -157,19 +162,23 @@ func scanScheduledTask(scanner interface {
 	var task domain.ScheduledTask
 	var kind string
 	var enabled int
+	var freshContext, notify int
 	var conversationType, conversationID, agentID, workspaceID sql.NullString
 	var lastRunID, lastRunStatus, lastRunAt, lastFinishedAt, nextRunAt sql.NullString
 	var createdAt, updatedAt string
 	if err := scanner.Scan(
 		&task.ID, &task.OrganizationID, &task.ProjectID, &task.Name, &kind, &enabled,
 		&task.Schedule, &task.Timezone, &conversationType, &conversationID, &agentID, &workspaceID,
-		&task.Prompt, &task.Command, &task.TimeoutSeconds, &task.CreatedBy, &lastRunID, &lastRunStatus,
+		&task.Prompt, &task.Command, &task.PostTitle, &freshContext, &notify, &task.TimeoutSeconds,
+		&task.CreatedBy, &lastRunID, &lastRunStatus,
 		&lastRunAt, &lastFinishedAt, &nextRunAt, &createdAt, &updatedAt,
 	); err != nil {
 		return domain.ScheduledTask{}, err
 	}
 	task.Kind = domain.ScheduledTaskKind(kind)
 	task.Enabled = enabled != 0
+	task.FreshContext = freshContext != 0
+	task.Notify = notify != 0
 	task.ConversationType = domain.ConversationType(conversationType.String)
 	task.ConversationID = conversationID.String
 	task.AgentID = agentID.String
@@ -223,12 +232,12 @@ func scanScheduledTaskRun(scanner interface {
 	var scheduledFor, finishedAt sql.NullString
 	var exitCode sql.NullInt64
 	var outputTruncated int
-	var messageID sql.NullString
+	var messageID, threadID sql.NullString
 	var startedAt string
 	if err := scanner.Scan(
 		&run.ID, &run.TaskID, &run.OrganizationID, &run.ProjectID, &kind, &trigger,
 		&scheduledFor, &startedAt, &finishedAt, &status, &run.Error, &exitCode,
-		&run.Stdout, &run.Stderr, &outputTruncated, &messageID,
+		&run.Stdout, &run.Stderr, &outputTruncated, &messageID, &threadID,
 	); err != nil {
 		return domain.ScheduledTaskRun{}, err
 	}
@@ -237,6 +246,7 @@ func scanScheduledTaskRun(scanner interface {
 	run.Status = domain.ScheduledTaskRunStatus(status)
 	run.OutputTruncated = outputTruncated != 0
 	run.MessageID = messageID.String
+	run.ThreadID = threadID.String
 	if exitCode.Valid {
 		value := int(exitCode.Int64)
 		run.ExitCode = &value

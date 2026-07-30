@@ -22,6 +22,9 @@ type scheduledTaskRequest struct {
 	WorkspaceID      string `json:"workspace_id"`
 	Prompt           string `json:"prompt"`
 	Command          string `json:"command"`
+	PostTitle        string `json:"post_title"`
+	FreshContext     bool   `json:"fresh_context"`
+	Notify           *bool  `json:"notify"`
 	TimeoutSeconds   int    `json:"timeout_seconds"`
 }
 
@@ -37,6 +40,9 @@ type scheduledTaskUpdateRequest struct {
 	WorkspaceID      *string `json:"workspace_id"`
 	Prompt           *string `json:"prompt"`
 	Command          *string `json:"command"`
+	PostTitle        *string `json:"post_title"`
+	FreshContext     *bool   `json:"fresh_context"`
+	Notify           *bool   `json:"notify"`
 	TimeoutSeconds   *int    `json:"timeout_seconds"`
 }
 
@@ -99,6 +105,9 @@ func (s *Server) handleCreateScheduledTask(w http.ResponseWriter, r *http.Reques
 	task, err := s.app.CreateScheduledTask(r.Context(), app.ScheduledTaskCreateRequest{
 		UserID:           userID,
 		ProjectID:        project.ID,
+		PostTitle:        req.PostTitle,
+		FreshContext:     req.FreshContext,
+		Notify:           req.Notify,
 		Name:             req.Name,
 		Kind:             kind,
 		Enabled:          req.Enabled,
@@ -162,6 +171,9 @@ func (s *Server) handleUpdateScheduledTask(w http.ResponseWriter, r *http.Reques
 		conversationType = &parsed
 	}
 	updated, err := s.app.UpdateScheduledTask(r.Context(), task.ID, app.ScheduledTaskUpdateRequest{
+		PostTitle:        req.PostTitle,
+		FreshContext:     req.FreshContext,
+		Notify:           req.Notify,
 		Name:             req.Name,
 		Kind:             kind,
 		Enabled:          req.Enabled,
@@ -296,6 +308,8 @@ func parseScheduledTaskKind(value string) (domain.ScheduledTaskKind, bool) {
 	switch domain.ScheduledTaskKind(value) {
 	case domain.ScheduledTaskKindAgentPrompt:
 		return domain.ScheduledTaskKindAgentPrompt, true
+	case domain.ScheduledTaskKindForumPost:
+		return domain.ScheduledTaskKindForumPost, true
 	case domain.ScheduledTaskKindShellCommand:
 		return domain.ScheduledTaskKindShellCommand, true
 	default:

@@ -954,21 +954,49 @@ func TestScheduledTasksRoundTripTaskAndRuns(t *testing.T) {
 	if err := st.Projects().Create(ctx, project); err != nil {
 		t.Fatal(err)
 	}
+	channel := domain.Channel{
+		ID:             "chn_scheduled",
+		OrganizationID: fixture.org.ID,
+		ProjectID:      project.ID,
+		Name:           "reports",
+		Type:           domain.ChannelTypeThread,
+		CreatedAt:      fixture.now,
+		UpdatedAt:      fixture.now,
+	}
+	if err := st.Channels().Create(ctx, channel); err != nil {
+		t.Fatal(err)
+	}
+	thread := domain.Thread{
+		ID:             "thr_scheduled",
+		OrganizationID: fixture.org.ID,
+		ProjectID:      project.ID,
+		ChannelID:      channel.ID,
+		Title:          "Report 2026-04-25",
+		CreatedBy:      fixture.user.ID,
+		CreatedAt:      fixture.now,
+		UpdatedAt:      fixture.now,
+	}
+	if err := st.Threads().Create(ctx, thread); err != nil {
+		t.Fatal(err)
+	}
 	nextRunAt := fixture.now.Add(time.Hour)
 	task := domain.ScheduledTask{
 		ID:               "tsk_1",
 		OrganizationID:   fixture.org.ID,
 		ProjectID:        project.ID,
 		Name:             "Daily check",
-		Kind:             domain.ScheduledTaskKindAgentPrompt,
+		Kind:             domain.ScheduledTaskKindForumPost,
 		Enabled:          true,
 		Schedule:         "0 9 * * *",
 		Timezone:         "UTC",
 		ConversationType: domain.ConversationChannel,
-		ConversationID:   "chn_scheduled",
+		ConversationID:   channel.ID,
 		AgentID:          fixture.agent1.ID,
 		WorkspaceID:      fixture.workspace1.ID,
 		Prompt:           "status",
+		PostTitle:        "Report ${date}",
+		FreshContext:     true,
+		Notify:           false,
 		TimeoutSeconds:   600,
 		CreatedBy:        fixture.user.ID,
 		NextRunAt:        &nextRunAt,
@@ -984,6 +1012,12 @@ func TestScheduledTasksRoundTripTaskAndRuns(t *testing.T) {
 	}
 	if len(tasks) != 1 || tasks[0].ID != task.ID || tasks[0].NextRunAt == nil {
 		t.Fatalf("tasks = %#v", tasks)
+	}
+	if !tasks[0].FreshContext || tasks[0].PostTitle != task.PostTitle || tasks[0].Kind != domain.ScheduledTaskKindForumPost {
+		t.Fatalf("task forum fields = %#v", tasks[0])
+	}
+	if tasks[0].Notify {
+		t.Fatalf("task notify = %v, want false", tasks[0].Notify)
 	}
 
 	startedAt := fixture.now.Add(2 * time.Hour)
@@ -1008,6 +1042,7 @@ func TestScheduledTasksRoundTripTaskAndRuns(t *testing.T) {
 	run.Stdout = "out"
 	run.Stderr = "err"
 	run.OutputTruncated = true
+	run.ThreadID = thread.ID
 	if err := st.ScheduledTasks().UpdateRun(ctx, run); err != nil {
 		t.Fatal(err)
 	}
@@ -1021,6 +1056,9 @@ func TestScheduledTasksRoundTripTaskAndRuns(t *testing.T) {
 	}
 	if len(runs) != 1 || runs[0].ExitCode == nil || *runs[0].ExitCode != exitCode || !runs[0].OutputTruncated {
 		t.Fatalf("runs = %#v", runs)
+	}
+	if runs[0].ThreadID != thread.ID {
+		t.Fatalf("run thread id = %q, want %q", runs[0].ThreadID, thread.ID)
 	}
 	updated, err := st.ScheduledTasks().ByID(ctx, task.ID)
 	if err != nil {

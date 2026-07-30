@@ -40,6 +40,9 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 	if team != nil {
 		metadata["team"] = *team
 	}
+	if suppressesNotifications(userMessage) {
+		metadata[suppressNotificationsMetadataKey] = true
+	}
 	botMessage := domain.Message{
 		ID:               botMessageID,
 		OrganizationID:   userMessage.OrganizationID,
@@ -151,6 +154,9 @@ func (a *App) persistFailedAgentRunMessage(ctx context.Context, userMessage doma
 	}
 	if team != nil {
 		metadata["team"] = *team
+	}
+	if suppressesNotifications(userMessage) {
+		metadata[suppressNotificationsMetadataKey] = true
 	}
 	botMessage := domain.Message{
 		ID:               id.New("msg"),

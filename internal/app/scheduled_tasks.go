@@ -24,6 +24,8 @@ const (
 	defaultScheduledTaskTimeoutSeconds = 600
 	maxScheduledTaskTimeoutSeconds     = 86400
 	scheduledTaskOutputLimit           = 64 * 1024
+	defaultScheduledPostTitleTemplate  = "${task} · ${datetime}"
+	maxScheduledPostTitleLength        = 200
 )
 
 type ScheduledTaskCreateRequest struct {
@@ -40,7 +42,12 @@ type ScheduledTaskCreateRequest struct {
 	WorkspaceID      string
 	Prompt           string
 	Command          string
-	TimeoutSeconds   int
+	PostTitle        string
+	FreshContext     bool
+	// Notify defaults to true when nil so callers that omit it keep the
+	// historical behavior of notifying on every scheduled agent reply.
+	Notify         *bool
+	TimeoutSeconds int
 }
 
 type ScheduledTaskUpdateRequest struct {
@@ -55,6 +62,9 @@ type ScheduledTaskUpdateRequest struct {
 	WorkspaceID      *string
 	Prompt           *string
 	Command          *string
+	PostTitle        *string
+	FreshContext     *bool
+	Notify           *bool
 	TimeoutSeconds   *int
 }
 
@@ -118,6 +128,9 @@ func (a *App) CreateScheduledTask(ctx context.Context, req ScheduledTaskCreateRe
 		WorkspaceID:      req.WorkspaceID,
 		Prompt:           req.Prompt,
 		Command:          req.Command,
+		PostTitle:        req.PostTitle,
+		FreshContext:     req.FreshContext,
+		Notify:           req.Notify == nil || *req.Notify,
 		TimeoutSeconds:   req.TimeoutSeconds,
 		CreatedBy:        req.UserID,
 		CreatedAt:        now,
@@ -179,6 +192,15 @@ func (a *App) UpdateScheduledTask(ctx context.Context, taskID string, req Schedu
 	}
 	if req.Command != nil {
 		task.Command = *req.Command
+	}
+	if req.PostTitle != nil {
+		task.PostTitle = *req.PostTitle
+	}
+	if req.FreshContext != nil {
+		task.FreshContext = *req.FreshContext
+	}
+	if req.Notify != nil {
+		task.Notify = *req.Notify
 	}
 	if req.TimeoutSeconds != nil {
 		task.TimeoutSeconds = *req.TimeoutSeconds
@@ -266,6 +288,8 @@ func (a *App) normalizeScheduledTask(ctx context.Context, project domain.Project
 	switch task.Kind {
 	case domain.ScheduledTaskKindAgentPrompt:
 		return a.normalizeAgentPromptTask(ctx, project, task)
+	case domain.ScheduledTaskKindForumPost:
+		return a.normalizeForumPostTask(ctx, project, task)
 	case domain.ScheduledTaskKindShellCommand:
 		return a.normalizeShellCommandTask(task)
 	default:
@@ -276,6 +300,7 @@ func (a *App) normalizeScheduledTask(ctx context.Context, project domain.Project
 func (a *App) normalizeAgentPromptTask(ctx context.Context, project domain.Project, task domain.ScheduledTask) (domain.ScheduledTask, error) {
 	task.Prompt = strings.TrimSpace(task.Prompt)
 	task.Command = ""
+	task.PostTitle = ""
 	if task.Prompt == "" {
 		return domain.ScheduledTask{}, invalidInput("prompt is required")
 	}
@@ -287,28 +312,47 @@ func (a *App) normalizeAgentPromptTask(ctx context.Context, project domain.Proje
 	if err != nil {
 		return domain.ScheduledTask{}, err
 	}
-	if scope.organizationID != project.OrganizationID {
-		return domain.ScheduledTask{}, invalidInput("target conversation must belong to the task organization")
+	if err := validateScheduledTaskScope(project, scope); err != nil {
+		return domain.ScheduledTask{}, err
 	}
-	if scope.project.ID != "" && scope.project.ID != project.ID {
-		return domain.ScheduledTask{}, invalidInput("target conversation must belong to the task project")
+	if scope.channel.ID != "" && scope.thread == nil && scope.channel.Type == domain.ChannelTypeThread {
+		return domain.ScheduledTask{}, invalidInput("forum channels require the forum post task kind")
 	}
-	agents, err := a.conversationAgents(ctx, scope)
+	task.AgentID, err = a.normalizeScheduledTaskAgent(ctx, scope, task.AgentID)
 	if err != nil {
 		return domain.ScheduledTask{}, err
 	}
-	task.AgentID = strings.TrimSpace(task.AgentID)
-	if task.AgentID != "" {
-		found := false
-		for _, item := range agents {
-			if item.Agent.ID == task.AgentID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return domain.ScheduledTask{}, invalidInput("agent is not bound to the target conversation")
-		}
+	return task, nil
+}
+
+func (a *App) normalizeForumPostTask(ctx context.Context, project domain.Project, task domain.ScheduledTask) (domain.ScheduledTask, error) {
+	task.Prompt = strings.TrimSpace(task.Prompt)
+	task.Command = ""
+	task.PostTitle = strings.TrimSpace(task.PostTitle)
+	if task.Prompt == "" {
+		return domain.ScheduledTask{}, invalidInput("prompt is required")
+	}
+	task.ConversationType = domain.ConversationChannel
+	task.ConversationID = strings.TrimSpace(task.ConversationID)
+	if task.ConversationID == "" {
+		return domain.ScheduledTask{}, invalidInput("target forum channel is required")
+	}
+	scope, err := a.conversationScope(ctx, task.ConversationType, task.ConversationID)
+	if err != nil {
+		return domain.ScheduledTask{}, err
+	}
+	if err := validateScheduledTaskScope(project, scope); err != nil {
+		return domain.ScheduledTask{}, err
+	}
+	if scope.channel.Type != domain.ChannelTypeThread {
+		return domain.ScheduledTask{}, invalidInput("forum post tasks require a forum channel")
+	}
+	if _, err := renderScheduledPostTitle(task, time.Now().UTC()); err != nil {
+		return domain.ScheduledTask{}, err
+	}
+	task.AgentID, err = a.normalizeScheduledTaskAgent(ctx, scope, task.AgentID)
+	if err != nil {
+		return domain.ScheduledTask{}, err
 	}
 	return task, nil
 }
@@ -319,6 +363,10 @@ func (a *App) normalizeShellCommandTask(task domain.ScheduledTask) (domain.Sched
 	}
 	task.Command = strings.TrimSpace(task.Command)
 	task.Prompt = ""
+	task.PostTitle = ""
+	task.FreshContext = false
+	// Shell commands never produce an agent reply, so there is nothing to notify about.
+	task.Notify = true
 	task.ConversationType = ""
 	task.ConversationID = ""
 	task.AgentID = ""
@@ -326,6 +374,33 @@ func (a *App) normalizeShellCommandTask(task domain.ScheduledTask) (domain.Sched
 		return domain.ScheduledTask{}, invalidInput("command is required")
 	}
 	return task, nil
+}
+
+func validateScheduledTaskScope(project domain.Project, scope conversationScope) error {
+	if scope.organizationID != project.OrganizationID {
+		return invalidInput("target conversation must belong to the task organization")
+	}
+	if scope.project.ID != "" && scope.project.ID != project.ID {
+		return invalidInput("target conversation must belong to the task project")
+	}
+	return nil
+}
+
+func (a *App) normalizeScheduledTaskAgent(ctx context.Context, scope conversationScope, agentID string) (string, error) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return "", nil
+	}
+	agents, err := a.conversationAgents(ctx, scope)
+	if err != nil {
+		return "", err
+	}
+	for _, item := range agents {
+		if item.Agent.ID == agentID {
+			return agentID, nil
+		}
+	}
+	return "", invalidInput("agent is not bound to the target conversation")
 }
 
 func (a *App) runScheduledTask(ctx context.Context, taskID string, trigger domain.ScheduledTaskTrigger, scheduledFor *time.Time) {
@@ -450,8 +525,18 @@ func (a *App) executeScheduledTaskRun(ctx context.Context, task domain.Scheduled
 
 	switch task.Kind {
 	case domain.ScheduledTaskKindAgentPrompt:
-		messageID, err := a.executeScheduledAgentPrompt(ctx, task, run)
-		run.MessageID = messageID
+		outcome, err := a.executeScheduledAgentPrompt(ctx, task, run)
+		run.MessageID = outcome.MessageID
+		if err != nil {
+			run.Status = domain.ScheduledTaskRunStatusFailed
+			run.Error = err.Error()
+		} else {
+			run.Status = domain.ScheduledTaskRunStatusCompleted
+		}
+	case domain.ScheduledTaskKindForumPost:
+		outcome, err := a.executeScheduledForumPost(ctx, task, run)
+		run.MessageID = outcome.MessageID
+		run.ThreadID = outcome.ThreadID
 		if err != nil {
 			run.Status = domain.ScheduledTaskRunStatusFailed
 			run.Error = err.Error()
@@ -486,17 +571,89 @@ func (a *App) clearScheduledTaskRunning(taskID string) {
 	delete(a.scheduledRuns, taskID)
 }
 
-func (a *App) executeScheduledAgentPrompt(ctx context.Context, task domain.ScheduledTask, run domain.ScheduledTaskRun) (string, error) {
-	scope, err := a.conversationScope(ctx, task.ConversationType, task.ConversationID)
+type scheduledPromptOutcome struct {
+	MessageID string
+	ThreadID  string
+}
+
+func (a *App) executeScheduledAgentPrompt(ctx context.Context, task domain.ScheduledTask, run domain.ScheduledTaskRun) (scheduledPromptOutcome, error) {
+	return a.dispatchScheduledPrompt(ctx, task, run, task.ConversationType, task.ConversationID)
+}
+
+func (a *App) executeScheduledForumPost(ctx context.Context, task domain.ScheduledTask, run domain.ScheduledTaskRun) (scheduledPromptOutcome, error) {
+	channel, err := a.store.Channels().ByID(ctx, task.ConversationID)
 	if err != nil {
-		return "", err
+		return scheduledPromptOutcome{}, err
+	}
+	if channel.Type != domain.ChannelTypeThread {
+		return scheduledPromptOutcome{}, invalidInput("forum post tasks require a forum channel")
+	}
+	if channel.ArchivedAt != nil {
+		return scheduledPromptOutcome{}, invalidInput("target forum channel is archived")
+	}
+	title, err := renderScheduledPostTitle(task, time.Now().UTC())
+	if err != nil {
+		return scheduledPromptOutcome{}, err
+	}
+	now := time.Now().UTC()
+	thread := domain.Thread{
+		ID:             id.New("thr"),
+		OrganizationID: channel.OrganizationID,
+		ProjectID:      channel.ProjectID,
+		ChannelID:      channel.ID,
+		Title:          title,
+		CreatedBy:      task.CreatedBy,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := a.store.Threads().Create(ctx, thread); err != nil {
+		return scheduledPromptOutcome{}, err
+	}
+	outcome, err := a.dispatchScheduledPrompt(ctx, task, run, domain.ConversationThread, thread.ID)
+	outcome.ThreadID = thread.ID
+	return outcome, err
+}
+
+func (a *App) dispatchScheduledPrompt(
+	ctx context.Context,
+	task domain.ScheduledTask,
+	run domain.ScheduledTaskRun,
+	conversationType domain.ConversationType,
+	conversationID string,
+) (scheduledPromptOutcome, error) {
+	scope, err := a.conversationScope(ctx, conversationType, conversationID)
+	if err != nil {
+		return scheduledPromptOutcome{}, err
 	}
 	agents, err := a.conversationAgents(ctx, scope)
 	if err != nil {
-		return "", err
+		return scheduledPromptOutcome{}, err
 	}
 	if len(agents) == 0 {
-		return "", invalidInput("target conversation has no enabled agents")
+		return scheduledPromptOutcome{}, invalidInput("target conversation has no enabled agents")
+	}
+	targets := agents
+	if task.AgentID != "" {
+		targets = nil
+		for _, target := range agents {
+			if target.Agent.ID == task.AgentID {
+				targets = []ConversationAgentContext{target}
+				break
+			}
+		}
+		if len(targets) == 0 {
+			return scheduledPromptOutcome{}, invalidInput("agent is not bound to the target conversation")
+		}
+	} else if mentioned := mentionedAgentsForBody(agents, task.Prompt); len(mentioned) > 0 {
+		targets = mentioned
+	}
+	if task.FreshContext {
+		boundary := time.Now().UTC()
+		for _, target := range targets {
+			if err := a.store.Sessions().ResetAgentSessionContext(ctx, target.Agent.ID, conversationType, conversationID, boundary); err != nil {
+				return scheduledPromptOutcome{}, err
+			}
+		}
 	}
 	metadata := map[string]any{
 		"scheduled":           true,
@@ -505,29 +662,25 @@ func (a *App) executeScheduledAgentPrompt(ctx context.Context, task domain.Sched
 		"scheduled_run_id":    run.ID,
 		"scheduled_trigger":   string(run.Trigger),
 	}
+	if task.FreshContext {
+		metadata["scheduled_fresh_context"] = true
+	}
+	if !task.Notify {
+		// Marks the run so replies it triggers skip webhook and browser notifications.
+		metadata[suppressNotificationsMetadataKey] = true
+	}
 	message, err := a.createConversationMessage(ctx, SendMessageRequest{
 		UserID:           task.CreatedBy,
 		OrganizationID:   task.OrganizationID,
-		ConversationType: task.ConversationType,
-		ConversationID:   task.ConversationID,
+		ConversationType: conversationType,
+		ConversationID:   conversationID,
 		Body:             task.Prompt,
 	}, domain.SenderSystem, "scheduled", task.Prompt, metadata)
 	if err != nil {
-		return "", err
+		return scheduledPromptOutcome{}, err
 	}
-	if task.AgentID != "" {
-		for _, target := range agents {
-			if target.Agent.ID == task.AgentID {
-				return message.ID, a.runScheduledAgentTarget(ctx, message, target)
-			}
-		}
-		return message.ID, invalidInput("agent is not bound to the target conversation")
-	}
-	targets := agents
-	if mentioned := mentionedAgentsForBody(agents, message.Body); len(mentioned) > 0 {
-		targets = mentioned
-	}
-	errCh := make(chan error, len(agents))
+	outcome := scheduledPromptOutcome{MessageID: message.ID}
+	errCh := make(chan error, len(targets))
 	var wg sync.WaitGroup
 	for _, target := range targets {
 		wg.Add(1)
@@ -542,10 +695,36 @@ func (a *App) executeScheduledAgentPrompt(ctx context.Context, task domain.Sched
 	close(errCh)
 	for err := range errCh {
 		if err != nil {
-			return message.ID, err
+			return outcome, err
 		}
 	}
-	return message.ID, nil
+	return outcome, nil
+}
+
+func renderScheduledPostTitle(task domain.ScheduledTask, now time.Time) (string, error) {
+	location, err := time.LoadLocation(strings.TrimSpace(task.Timezone))
+	if err != nil {
+		location = time.UTC
+	}
+	local := now.In(location)
+	template := strings.TrimSpace(task.PostTitle)
+	if template == "" {
+		template = defaultScheduledPostTitleTemplate
+	}
+	title := strings.NewReplacer(
+		"${task}", task.Name,
+		"${date}", local.Format("2006-01-02"),
+		"${time}", local.Format("15:04"),
+		"${datetime}", local.Format("2006-01-02 15:04"),
+	).Replace(template)
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return "", invalidInput("post title renders to an empty value")
+	}
+	if len([]rune(title)) > maxScheduledPostTitleLength {
+		title = strings.TrimSpace(string([]rune(title)[:maxScheduledPostTitleLength]))
+	}
+	return title, nil
 }
 
 func (a *App) runScheduledAgentTarget(ctx context.Context, message domain.Message, target ConversationAgentContext) error {

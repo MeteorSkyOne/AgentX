@@ -135,7 +135,7 @@ func (a *App) TestNotificationSettings(ctx context.Context, orgID string) error 
 }
 
 func (a *App) notifyAgentMessageCreated(ctx context.Context, title string, message domain.Message) {
-	if isTeamDiscussionMessage(message) {
+	if isTeamDiscussionMessage(message) || suppressesNotifications(message) {
 		return
 	}
 	deliverCtx := withoutCancelOrBackground(ctx)
@@ -174,6 +174,21 @@ func (a *App) notifyAgentInputRequest(ctx context.Context, title string, orgID s
 	}
 	log.Printf("agentx webhook delivery running inline during shutdown org=%s input_request=%s", orgID, input.QuestionID)
 	deliver()
+}
+
+// suppressNotificationsMetadataKey marks a message whose replies must not raise
+// webhook or browser notifications. Scheduled tasks with notify disabled set it
+// on the prompt they post, and agent replies inherit it (see completeAgentRun),
+// so the flag survives restarts and reaches the frontend too.
+const suppressNotificationsMetadataKey = "suppress_notifications"
+
+func suppressesNotifications(message domain.Message) bool {
+	value, ok := message.Metadata[suppressNotificationsMetadataKey]
+	if !ok {
+		return false
+	}
+	flag, ok := value.(bool)
+	return ok && flag
 }
 
 func isTeamDiscussionMessage(message domain.Message) bool {

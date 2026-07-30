@@ -203,6 +203,7 @@ type ScheduledTaskKind string
 
 const (
 	ScheduledTaskKindAgentPrompt  ScheduledTaskKind = "agent_prompt"
+	ScheduledTaskKindForumPost    ScheduledTaskKind = "forum_post"
 	ScheduledTaskKindShellCommand ScheduledTaskKind = "shell_command"
 )
 
@@ -237,6 +238,9 @@ type ScheduledTask struct {
 	WorkspaceID      string            `json:"workspace_id,omitempty"`
 	Prompt           string            `json:"prompt,omitempty"`
 	Command          string            `json:"command,omitempty"`
+	PostTitle        string            `json:"post_title,omitempty"`
+	FreshContext     bool              `json:"fresh_context"`
+	Notify           bool              `json:"notify"`
 	TimeoutSeconds   int               `json:"timeout_seconds"`
 	CreatedBy        string            `json:"created_by"`
 	LastRunID        string            `json:"last_run_id,omitempty"`
@@ -265,6 +269,7 @@ type ScheduledTaskRun struct {
 	Stderr          string                 `json:"stderr,omitempty"`
 	OutputTruncated bool                   `json:"output_truncated"`
 	MessageID       string                 `json:"message_id,omitempty"`
+	ThreadID        string                 `json:"thread_id,omitempty"`
 }
 
 type RoadmapStageStatus string
