@@ -91,12 +91,16 @@ func collabAgentToolCallToProcessItem(item map[string]any, status string) *runti
 	}
 }
 
-func completedAgentMessageText(item map[string]any) string {
+func isAgentMessageItem(item map[string]any) bool {
 	if item == nil {
-		return ""
+		return false
 	}
 	itemType := normalizeItemType(stringVal(item, "type"))
-	if itemType != "agentmessage" && itemType != "agent_message" && itemType != "message" {
+	return itemType == "agentmessage" || itemType == "agent_message" || itemType == "message"
+}
+
+func completedAgentMessageText(item map[string]any) string {
+	if !isAgentMessageItem(item) {
 		return ""
 	}
 	for _, key := range []string{"text", "message"} {

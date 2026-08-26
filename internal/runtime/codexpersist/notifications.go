@@ -10,10 +10,18 @@ import (
 )
 
 type notificationState struct {
-	text              strings.Builder
-	pendingAgentText  strings.Builder
-	streamedPlanItems map[string]bool
-	completedPlanText string
+	text strings.Builder
+	// pendingAgentText holds the text of the agent message item that is still
+	// streaming. Codex can run tool calls while a message is being produced, so
+	// this text must not be reclassified until the message item completes.
+	pendingAgentText   strings.Builder
+	pendingAgentItemID string
+	// completedAgentText holds agent messages that finished but have not been
+	// classified yet: they become "thinking" if another item follows them in
+	// the same turn, or the final text otherwise.
+	completedAgentText strings.Builder
+	streamedPlanItems  map[string]bool
+	completedPlanText  string
 }
 
 func newNotificationState() *notificationState {
@@ -26,33 +34,60 @@ func (st *notificationState) writeText(text string) {
 	}
 }
 
-func (st *notificationState) writePendingAgentText(text string) {
-	if text != "" {
-		st.pendingAgentText.WriteString(text)
+func (st *notificationState) writePendingAgentText(itemID, text string) {
+	if text == "" {
+		return
 	}
+	if itemID != "" && st.pendingAgentItemID != "" && itemID != st.pendingAgentItemID {
+		// A new message item started streaming before the previous one
+		// reported completion; treat the previous one as completed.
+		st.completeAgentMessage("")
+	}
+	if itemID != "" {
+		st.pendingAgentItemID = itemID
+	}
+	st.pendingAgentText.WriteString(text)
 }
 
-func (st *notificationState) flushPendingAgentTextAsThinking() runtime.Event {
-	text := st.pendingAgentText.String()
+// completeAgentMessage moves the streaming agent message into the completed
+// bucket. fullText is the authoritative text from item/completed and is used
+// when nothing was streamed for this item.
+func (st *notificationState) completeAgentMessage(fullText string) {
+	if st.pendingAgentText.Len() == 0 {
+		st.completedAgentText.WriteString(fullText)
+	} else {
+		st.completedAgentText.WriteString(st.pendingAgentText.String())
+	}
 	st.pendingAgentText.Reset()
+	st.pendingAgentItemID = ""
+}
+
+func (st *notificationState) hasCompletedAgentText() bool {
+	return st.completedAgentText.Len() > 0
+}
+
+func (st *notificationState) flushCompletedAgentTextAsThinking() runtime.Event {
+	text := st.completedAgentText.String()
+	st.completedAgentText.Reset()
 	return runtime.Event{Type: runtime.EventDelta, Thinking: text, Process: []runtime.ProcessItem{{
 		Type: "thinking",
 		Text: text,
 	}}}
 }
 
-func (st *notificationState) flushPendingAgentTextAsText() string {
-	text := st.pendingAgentText.String()
+func (st *notificationState) flushAgentTextAsText() {
+	st.writeText(st.completedAgentText.String())
+	st.completedAgentText.Reset()
+	st.writeText(st.pendingAgentText.String())
 	st.pendingAgentText.Reset()
-	st.writeText(text)
-	return text
+	st.pendingAgentItemID = ""
 }
 
 func (st *notificationState) textString() string {
 	if st.completedPlanText != "" {
 		return st.completedPlanText
 	}
-	st.flushPendingAgentTextAsText()
+	st.flushAgentTextAsText()
 	return st.text.String()
 }
 
@@ -96,7 +131,7 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 	case "item/agentMessage/delta":
 		delta, _ := params["delta"].(string)
 		if delta != "" {
-			state.writePendingAgentText(delta)
+			state.writePendingAgentText(stringVal(params, "itemId"), delta)
 		}
 
 	case "item/plan/delta":
@@ -118,16 +153,16 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 	case "item/started":
 		item, _ := params["item"].(map[string]any)
 		if pi := itemToProcessItem(item, "started"); pi != nil {
-			if state.pendingAgentText.Len() > 0 {
-				s.emit(state.flushPendingAgentTextAsThinking())
+			if state.hasCompletedAgentText() {
+				s.emit(state.flushCompletedAgentTextAsThinking())
 			}
 			s.emit(runtime.Event{Type: runtime.EventDelta, Process: []runtime.ProcessItem{*pi}})
 		}
 
 	case "item/completed":
 		item, _ := params["item"].(map[string]any)
-		if text := completedAgentMessageText(item); text != "" && state.pendingAgentText.Len() == 0 {
-			state.writePendingAgentText(text)
+		if isAgentMessageItem(item) {
+			state.completeAgentMessage(completedAgentMessageText(item))
 		}
 		if text, streamed := completedPlanText(item, state); text != "" {
 			if streamed {
@@ -138,8 +173,8 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 			}
 		}
 		if pi := itemToProcessItem(item, "completed"); pi != nil {
-			if state.pendingAgentText.Len() > 0 {
-				s.emit(state.flushPendingAgentTextAsThinking())
+			if state.hasCompletedAgentText() {
+				s.emit(state.flushCompletedAgentTextAsThinking())
 			}
 			s.emit(runtime.Event{Type: runtime.EventDelta, Process: []runtime.ProcessItem{*pi}})
 		}

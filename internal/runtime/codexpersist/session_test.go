@@ -490,7 +490,18 @@ func TestAgentMessageDeltaBeforeToolIsEmittedAsThinking(t *testing.T) {
 	s.handleNotification(jsonRPCMessage{
 		Method: "item/agentMessage/delta",
 		Params: map[string]any{
-			"delta": "I will inspect the files.",
+			"itemId": "msg_1",
+			"delta":  "I will inspect the files.",
+		},
+	}, state)
+	s.handleNotification(jsonRPCMessage{
+		Method: "item/completed",
+		Params: map[string]any{
+			"item": map[string]any{
+				"type": "agentMessage",
+				"id":   "msg_1",
+				"text": "I will inspect the files.",
+			},
 		},
 	}, state)
 	select {
@@ -520,6 +531,71 @@ func TestAgentMessageDeltaBeforeToolIsEmittedAsThinking(t *testing.T) {
 	evt = <-s.events
 	if evt.Type != runtime.EventDelta || len(evt.Process) != 1 || evt.Process[0].Type != "tool_call" {
 		t.Fatalf("tool event = %#v", evt)
+	}
+}
+
+func TestStreamingAgentMessageInterleavedWithToolsStaysFinalText(t *testing.T) {
+	s := &persistentSession{events: make(chan runtime.Event, 16)}
+	state := newNotificationState()
+
+	delta := func(id, text string) {
+		s.handleNotification(jsonRPCMessage{
+			Method: "item/agentMessage/delta",
+			Params: map[string]any{"itemId": id, "delta": text},
+		}, state)
+	}
+	tool := func(method, id string) {
+		s.handleNotification(jsonRPCMessage{
+			Method: method,
+			Params: map[string]any{"item": map[string]any{
+				"type":    "commandExecution",
+				"id":      id,
+				"command": "ls",
+			}},
+		}, state)
+	}
+
+	// Interstitial commentary: message completes before the tool starts.
+	delta("msg_1", "Let me look.")
+	s.handleNotification(jsonRPCMessage{
+		Method: "item/completed",
+		Params: map[string]any{"item": map[string]any{"type": "agentMessage", "id": "msg_1", "text": "Let me look."}},
+	}, state)
+	tool("item/started", "cmd_1")
+
+	// Final answer streams while cmd_1 is still running and completes later.
+	delta("msg_2", "## Report\n\n")
+	tool("item/completed", "cmd_1")
+	delta("msg_2", "```cpp\nint x;\n```\n")
+	s.handleNotification(jsonRPCMessage{
+		Method: "item/completed",
+		Params: map[string]any{"item": map[string]any{"type": "agentMessage", "id": "msg_2", "text": "## Report\n\n```cpp\nint x;\n```\n"}},
+	}, state)
+	terminal := s.handleNotification(jsonRPCMessage{
+		Method: "turn/completed",
+		Params: map[string]any{"turn": map[string]any{"status": "completed"}},
+	}, state)
+	if !terminal {
+		t.Fatalf("turn/completed should be terminal")
+	}
+
+	var thinking []string
+	var completed *runtime.Event
+	for len(s.events) > 0 {
+		evt := <-s.events
+		if evt.Thinking != "" {
+			thinking = append(thinking, evt.Thinking)
+		}
+		if evt.Type == runtime.EventCompleted {
+			e := evt
+			completed = &e
+		}
+	}
+	if len(thinking) != 1 || thinking[0] != "Let me look." {
+		t.Fatalf("thinking = %#v, want only the interstitial message", thinking)
+	}
+	if completed == nil || completed.Text != "## Report\n\n```cpp\nint x;\n```\n" {
+		t.Fatalf("completed event = %#v", completed)
 	}
 }
 

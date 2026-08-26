@@ -24,7 +24,7 @@ func goalChunk(processCount int, text string) string {
 
 func TestGoalIntermediateTurnCompletedIsNotTerminal(t *testing.T) {
 	tr := newGoalTurnTracker()
-	tr.state.writePendingAgentText("round one answer")
+	tr.state.writePendingAgentText("", "round one answer")
 
 	events, ctrl, handled := tr.handleControl(turnCompletedMsg("completed"), 0)
 
@@ -50,13 +50,13 @@ func TestGoalEachTurnIsAProcessBreakSeparatedBlock(t *testing.T) {
 	tr := newGoalTurnTracker()
 
 	// Round one ran 2 tool calls (process items) before answering.
-	tr.state.writePendingAgentText("round one")
+	tr.state.writePendingAgentText("", "round one")
 	tr.handleControl(turnCompletedMsg("completed"), 2)
 
 	// A continuation turn starts (the loop sets turnActive on turn/started),
 	// runs 3 more tool calls, then answers.
 	tr.turnActive = true
-	tr.state.writePendingAgentText("round two")
+	tr.state.writePendingAgentText("", "round two")
 	events, ctrl, _ := tr.handleControl(turnCompletedMsg("completed"), 5)
 
 	if ctrl != goalCtrlArmIdle {
@@ -99,7 +99,7 @@ func TestGoalTerminalStatusDuringActiveTurnWaitsForTurnCompleted(t *testing.T) {
 		t.Fatalf("goalDone should be set")
 	}
 
-	tr.state.writePendingAgentText("final summary")
+	tr.state.writePendingAgentText("", "final summary")
 	events, ctrl, _ = tr.handleControl(turnCompletedMsg("completed"), 4)
 	if ctrl != goalCtrlStop {
 		t.Fatalf("ctrl = %v, want goalCtrlStop once the final turn completes", ctrl)
@@ -114,7 +114,7 @@ func TestGoalTerminalStatusDuringActiveTurnWaitsForTurnCompleted(t *testing.T) {
 
 func TestGoalTerminalStatusBetweenTurnsCompletesImmediately(t *testing.T) {
 	tr := newGoalTurnTracker()
-	tr.state.writePendingAgentText("the answer")
+	tr.state.writePendingAgentText("", "the answer")
 	tr.handleControl(turnCompletedMsg("completed"), 1) // turnActive -> false, arms idle
 
 	events, ctrl, _ := tr.handleControl(jsonRPCMessage{
@@ -144,11 +144,11 @@ func turnCompletedWithInputTokens(status string, inputTokens int) jsonRPCMessage
 func TestGoalAccumulatesUsageAcrossTurns(t *testing.T) {
 	tr := newGoalTurnTracker()
 
-	tr.state.writePendingAgentText("r1")
+	tr.state.writePendingAgentText("", "r1")
 	tr.handleControl(turnCompletedWithInputTokens("completed", 10), 0) // round one: 10 input tokens
 
 	tr.turnActive = true
-	tr.state.writePendingAgentText("r2")
+	tr.state.writePendingAgentText("", "r2")
 	tr.handleControl(jsonRPCMessage{Method: "thread/goal/updated", Params: map[string]any{"status": "completed"}}, 0)
 	events, ctrl, _ := tr.handleControl(turnCompletedWithInputTokens("completed", 7), 0) // round two: 7 input tokens
 
@@ -210,7 +210,7 @@ func TestRPCClientDrainDiscardsBufferedNotifications(t *testing.T) {
 
 func TestGoalProgressUpdateKeepsRunning(t *testing.T) {
 	tr := newGoalTurnTracker()
-	tr.state.writePendingAgentText("partial")
+	tr.state.writePendingAgentText("", "partial")
 	tr.handleControl(turnCompletedMsg("completed"), 0)
 
 	events, ctrl, handled := tr.handleControl(jsonRPCMessage{
@@ -227,7 +227,7 @@ func TestGoalProgressUpdateKeepsRunning(t *testing.T) {
 
 func TestGoalClearedCompletesRun(t *testing.T) {
 	tr := newGoalTurnTracker()
-	tr.state.writePendingAgentText("done")
+	tr.state.writePendingAgentText("", "done")
 	tr.handleControl(turnCompletedMsg("completed"), 0)
 
 	events, ctrl, _ := tr.handleControl(jsonRPCMessage{Method: "thread/goal/cleared"}, 0)
@@ -241,7 +241,7 @@ func TestGoalClearedCompletesRun(t *testing.T) {
 
 func TestGoalInterruptedTurnEmitsCanceled(t *testing.T) {
 	tr := newGoalTurnTracker()
-	tr.state.writePendingAgentText("partial work")
+	tr.state.writePendingAgentText("", "partial work")
 
 	events, ctrl, _ := tr.handleControl(turnCompletedMsg("interrupted"), 0)
 	if ctrl != goalCtrlStop {
@@ -269,7 +269,7 @@ func TestGoalStreamingNotificationsAreDelegated(t *testing.T) {
 
 func TestGoalFinishGoalUsesTranscript(t *testing.T) {
 	tr := newGoalTurnTracker()
-	tr.state.writePendingAgentText("answer")
+	tr.state.writePendingAgentText("", "answer")
 	tr.handleControl(turnCompletedMsg("completed"), 0)
 
 	events := tr.finishGoal(0)
