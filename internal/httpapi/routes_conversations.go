@@ -17,6 +17,12 @@ import (
 	"github.com/meteorsky/agentx/internal/domain"
 )
 
+// multipartMemoryBytes bounds how much of an upload is buffered in memory while
+// parsing multipart/form-data; anything larger spills to temporary files. It is
+// not an upload size limit — attachment size is unlimited. Tests lower it to
+// exercise the spilled-to-disk path.
+var multipartMemoryBytes int64 = 32 << 20
+
 type sendMessageRequest struct {
 	Body             string `json:"body"`
 	ReplyToMessageID string `json:"reply_to_message_id"`
@@ -178,7 +184,8 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req, attachments, err := s.readSendMessageRequest(w, r)
+	req, attachments, err := s.readSendMessageRequest(r)
+	defer cleanupMultipartForm(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -227,10 +234,10 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, redactMessageProcessDetails(message))
 }
 
-func (s *Server) readSendMessageRequest(w http.ResponseWriter, r *http.Request) (sendMessageRequest, []app.AttachmentUpload, error) {
+func (s *Server) readSendMessageRequest(r *http.Request) (sendMessageRequest, []app.AttachmentUpload, error) {
 	contentType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if strings.EqualFold(contentType, "multipart/form-data") {
-		return readMultipartSendMessageRequest(w, r)
+		return readMultipartSendMessageRequest(r)
 	}
 
 	var req sendMessageRequest
@@ -240,13 +247,9 @@ func (s *Server) readSendMessageRequest(w http.ResponseWriter, r *http.Request) 
 	return req, nil, nil
 }
 
-func readMultipartSendMessageRequest(w http.ResponseWriter, r *http.Request) (sendMessageRequest, []app.AttachmentUpload, error) {
-	r.Body = http.MaxBytesReader(w, r.Body, app.MaxMessageAttachmentTotalBytes+1024*1024)
-	if err := r.ParseMultipartForm(app.MaxMessageAttachmentTotalBytes + 1024*1024); err != nil {
+func readMultipartSendMessageRequest(r *http.Request) (sendMessageRequest, []app.AttachmentUpload, error) {
+	if err := r.ParseMultipartForm(multipartMemoryBytes); err != nil {
 		return sendMessageRequest{}, nil, errors.New("malformed multipart form")
-	}
-	if r.MultipartForm != nil {
-		defer r.MultipartForm.RemoveAll()
 	}
 
 	req := sendMessageRequest{
@@ -260,8 +263,11 @@ func readMultipartSendMessageRequest(w http.ResponseWriter, r *http.Request) (se
 	return req, attachments, nil
 }
 
-// parseMultipartAttachments reads uploaded files from an already-parsed
+// parseMultipartAttachments collects uploaded files from an already-parsed
 // multipart form. Files may be supplied under either "files[]" or "files".
+// Contents are left on the multipart form and streamed later, so the caller
+// must keep the form alive (see cleanupMultipartForm) until the app layer has
+// copied them to their final location.
 func parseMultipartAttachments(form *multipart.Form) ([]app.AttachmentUpload, error) {
 	if form == nil {
 		return nil, nil
@@ -271,31 +277,29 @@ func parseMultipartAttachments(form *multipart.Form) ([]app.AttachmentUpload, er
 	headers = append(headers, form.File["files"]...)
 	attachments := make([]app.AttachmentUpload, 0, len(headers))
 	for _, header := range headers {
-		file, err := header.Open()
-		if err != nil {
-			slog.Warn("failed to open uploaded attachment", "filename", header.Filename, "error", err)
-			return nil, errors.New("failed to read attachment")
-		}
-		data, readErr := io.ReadAll(io.LimitReader(file, app.MaxAttachmentBytes+1))
-		closeErr := file.Close()
-		if readErr != nil {
-			slog.Warn("failed to read uploaded attachment", "filename", header.Filename, "error", readErr)
-			return nil, errors.New("failed to read attachment")
-		}
-		if closeErr != nil {
-			slog.Warn("failed to close uploaded attachment", "filename", header.Filename, "error", closeErr)
-			return nil, errors.New("failed to read attachment")
-		}
-		if int64(len(data)) > app.MaxAttachmentBytes {
-			return nil, errors.New("attachment exceeds 10 MiB")
-		}
 		attachments = append(attachments, app.AttachmentUpload{
 			Filename:    header.Filename,
 			ContentType: header.Header.Get("Content-Type"),
-			Data:        data,
+			Open: func() (io.ReadCloser, error) {
+				file, err := header.Open()
+				if err != nil {
+					slog.Warn("failed to open uploaded attachment", "filename", header.Filename, "error", err)
+					return nil, errors.New("failed to read attachment")
+				}
+				return file, nil
+			},
 		})
 	}
 	return attachments, nil
+}
+
+// cleanupMultipartForm removes the temporary files a multipart upload spilled to
+// disk. Attachments stream directly from those files, so this has to run only
+// once the handler is done with them.
+func cleanupMultipartForm(r *http.Request) {
+	if r.MultipartForm != nil {
+		_ = r.MultipartForm.RemoveAll()
+	}
 }
 
 type inputResponseRequest struct {

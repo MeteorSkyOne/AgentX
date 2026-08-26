@@ -1596,6 +1596,46 @@ func TestHTTPSendReplyMessageReturnsResolvedReferenceAndRejectsInvalidTarget(t *
 	}, http.StatusBadRequest, nil)
 }
 
+// Uploads larger than the multipart memory budget are spilled to temporary
+// files by net/http and streamed from there, so the attachment has to be stored
+// before those temporaries are cleaned up.
+func TestHTTPMultipartAttachmentLargerThanMemoryBudgetIsStreamedToDisk(t *testing.T) {
+	previous := multipartMemoryBytes
+	multipartMemoryBytes = 1
+	t.Cleanup(func() { multipartMemoryBytes = previous })
+
+	env := newTestEnv(t)
+	bootstrap := setupHTTP(t, env.server.URL)
+	payload := []byte(strings.Repeat("streamed attachment ", 4096))
+
+	var sent domain.Message
+	postMultipartMessage(t, env.server.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/messages", bootstrap.SessionToken, map[string]string{
+		"body": "big attachment",
+	}, []multipartTestFile{{
+		Field:       "files[]",
+		Filename:    "big.txt",
+		ContentType: "text/plain",
+		Body:        payload,
+	}}, http.StatusOK, &sent)
+	if len(sent.Attachments) != 1 {
+		t.Fatalf("attachments = %d, want 1", len(sent.Attachments))
+	}
+	if got := sent.Attachments[0].SizeBytes; got != int64(len(payload)) {
+		t.Fatalf("size = %d, want %d", got, len(payload))
+	}
+	if kind := sent.Attachments[0].Kind; kind != domain.MessageAttachmentText {
+		t.Fatalf("kind = %q, want %q", kind, domain.MessageAttachmentText)
+	}
+
+	status, _, body := getRaw(t, env.server.URL+"/api/attachments/"+sent.Attachments[0].ID+"/content", bootstrap.SessionToken)
+	if status != http.StatusOK {
+		t.Fatalf("attachment content status = %d, body = %s", status, string(body))
+	}
+	if !bytes.Equal(body, payload) {
+		t.Fatalf("attachment body length = %d, want %d", len(body), len(payload))
+	}
+}
+
 func TestHTTPMultipartAttachmentsCanBeSentDownloadedAndAuthorized(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()

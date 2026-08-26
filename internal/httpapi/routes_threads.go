@@ -62,7 +62,8 @@ func (s *Server) handleCreateThread(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
 	}
-	req, attachments, err := s.readCreateThreadRequest(w, r)
+	req, attachments, err := s.readCreateThreadRequest(r)
+	defer cleanupMultipartForm(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -81,15 +82,11 @@ func (s *Server) handleCreateThread(w http.ResponseWriter, r *http.Request) {
 
 // readCreateThreadRequest parses a thread-creation request as either JSON or,
 // when files are attached, multipart/form-data carrying title, body, and files.
-func (s *Server) readCreateThreadRequest(w http.ResponseWriter, r *http.Request) (threadCreateRequest, []app.AttachmentUpload, error) {
+func (s *Server) readCreateThreadRequest(r *http.Request) (threadCreateRequest, []app.AttachmentUpload, error) {
 	contentType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if strings.EqualFold(contentType, "multipart/form-data") {
-		r.Body = http.MaxBytesReader(w, r.Body, app.MaxMessageAttachmentTotalBytes+1024*1024)
-		if err := r.ParseMultipartForm(app.MaxMessageAttachmentTotalBytes + 1024*1024); err != nil {
+		if err := r.ParseMultipartForm(multipartMemoryBytes); err != nil {
 			return threadCreateRequest{}, nil, errors.New("malformed multipart form")
-		}
-		if r.MultipartForm != nil {
-			defer r.MultipartForm.RemoveAll()
 		}
 		req := threadCreateRequest{
 			Title:       r.FormValue("title"),

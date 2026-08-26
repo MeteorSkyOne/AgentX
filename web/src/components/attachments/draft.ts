@@ -4,9 +4,8 @@ export interface DraftAttachment {
   previewURL?: string;
 }
 
+// Only the file count is capped; attachment size is unlimited.
 export const maxDraftAttachments = 5;
-export const maxDraftAttachmentBytes = 10 * 1024 * 1024;
-export const maxDraftAttachmentTotalBytes = 25 * 1024 * 1024;
 
 const imageDraftContentTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
@@ -36,7 +35,6 @@ export function selectDraftAttachmentFiles(
 ): { accepted: File[]; rejected: string[] } {
   const accepted: File[] = [];
   const rejected: string[] = [];
-  let totalBytes = existingFiles.reduce((sum, file) => sum + file.size, 0);
   let remainingSlots = Math.max(0, maxDraftAttachments - existingFiles.length);
 
   for (const file of incomingFiles) {
@@ -49,17 +47,8 @@ export function selectDraftAttachmentFiles(
       rejected.push(`${name} is empty`);
       continue;
     }
-    if (file.size > maxDraftAttachmentBytes) {
-      rejected.push(`${name} exceeds 10 MiB`);
-      continue;
-    }
-    if (totalBytes + file.size > maxDraftAttachmentTotalBytes) {
-      rejected.push(`${name} would exceed 25 MiB total`);
-      continue;
-    }
     accepted.push(file);
     remainingSlots -= 1;
-    totalBytes += file.size;
   }
 
   return { accepted, rejected };

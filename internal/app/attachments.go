@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"io"
 	"mime"
 	"net/http"
 	"os"
@@ -15,16 +16,26 @@ import (
 	"github.com/meteorsky/agentx/internal/id"
 )
 
-const (
-	MaxMessageAttachments          = 5
-	MaxAttachmentBytes             = 10 * 1024 * 1024
-	MaxMessageAttachmentTotalBytes = 25 * 1024 * 1024
-)
+// MaxMessageAttachments caps how many files a single message may carry.
+// Attachment size is intentionally unlimited.
+const MaxMessageAttachments = 5
 
 type AttachmentUpload struct {
 	Filename    string
 	ContentType string
-	Data        []byte
+	// Data holds the whole attachment for in-process callers. It is ignored
+	// when Open is set.
+	Data []byte
+	// Open, when set, yields the attachment contents as a stream so uploads are
+	// copied straight to disk instead of being buffered in memory.
+	Open func() (io.ReadCloser, error)
+}
+
+func (u AttachmentUpload) open() (io.ReadCloser, error) {
+	if u.Open != nil {
+		return u.Open()
+	}
+	return io.NopCloser(bytes.NewReader(u.Data)), nil
 }
 
 func (a *App) Attachment(ctx context.Context, attachmentID string) (domain.MessageAttachment, error) {
@@ -39,27 +50,6 @@ func (a *App) prepareMessageAttachments(message domain.Message, uploads []Attach
 		return nil, invalidInput("too many attachments")
 	}
 
-	var total int64
-	classified := make([]attachmentClassification, 0, len(uploads))
-	for _, upload := range uploads {
-		size := int64(len(upload.Data))
-		if size == 0 {
-			return nil, invalidInput("empty attachment")
-		}
-		if size > MaxAttachmentBytes {
-			return nil, invalidInput("attachment exceeds 10 MiB")
-		}
-		total += size
-		if total > MaxMessageAttachmentTotalBytes {
-			return nil, invalidInput("attachments exceed 25 MiB total")
-		}
-		info, err := classifyAttachment(upload)
-		if err != nil {
-			return nil, err
-		}
-		classified = append(classified, info)
-	}
-
 	dir := a.messageAttachmentDir(message)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
@@ -67,13 +57,22 @@ func (a *App) prepareMessageAttachments(message domain.Message, uploads []Attach
 
 	attachments := make([]domain.MessageAttachment, 0, len(uploads))
 	for index, upload := range uploads {
-		info := classified[index]
 		attachmentID := id.New("att")
-		storagePath := filepath.Join(dir, attachmentID+safeAttachmentExt(info.Filename))
-		if err := os.WriteFile(storagePath, upload.Data, 0o600); err != nil {
+		filename := sanitizeAttachmentFilename(upload.Filename)
+		storagePath := filepath.Join(dir, attachmentID+safeAttachmentExt(filename))
+
+		stored, err := storeAttachmentFile(storagePath, upload)
+		if err == nil && stored.size == 0 {
+			err = invalidInput("empty attachment")
+		}
+		if err != nil {
+			_ = os.Remove(storagePath)
 			_ = removeAttachmentFiles(attachments)
+			_ = os.Remove(dir)
 			return nil, err
 		}
+
+		info := classifyAttachment(filename, upload.ContentType, stored)
 		attachments = append(attachments, domain.MessageAttachment{
 			ID:               attachmentID,
 			MessageID:        message.ID,
@@ -83,12 +82,45 @@ func (a *App) prepareMessageAttachments(message domain.Message, uploads []Attach
 			Filename:         info.Filename,
 			ContentType:      info.ContentType,
 			Kind:             info.Kind,
-			SizeBytes:        int64(len(upload.Data)),
+			SizeBytes:        stored.size,
 			StoragePath:      storagePath,
 			CreatedAt:        message.CreatedAt.Add(time.Duration(index)),
 		})
 	}
 	return attachments, nil
+}
+
+// storedAttachment describes an attachment that has already been streamed to
+// disk: everything classification needs, without holding the payload in memory.
+type storedAttachment struct {
+	size  int64
+	sniff []byte
+	text  bool
+}
+
+// storeAttachmentFile copies an upload to path, inspecting the bytes as they go
+// past so the file never has to be read back or held in memory.
+func storeAttachmentFile(path string, upload AttachmentUpload) (storedAttachment, error) {
+	src, err := upload.open()
+	if err != nil {
+		return storedAttachment{}, err
+	}
+	defer src.Close()
+
+	dst, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return storedAttachment{}, err
+	}
+	scanner := &attachmentScanner{}
+	size, copyErr := io.Copy(dst, io.TeeReader(src, scanner))
+	closeErr := dst.Close()
+	if copyErr != nil {
+		return storedAttachment{}, copyErr
+	}
+	if closeErr != nil {
+		return storedAttachment{}, closeErr
+	}
+	return storedAttachment{size: size, sniff: scanner.sniff, text: scanner.isText()}, nil
 }
 
 func (a *App) messageAttachmentDir(message domain.Message) string {
@@ -112,10 +144,9 @@ type attachmentClassification struct {
 	Kind        domain.MessageAttachmentKind
 }
 
-func classifyAttachment(upload AttachmentUpload) (attachmentClassification, error) {
-	filename := sanitizeAttachmentFilename(upload.Filename)
-	headerType := mediaType(upload.ContentType)
-	detectedType := mediaType(http.DetectContentType(sniffBytes(upload.Data)))
+func classifyAttachment(filename string, uploadContentType string, stored storedAttachment) attachmentClassification {
+	headerType := mediaType(uploadContentType)
+	detectedType := mediaType(http.DetectContentType(stored.sniff))
 	ext := strings.ToLower(filepath.Ext(filename))
 
 	if isAllowedImageType(detectedType) || (isAllowedImageType(headerType) && detectedType == "application/octet-stream") {
@@ -127,10 +158,10 @@ func classifyAttachment(upload AttachmentUpload) (attachmentClassification, erro
 			Filename:    filename,
 			ContentType: contentType,
 			Kind:        domain.MessageAttachmentImage,
-		}, nil
+		}
 	}
 
-	if isUTF8Text(upload.Data) && isTextAttachmentType(headerType, detectedType, ext) {
+	if stored.text && isTextAttachmentType(headerType, detectedType, ext) {
 		contentType := headerType
 		if contentType == "" || contentType == "application/octet-stream" {
 			contentType = detectedType
@@ -142,7 +173,7 @@ func classifyAttachment(upload AttachmentUpload) (attachmentClassification, erro
 			Filename:    filename,
 			ContentType: contentType,
 			Kind:        domain.MessageAttachmentText,
-		}, nil
+		}
 	}
 
 	contentType := headerType
@@ -156,14 +187,87 @@ func classifyAttachment(upload AttachmentUpload) (attachmentClassification, erro
 		Filename:    filename,
 		ContentType: contentType,
 		Kind:        domain.MessageAttachmentFile,
-	}, nil
+	}
 }
 
-func sniffBytes(data []byte) []byte {
-	if len(data) > 512 {
-		return data[:512]
+// attachmentSniffBytes matches what http.DetectContentType inspects.
+const attachmentSniffBytes = 512
+
+// attachmentScanner inspects attachment bytes as they stream to disk: it keeps
+// the leading bytes for content sniffing and tracks whether the payload so far
+// is NUL-free valid UTF-8.
+type attachmentScanner struct {
+	sniff   []byte
+	binary  bool
+	partial []byte
+}
+
+func (s *attachmentScanner) Write(p []byte) (int, error) {
+	if len(s.sniff) < attachmentSniffBytes {
+		s.sniff = append(s.sniff, p[:min(len(p), attachmentSniffBytes-len(s.sniff))]...)
 	}
-	return data
+	if s.binary {
+		return len(p), nil
+	}
+	if bytes.IndexByte(p, 0) >= 0 {
+		s.binary = true
+		s.partial = nil
+		return len(p), nil
+	}
+
+	buf := p
+	if len(s.partial) > 0 {
+		buf = append(s.partial, p...)
+		s.partial = nil
+	}
+	complete, partial := splitTrailingRune(buf)
+	if !utf8.Valid(complete) {
+		s.binary = true
+		return len(p), nil
+	}
+	if len(partial) > 0 {
+		s.partial = append([]byte(nil), partial...)
+	}
+	return len(p), nil
+}
+
+// isText reports whether every byte written formed NUL-free valid UTF-8. A
+// leftover partial rune means the payload ended mid-sequence, which is not.
+func (s *attachmentScanner) isText() bool {
+	return !s.binary && len(s.partial) == 0
+}
+
+// splitTrailingRune splits buf just before a trailing incomplete UTF-8 rune so
+// that a multi-byte rune straddling two writes is validated as a whole.
+func splitTrailingRune(buf []byte) (complete []byte, partial []byte) {
+	for i := 1; i <= utf8.UTFMax && i <= len(buf); i++ {
+		b := buf[len(buf)-i]
+		if !utf8.RuneStart(b) {
+			continue
+		}
+		if runeByteLen(b) > i {
+			return buf[:len(buf)-i], buf[len(buf)-i:]
+		}
+		return buf, nil
+	}
+	return buf, nil
+}
+
+// runeByteLen returns the encoded length of the rune starting with b, or 1 for
+// bytes that cannot start one so utf8.Valid gets to reject them.
+func runeByteLen(b byte) int {
+	switch {
+	case b < 0x80:
+		return 1
+	case b&0xE0 == 0xC0:
+		return 2
+	case b&0xF0 == 0xE0:
+		return 3
+	case b&0xF8 == 0xF0:
+		return 4
+	default:
+		return 1
+	}
 }
 
 func isAllowedImageType(contentType string) bool {
@@ -198,10 +302,6 @@ func isKnownTextExtension(ext string) bool {
 	default:
 		return false
 	}
-}
-
-func isUTF8Text(data []byte) bool {
-	return utf8.Valid(data) && !bytes.Contains(data, []byte{0})
 }
 
 func mediaType(value string) string {
