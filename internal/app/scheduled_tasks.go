@@ -609,9 +609,37 @@ func (a *App) executeScheduledForumPost(ctx context.Context, task domain.Schedul
 	if err := a.store.Threads().Create(ctx, thread); err != nil {
 		return scheduledPromptOutcome{}, err
 	}
+	if err := a.applyScheduledForumPostMembers(ctx, task, thread, now); err != nil {
+		return scheduledPromptOutcome{}, err
+	}
 	outcome, err := a.dispatchScheduledPrompt(ctx, task, run, domain.ConversationThread, thread.ID)
 	outcome.ThreadID = thread.ID
 	return outcome, err
+}
+
+// applyScheduledForumPostMembers scopes a scheduled post to its target agent,
+// matching what an @mention does for a hand-written post. Tasks that target no
+// specific agent leave the post open to every channel agent.
+func (a *App) applyScheduledForumPostMembers(ctx context.Context, task domain.ScheduledTask, thread domain.Thread, now time.Time) error {
+	channelAgents, err := a.ChannelAgents(ctx, thread.ChannelID)
+	if err != nil {
+		return err
+	}
+	var targets []ConversationAgentContext
+	if task.AgentID != "" {
+		for _, agent := range channelAgents {
+			if agent.Agent.ID == task.AgentID {
+				targets = []ConversationAgentContext{agent}
+				break
+			}
+		}
+	} else {
+		targets = mentionedAgentsForBody(channelAgents, task.Prompt)
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+	return a.store.ThreadAgents().ReplaceForThread(ctx, thread.ID, threadAgentRows(thread.ID, targets, now))
 }
 
 func (a *App) dispatchScheduledPrompt(

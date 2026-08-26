@@ -137,6 +137,7 @@ export interface ShellProps {
   onSaveChannelAgents: (
     bindings: Array<{ agent_id: string; run_workspace_id?: string }>
   ) => Promise<void>;
+  onSaveThreadAgents: (agentIDs: string[]) => Promise<void>;
   onCreateAgent: (payload: {
     name: string;
     description?: string;

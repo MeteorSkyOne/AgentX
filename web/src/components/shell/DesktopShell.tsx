@@ -71,7 +71,9 @@ interface DesktopShellProps {
   setMembersPanelOpen: Dispatch<SetStateAction<boolean>>;
   setAgentPanelOpen: Dispatch<SetStateAction<boolean>>;
   setAgentDraftOpen: Dispatch<SetStateAction<boolean>>;
+  channelAgents: ConversationAgentContext[];
   onSaveChannelAgents: ShellProps["onSaveChannelAgents"];
+  onSaveThreadAgents: ShellProps["onSaveThreadAgents"];
   user: ShellProps["user"];
   organization: ShellProps["organization"];
   openAccountSettings: () => void;
@@ -170,7 +172,9 @@ export function DesktopShell({
   setMembersPanelOpen,
   setAgentPanelOpen,
   setAgentDraftOpen,
+  channelAgents,
   onSaveChannelAgents,
+  onSaveThreadAgents,
   user,
   organization,
   openAccountSettings,
@@ -704,9 +708,12 @@ export function DesktopShell({
               <MembersPanel
                 agents={activeAgents}
                 boundAgents={boundAgents}
+                channelAgents={channelAgents}
                 projectWorkspace={projectWorkspace}
                 selectedChannel={selectedChannel}
+                activeThread={activeThread}
                 onSaveChannelAgents={onSaveChannelAgents}
+                onSaveThreadAgents={onSaveThreadAgents}
                 onClose={() => setMembersPanelOpen(false)}
               />
             </ResizablePanel>

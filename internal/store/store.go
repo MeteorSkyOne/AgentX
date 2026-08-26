@@ -22,6 +22,7 @@ type Store interface {
 	Agents() AgentStore
 	Workspaces() WorkspaceStore
 	ChannelAgents() ChannelAgentStore
+	ThreadAgents() ThreadAgentStore
 	Bindings() BindingStore
 	Sessions() SessionStore
 	Metrics() MetricsStore
@@ -44,6 +45,7 @@ type Tx interface {
 	Agents() AgentStore
 	Workspaces() WorkspaceStore
 	ChannelAgents() ChannelAgentStore
+	ThreadAgents() ThreadAgentStore
 	Bindings() BindingStore
 	Sessions() SessionStore
 	Metrics() MetricsStore
@@ -148,6 +150,12 @@ type ChannelAgentStore interface {
 	ReplaceForChannel(ctx context.Context, channelID string, agents []domain.ChannelAgent) error
 	ListByChannel(ctx context.Context, channelID string) ([]domain.ChannelAgent, error)
 	ListByAgent(ctx context.Context, agentID string) ([]domain.ChannelAgent, error)
+	DeleteForAgent(ctx context.Context, agentID string) error
+}
+
+type ThreadAgentStore interface {
+	ReplaceForThread(ctx context.Context, threadID string, agents []domain.ThreadAgent) error
+	ListByThread(ctx context.Context, threadID string) ([]domain.ThreadAgent, error)
 	DeleteForAgent(ctx context.Context, agentID string) error
 }
 

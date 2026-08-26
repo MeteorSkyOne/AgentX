@@ -126,7 +126,9 @@ interface MobileShellProps {
   onToggleTheme: ShellProps["onToggleTheme"];
   onLogout: ShellProps["onLogout"];
   mobileMembersPanelOpen: boolean;
+  channelAgents: ConversationAgentContext[];
   onSaveChannelAgents: ShellProps["onSaveChannelAgents"];
+  onSaveThreadAgents: ShellProps["onSaveThreadAgents"];
   mobileAgentPanelOpen: boolean;
   selectedAgent?: Agent;
   onUpdateAgent: ShellProps["onUpdateAgent"];
@@ -228,7 +230,9 @@ export function MobileShell({
   onToggleTheme,
   onLogout,
   mobileMembersPanelOpen,
+  channelAgents,
   onSaveChannelAgents,
+  onSaveThreadAgents,
   mobileAgentPanelOpen,
   selectedAgent,
   onUpdateAgent,
@@ -792,9 +796,12 @@ export function MobileShell({
             <MembersPanel
               agents={activeAgents}
               boundAgents={boundAgents}
+              channelAgents={channelAgents}
               projectWorkspace={projectWorkspace}
               selectedChannel={selectedChannel}
+              activeThread={activeThread}
               onSaveChannelAgents={onSaveChannelAgents}
+              onSaveThreadAgents={onSaveThreadAgents}
               onClose={() => setMobileMembersPanelOpen(false)}
             />
           </DialogContent>

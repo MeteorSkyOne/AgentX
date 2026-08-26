@@ -685,6 +685,25 @@ export function setChannelAgents(
   );
 }
 
+export function threadAgents(threadID: string): Promise<ConversationAgentContext[]> {
+  return request<ConversationAgentContext[]>(
+    `/api/threads/${encodeURIComponent(threadID)}/agents`
+  );
+}
+
+export function setThreadAgents(
+  threadID: string,
+  agentIDs: string[]
+): Promise<ConversationAgentContext[]> {
+  return request<ConversationAgentContext[]>(
+    `/api/threads/${encodeURIComponent(threadID)}/agents`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ agent_ids: agentIDs })
+    }
+  );
+}
+
 export function workspaceTree(
   workspaceID: string,
   path = "",

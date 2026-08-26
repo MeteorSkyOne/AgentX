@@ -85,6 +85,8 @@ func NewRouter(a *app.App, bus *eventbus.Bus) http.Handler {
 			r.Post("/channels/{channelID}/threads", s.handleCreateThread)
 			r.Get("/channels/{channelID}/agents", s.handleChannelAgents)
 			r.Put("/channels/{channelID}/agents", s.handleSetChannelAgents)
+			r.Get("/threads/{threadID}/agents", s.handleThreadAgents)
+			r.Put("/threads/{threadID}/agents", s.handleSetThreadAgents)
 			r.Patch("/threads/{threadID}", s.handleUpdateThread)
 			r.Delete("/threads/{threadID}", s.handleArchiveThread)
 			r.Get("/agents/{agentID}/limits", s.handleAgentLimits)

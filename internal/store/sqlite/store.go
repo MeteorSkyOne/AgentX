@@ -92,6 +92,10 @@ func (s *Store) ChannelAgents() store.ChannelAgentStore {
 	return channelAgentRepo{q: s.db}
 }
 
+func (s *Store) ThreadAgents() store.ThreadAgentStore {
+	return threadAgentRepo{q: s.db}
+}
+
 func (s *Store) Bindings() store.BindingStore {
 	return bindingRepo{q: s.db}
 }
@@ -166,6 +170,10 @@ func (t *txStore) Workspaces() store.WorkspaceStore {
 
 func (t *txStore) ChannelAgents() store.ChannelAgentStore {
 	return channelAgentRepo{q: t.tx}
+}
+
+func (t *txStore) ThreadAgents() store.ThreadAgentStore {
+	return threadAgentRepo{q: t.tx}
 }
 
 func (t *txStore) Bindings() store.BindingStore {

@@ -20,6 +20,10 @@ type threadUpdateRequest struct {
 	Title string `json:"title"`
 }
 
+type threadAgentsRequest struct {
+	AgentIDs []string `json:"agent_ids"`
+}
+
 func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
 	userID, ok := userIDFromContext(r.Context())
 	if !ok {
@@ -132,6 +136,57 @@ func (s *Server) handleUpdateThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)
+}
+
+func (s *Server) handleThreadAgents(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	thread, ok, err := s.authorizedThread(r, userID, chi.URLParam(r, "threadID"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "thread not found")
+		return
+	}
+	agents, err := s.app.ThreadAgents(r.Context(), thread.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, redactConversationAgents(agents))
+}
+
+func (s *Server) handleSetThreadAgents(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	thread, ok, err := s.authorizedThread(r, userID, chi.URLParam(r, "threadID"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "thread not found")
+		return
+	}
+	var req threadAgentsRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "malformed JSON")
+		return
+	}
+	agents, err := s.app.SetThreadAgents(r.Context(), thread.ID, req.AgentIDs)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, redactConversationAgents(agents))
 }
 
 func (s *Server) handleArchiveThread(w http.ResponseWriter, r *http.Request) {

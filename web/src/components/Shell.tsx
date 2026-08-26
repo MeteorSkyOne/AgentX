@@ -82,6 +82,7 @@ export function Shell({
   onUpdateThread,
   onDeleteThread,
   onSaveChannelAgents,
+  onSaveThreadAgents,
   onCreateAgent,
   onUpdateAgent,
   onDeleteAgent,
@@ -1015,7 +1016,9 @@ export function Shell({
           onToggleTheme={onToggleTheme}
           onLogout={onLogout}
           mobileMembersPanelOpen={mobileMembersPanelOpen}
+          channelAgents={channelAgents}
           onSaveChannelAgents={onSaveChannelAgents}
+          onSaveThreadAgents={onSaveThreadAgents}
           mobileAgentPanelOpen={mobileAgentPanelOpen}
           selectedAgent={selectedAgent}
           onUpdateAgent={onUpdateAgent}
@@ -1066,7 +1069,9 @@ export function Shell({
           setMembersPanelOpen={setMembersPanelOpen}
           setAgentPanelOpen={setAgentPanelOpen}
           setAgentDraftOpen={setAgentDraftOpen}
+          channelAgents={channelAgents}
           onSaveChannelAgents={onSaveChannelAgents}
+          onSaveThreadAgents={onSaveThreadAgents}
           user={user}
           organization={organization}
           openAccountSettings={openAccountSettings}

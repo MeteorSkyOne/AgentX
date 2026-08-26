@@ -199,6 +199,14 @@ type ChannelAgent struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
+// ThreadAgent restricts which channel agents take part in a forum post. A
+// thread with no rows inherits every agent bound to its channel.
+type ThreadAgent struct {
+	ThreadID  string    `json:"thread_id"`
+	AgentID   string    `json:"agent_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type ScheduledTaskKind string
 
 const (

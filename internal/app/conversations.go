@@ -436,7 +436,33 @@ func (a *App) conversationAgents(ctx context.Context, scope conversationScope) (
 			RunWorkspace:    runWorkspace,
 		})
 	}
-	return result, nil
+	if scope.thread == nil {
+		return result, nil
+	}
+	return a.filterThreadMembers(ctx, scope.thread.ID, result)
+}
+
+// filterThreadMembers narrows channel agents down to the members of a forum
+// post. Posts without an explicit member list inherit every channel agent.
+func (a *App) filterThreadMembers(ctx context.Context, threadID string, agents []ConversationAgentContext) ([]ConversationAgentContext, error) {
+	members, err := a.store.ThreadAgents().ListByThread(ctx, threadID)
+	if err != nil {
+		return nil, err
+	}
+	if len(members) == 0 {
+		return agents, nil
+	}
+	allowed := make(map[string]struct{}, len(members))
+	for _, member := range members {
+		allowed[member.AgentID] = struct{}{}
+	}
+	filtered := make([]ConversationAgentContext, 0, len(members))
+	for _, agent := range agents {
+		if _, ok := allowed[agent.Agent.ID]; ok {
+			filtered = append(filtered, agent)
+		}
+	}
+	return filtered, nil
 }
 
 func targetAgentsForBody(agents []ConversationAgentContext, body string) []ConversationAgentContext {

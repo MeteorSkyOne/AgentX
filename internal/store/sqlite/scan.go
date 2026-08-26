@@ -373,6 +373,22 @@ func scanChannelAgent(scanner interface {
 	return agent, nil
 }
 
+func scanThreadAgent(scanner interface {
+	Scan(dest ...any) error
+}) (domain.ThreadAgent, error) {
+	var agent domain.ThreadAgent
+	var createdAt string
+	if err := scanner.Scan(&agent.ThreadID, &agent.AgentID, &createdAt); err != nil {
+		return domain.ThreadAgent{}, err
+	}
+	var err error
+	agent.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return domain.ThreadAgent{}, err
+	}
+	return agent, nil
+}
+
 func scanBinding(scanner interface {
 	Scan(dest ...any) error
 }) (domain.ConversationBinding, error) {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Save, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select } from "@/components/ui/select";
-import type { Agent, Channel, ConversationAgentContext, Workspace } from "../../api/types";
+import type { Agent, Channel, ConversationAgentContext, Thread, Workspace } from "../../api/types";
 import { AgentAvatar } from "../AgentAvatar";
 import type { ShellProps } from "./types";
 import { agentKindLabel, agentToneColor, runWorkspaceOptions } from "./utils";
@@ -14,22 +14,36 @@ import { agentKindLabel, agentToneColor, runWorkspaceOptions } from "./utils";
 export function MembersPanel({
   agents,
   boundAgents,
+  channelAgents,
   projectWorkspace,
   selectedChannel,
+  activeThread,
   onSaveChannelAgents,
+  onSaveThreadAgents,
   onClose,
 }: {
   agents: Agent[];
   boundAgents: ConversationAgentContext[];
+  channelAgents?: ConversationAgentContext[];
   projectWorkspace?: Workspace;
   selectedChannel?: Channel;
+  activeThread?: Thread;
   onSaveChannelAgents: ShellProps["onSaveChannelAgents"];
+  onSaveThreadAgents?: ShellProps["onSaveThreadAgents"];
   onClose: () => void;
 }) {
+  // Inside a forum post the panel edits post membership, which can only be
+  // picked from the agents already bound to the channel.
+  const threadMode = Boolean(activeThread && onSaveThreadAgents);
+  const candidates = useMemo(
+    () => (threadMode ? (channelAgents ?? []).map((item) => item.agent) : agents),
+    [agents, channelAgents, threadMode]
+  );
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [runWorkspaceIDs, setRunWorkspaceIDs] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const next: Record<string, boolean> = {};
@@ -41,34 +55,47 @@ export function MembersPanel({
     setChecked(next);
     setRunWorkspaceIDs(nextRunWorkspaces);
     setDirty(false);
+    setError(null);
   }, [boundAgents]);
 
   function toggle(agentID: string, value: boolean) {
     setChecked((prev) => ({ ...prev, [agentID]: value }));
     setDirty(true);
+    setError(null);
   }
 
   async function save() {
     setSaving(true);
+    setError(null);
     try {
-      const bindings = agents
-        .filter((a) => checked[a.id])
-        .map((a) => ({
-          agent_id: a.id,
-          run_workspace_id: runWorkspaceIDs[a.id]?.trim() || undefined,
-        }));
-      await onSaveChannelAgents(bindings);
+      if (threadMode) {
+        await onSaveThreadAgents!(candidates.filter((a) => checked[a.id]).map((a) => a.id));
+      } else {
+        const bindings = candidates
+          .filter((a) => checked[a.id])
+          .map((a) => ({
+            agent_id: a.id,
+            run_workspace_id: runWorkspaceIDs[a.id]?.trim() || undefined,
+          }));
+        await onSaveChannelAgents(bindings);
+      }
       setDirty(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save members failed");
     } finally {
       setSaving(false);
     }
   }
 
-  const bound = agents.filter((a) => checked[a.id]);
-  const unbound = agents.filter((a) => !checked[a.id]);
+  const bound = candidates.filter((a) => checked[a.id]);
+  const unbound = candidates.filter((a) => !checked[a.id]);
+  const saveDisabled = saving || (threadMode && bound.length === 0);
 
   return (
-    <aside className="flex h-full min-h-0 min-w-0 flex-col border-l border-border bg-card" aria-label="Channel members">
+    <aside
+      className="flex h-full min-h-0 min-w-0 flex-col border-l border-border bg-card"
+      aria-label={threadMode ? "Post members" : "Channel members"}
+    >
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
         <span className="text-sm font-semibold">Members</span>
         <Button variant="ghost" size="icon" className="h-8 w-8" title="Close" aria-label="Close members" onClick={onClose}>
@@ -78,16 +105,24 @@ export function MembersPanel({
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="p-3 space-y-4">
-          {selectedChannel && (
-            <p className="text-xs text-muted-foreground uppercase font-semibold px-1">
-              #{selectedChannel.name}
-            </p>
+          {threadMode ? (
+            activeThread && (
+              <p className="truncate px-1 text-xs font-semibold uppercase text-muted-foreground">
+                {activeThread.title}
+              </p>
+            )
+          ) : (
+            selectedChannel && (
+              <p className="text-xs text-muted-foreground uppercase font-semibold px-1">
+                #{selectedChannel.name}
+              </p>
+            )
           )}
 
           {bound.length > 0 && (
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground uppercase font-semibold px-1">
-                Bound — {bound.length}
+                {threadMode ? "In this post" : "Bound"} — {bound.length}
               </p>
               {bound.map((a) => (
                 <div
@@ -114,22 +149,24 @@ export function MembersPanel({
                       {agentKindLabel(a.kind)}
                     </Badge>
                   </div>
-                  <Select
-                    className="mt-2"
-                    value={runWorkspaceIDs[a.id] ?? ""}
-                    onChange={(e) => {
-                      setRunWorkspaceIDs((current) => ({ ...current, [a.id]: e.target.value }));
-                      setDirty(true);
-                    }}
-                    aria-label={`${a.name} run workspace`}
-                    selectClassName="h-8 px-2 pr-8 text-xs"
-                  >
-                    {runWorkspaceOptions(a, boundAgents, projectWorkspace).map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </Select>
+                  {!threadMode && (
+                    <Select
+                      className="mt-2"
+                      value={runWorkspaceIDs[a.id] ?? ""}
+                      onChange={(e) => {
+                        setRunWorkspaceIDs((current) => ({ ...current, [a.id]: e.target.value }));
+                        setDirty(true);
+                      }}
+                      aria-label={`${a.name} run workspace`}
+                      selectClassName="h-8 px-2 pr-8 text-xs"
+                    >
+                      {runWorkspaceOptions(a, boundAgents, projectWorkspace).map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
                 </div>
               ))}
             </div>
@@ -138,7 +175,7 @@ export function MembersPanel({
           {unbound.length > 0 && (
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground uppercase font-semibold px-1">
-                Available — {unbound.length}
+                {threadMode ? "Not in this post" : "Available"} — {unbound.length}
               </p>
               {unbound.map((a) => (
                 <label
@@ -159,18 +196,26 @@ export function MembersPanel({
             </div>
           )}
 
-          {agents.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center py-4">No agents</p>
+          {candidates.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              {threadMode ? "No agents bound to this channel" : "No agents"}
+            </p>
           )}
         </div>
       </ScrollArea>
 
-      {dirty && (
-        <div className="shrink-0 border-t border-border p-3">
-          <Button size="sm" className="w-full gap-2" onClick={save} disabled={saving}>
-            <Save className="h-4 w-4" />
-            Save
-          </Button>
+      {(dirty || error) && (
+        <div className="shrink-0 space-y-2 border-t border-border p-3">
+          {error && <p className="text-xs text-destructive">{error}</p>}
+          {threadMode && bound.length === 0 && (
+            <p className="text-xs text-muted-foreground">A post needs at least one member.</p>
+          )}
+          {dirty && (
+            <Button size="sm" className="w-full gap-2" onClick={save} disabled={saveDisabled}>
+              <Save className="h-4 w-4" />
+              Save
+            </Button>
+          )}
         </div>
       )}
     </aside>

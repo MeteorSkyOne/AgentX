@@ -28,6 +28,7 @@ import {
   runSelfUpdate,
   serverSettings,
   setChannelAgents,
+  setThreadAgents,
   selfUpdate,
   toolUpdates,
   testNotificationSettings,
@@ -929,6 +930,14 @@ export default function App() {
     await queryClient.invalidateQueries({ queryKey: ["conversation-context"] });
   }
 
+  async function handleSaveThreadAgents(agentIDs: string[]) {
+    if (activeConversation?.type !== "thread") {
+      return;
+    }
+    await setThreadAgents(activeConversation.id, agentIDs);
+    await queryClient.invalidateQueries({ queryKey: ["conversation-context"] });
+  }
+
   async function handleCreateAgent(payload: {
     name: string;
     description?: string;
@@ -1101,6 +1110,7 @@ export default function App() {
       onUpdateThread={handleUpdateThread}
       onDeleteThread={handleDeleteThread}
       onSaveChannelAgents={handleSaveChannelAgents}
+      onSaveThreadAgents={handleSaveThreadAgents}
       onCreateAgent={handleCreateAgent}
       onUpdateAgent={handleUpdateAgent}
       onDeleteAgent={handleDeleteAgent}

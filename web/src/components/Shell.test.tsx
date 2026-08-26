@@ -395,6 +395,7 @@ function shellProps(): ShellProps {
     onUpdateThread: vi.fn(),
     onDeleteThread: vi.fn(),
     onSaveChannelAgents: vi.fn(),
+    onSaveThreadAgents: vi.fn(),
     onCreateAgent: vi.fn(),
     onUpdateAgent: vi.fn(),
     onDeleteAgent: vi.fn(),

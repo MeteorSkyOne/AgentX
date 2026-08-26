@@ -271,8 +271,22 @@ func (a *App) CreateThread(ctx context.Context, userID string, channelID string,
 		UpdatedAt:      now,
 	}
 
+	// Mentioning agents in the post body scopes the post to them; other channel
+	// agents have to be added to the post explicitly afterwards.
+	channelAgents, err := a.ChannelAgents(ctx, channel.ID)
+	if err != nil {
+		return domain.Thread{}, domain.Message{}, err
+	}
+	members := threadAgentRows(thread.ID, mentionedAgentsForBody(channelAgents, body), now)
+
 	if err := a.store.Tx(ctx, func(tx store.Tx) error {
-		return tx.Threads().Create(ctx, thread)
+		if err := tx.Threads().Create(ctx, thread); err != nil {
+			return err
+		}
+		if len(members) == 0 {
+			return nil
+		}
+		return tx.ThreadAgents().ReplaceForThread(ctx, thread.ID, members)
 	}); err != nil {
 		return domain.Thread{}, domain.Message{}, err
 	}
@@ -290,6 +304,65 @@ func (a *App) CreateThread(ctx context.Context, userID string, channelID string,
 	}
 
 	return thread, message, nil
+}
+
+// ThreadAgents lists the agents taking part in a forum post.
+func (a *App) ThreadAgents(ctx context.Context, threadID string) ([]ConversationAgentContext, error) {
+	scope, err := a.conversationScope(ctx, domain.ConversationThread, threadID)
+	if err != nil {
+		return nil, err
+	}
+	return a.conversationAgents(ctx, scope)
+}
+
+// SetThreadAgents replaces the member list of a forum post. Only agents bound
+// to the post's channel can be members.
+func (a *App) SetThreadAgents(ctx context.Context, threadID string, agentIDs []string) ([]ConversationAgentContext, error) {
+	thread, err := a.store.Threads().ByID(ctx, threadID)
+	if err != nil {
+		return nil, err
+	}
+	channelAgents, err := a.ChannelAgents(ctx, thread.ChannelID)
+	if err != nil {
+		return nil, err
+	}
+	bound := make(map[string]struct{}, len(channelAgents))
+	for _, item := range channelAgents {
+		bound[item.Agent.ID] = struct{}{}
+	}
+
+	now := time.Now().UTC()
+	seen := make(map[string]struct{}, len(agentIDs))
+	members := make([]domain.ThreadAgent, 0, len(agentIDs))
+	for _, agentID := range agentIDs {
+		agentID = strings.TrimSpace(agentID)
+		if agentID == "" {
+			continue
+		}
+		if _, ok := seen[agentID]; ok {
+			continue
+		}
+		if _, ok := bound[agentID]; !ok {
+			return nil, invalidInput("agent is not bound to this channel")
+		}
+		seen[agentID] = struct{}{}
+		members = append(members, domain.ThreadAgent{ThreadID: thread.ID, AgentID: agentID, CreatedAt: now})
+	}
+	if len(members) == 0 {
+		return nil, invalidInput("a post needs at least one agent member")
+	}
+	if err := a.store.ThreadAgents().ReplaceForThread(ctx, thread.ID, members); err != nil {
+		return nil, err
+	}
+	return a.ThreadAgents(ctx, thread.ID)
+}
+
+func threadAgentRows(threadID string, agents []ConversationAgentContext, now time.Time) []domain.ThreadAgent {
+	rows := make([]domain.ThreadAgent, 0, len(agents))
+	for _, agent := range agents {
+		rows = append(rows, domain.ThreadAgent{ThreadID: threadID, AgentID: agent.Agent.ID, CreatedAt: now})
+	}
+	return rows
 }
 
 func (a *App) UpdateThread(ctx context.Context, threadID string, title string) (domain.Thread, error) {
@@ -495,6 +568,9 @@ func (a *App) DeleteAgent(ctx context.Context, agentID string) error {
 	agent.UpdatedAt = now
 	return a.store.Tx(ctx, func(tx store.Tx) error {
 		if err := tx.ChannelAgents().DeleteForAgent(ctx, agent.ID); err != nil {
+			return err
+		}
+		if err := tx.ThreadAgents().DeleteForAgent(ctx, agent.ID); err != nil {
 			return err
 		}
 		return tx.Agents().Update(ctx, agent)

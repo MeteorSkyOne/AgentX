@@ -4429,6 +4429,105 @@ func TestUpdateThreadTitlePreservesCatalogOrder(t *testing.T) {
 	}
 }
 
+func TestCreateThreadScopesMembersToMentionedAgent(t *testing.T) {
+	ctx := context.Background()
+	application, _, bootstrap := newConversationTestApp(t, ctx)
+
+	forum, second := newForumWithTwoAgents(t, ctx, application, bootstrap)
+
+	mentioned, _, err := application.CreateThread(ctx, bootstrap.User.ID, forum.ID, "scoped", "@agent_two take a look", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	members, err := application.ThreadAgents(ctx, mentioned.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(members) != 1 || members[0].Agent.ID != second.ID {
+		t.Fatalf("members = %#v, want only %s", members, second.ID)
+	}
+
+	open, _, err := application.CreateThread(ctx, bootstrap.User.ID, forum.ID, "open", "anyone can help", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	openMembers, err := application.ThreadAgents(ctx, open.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(openMembers) != 2 {
+		t.Fatalf("members without a mention = %d, want 2", len(openMembers))
+	}
+}
+
+func TestSetThreadAgentsAddsAndValidatesMembers(t *testing.T) {
+	ctx := context.Background()
+	application, _, bootstrap := newConversationTestApp(t, ctx)
+
+	forum, second := newForumWithTwoAgents(t, ctx, application, bootstrap)
+	thread, _, err := application.CreateThread(ctx, bootstrap.User.ID, forum.ID, "scoped", "@agent_two take a look", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	members, err := application.SetThreadAgents(ctx, thread.ID, []string{second.ID, bootstrap.Agent.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(members) != 2 {
+		t.Fatalf("members = %#v, want 2", members)
+	}
+
+	if _, err := application.SetThreadAgents(ctx, thread.ID, nil); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("empty members err = %v, want invalid input", err)
+	}
+
+	outsider, err := application.CreateAgent(ctx, AgentCreateRequest{
+		UserID:         bootstrap.User.ID,
+		OrganizationID: bootstrap.Organization.ID,
+		Name:           "Agent Three",
+		Handle:         "agent_three",
+		Kind:           domain.AgentKindFake,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := application.SetThreadAgents(ctx, thread.ID, []string{outsider.ID}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("unbound agent err = %v, want invalid input", err)
+	}
+}
+
+func newForumWithTwoAgents(
+	t *testing.T,
+	ctx context.Context,
+	application *App,
+	bootstrap BootstrapResult,
+) (domain.Channel, domain.Agent) {
+	t.Helper()
+
+	forum, err := application.CreateChannel(ctx, bootstrap.Project.ID, "forum", domain.ChannelTypeThread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := application.CreateAgent(ctx, AgentCreateRequest{
+		UserID:         bootstrap.User.ID,
+		OrganizationID: bootstrap.Organization.ID,
+		Name:           "Agent Two",
+		Handle:         "agent_two",
+		Kind:           domain.AgentKindFake,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := application.SetChannelAgents(ctx, forum.ID, []domain.ChannelAgent{
+		{AgentID: bootstrap.Agent.ID},
+		{AgentID: second.ID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return forum, second
+}
+
 func TestListOrganizationsAndChannels(t *testing.T) {
 	ctx := context.Background()
 	app, _, bootstrap := newConversationTestApp(t, ctx)

@@ -634,6 +634,52 @@ func TestHTTPScheduledForumPostTaskCreatesThreadPerRun(t *testing.T) {
 	}
 }
 
+func TestHTTPThreadAgentsFollowMentionAndCanBeEdited(t *testing.T) {
+	ts := newTestServer(t)
+	bootstrap := setupHTTP(t, ts.URL)
+
+	var forum domain.Channel
+	postJSON(t, ts.URL+"/api/projects/"+bootstrap.Project.ID+"/channels", bootstrap.SessionToken, map[string]any{
+		"name": "forum",
+		"type": "thread",
+	}, http.StatusOK, &forum)
+
+	var second domain.Agent
+	postJSON(t, ts.URL+"/api/organizations/"+bootstrap.Organization.ID+"/agents", bootstrap.SessionToken, map[string]any{
+		"name":   "Agent Two",
+		"handle": "agent_two",
+		"kind":   "fake",
+	}, http.StatusOK, &second)
+	putJSON(t, ts.URL+"/api/channels/"+forum.ID+"/agents", bootstrap.SessionToken, map[string]any{
+		"agents": []map[string]any{{"agent_id": bootstrap.Agent.ID}, {"agent_id": second.ID}},
+	}, http.StatusOK, nil)
+
+	var created struct {
+		Thread domain.Thread `json:"thread"`
+	}
+	postJSON(t, ts.URL+"/api/channels/"+forum.ID+"/threads", bootstrap.SessionToken, map[string]any{
+		"title": "scoped post",
+		"body":  "@agent_two please look",
+	}, http.StatusOK, &created)
+
+	var members []app.ConversationAgentContext
+	getJSON(t, ts.URL+"/api/threads/"+created.Thread.ID+"/agents", bootstrap.SessionToken, http.StatusOK, &members)
+	if len(members) != 1 || members[0].Agent.ID != second.ID {
+		t.Fatalf("members = %#v, want only %s", members, second.ID)
+	}
+
+	putJSON(t, ts.URL+"/api/threads/"+created.Thread.ID+"/agents", bootstrap.SessionToken, map[string]any{
+		"agent_ids": []string{second.ID, bootstrap.Agent.ID},
+	}, http.StatusOK, &members)
+	if len(members) != 2 {
+		t.Fatalf("members after add = %#v, want 2", members)
+	}
+
+	putJSON(t, ts.URL+"/api/threads/"+created.Thread.ID+"/agents", bootstrap.SessionToken, map[string]any{
+		"agent_ids": []string{},
+	}, http.StatusBadRequest, nil)
+}
+
 func TestHTTPSendMessageRejectsUnknownChannelWithoutCreatingOrphan(t *testing.T) {
 	ts := newTestServer(t)
 

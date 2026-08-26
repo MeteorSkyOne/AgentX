@@ -456,6 +456,12 @@ export function ThreadForum({
           className="mb-0"
         />
         {error && <p className="text-sm text-destructive">{error}</p>}
+        {mentionAgents.length > 1 && (
+          <p className="text-xs text-muted-foreground">
+            Mention an @agent to make it the only member of this post. Others can be added from the
+            Members panel later.
+          </p>
+        )}
         <div className="flex items-center gap-2">
           <Button
             type="button"

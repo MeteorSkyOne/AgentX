@@ -47,6 +47,8 @@ cmd/agentx/main.go (bootstrap)
 
 **Data model**: Organization → Projects → Channels → Threads → Messages. Agents bind to channels via ChannelAgentBinding and run in Workspaces. Agents have configurable `kind`, `model`, `effort`, `fast_mode`, `yolo_mode`, `env`, and `description` fields.
 
+**Forum post members**: In a forum channel (`ChannelTypeThread`), mentioning `@agent` in the post body scopes the new post to the mentioned agents — they become its only members (`thread_agents` table), and other channel agents have to be added afterwards from the Members panel (`GET`/`PUT /api/threads/{threadID}/agents`). A post with no mention stores no membership rows and inherits every agent bound to its channel. Scheduled `forum_post` tasks apply the same rule via their `agent_id` or prompt mentions. `App.conversationAgents` enforces membership for every thread conversation, so replies, team runs, and notifications all follow it.
+
 **Agent runtimes**: Five runtime kinds are supported:
 - `fake` — echo agent for testing
 - `claude` — ephemeral Claude Code CLI sessions (`claude --print --output-format stream-json`)
