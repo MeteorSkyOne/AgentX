@@ -128,6 +128,35 @@ describe("WorkspaceFileEditor markdown preview", () => {
     });
   });
 
+  it("keeps preview content mounted when the controller object is rebuilt", () => {
+    const body = "# Title\n\n```ts\nconst x = 1;\n```\n\nSee `docs/next.md`.";
+    const { rerender } = render(
+      <WorkspaceFileEditor
+        controller={controllerFixture({ filePath: "docs/readme.md", fileBody: body, fileViewMode: "preview" })}
+        theme="dark"
+        contentAriaLabel="File content"
+      />
+    );
+    const preview = screen.getByTestId("workspace-file-markdown-preview");
+    const heading = preview.querySelector("h1");
+    const codeBlock = preview.querySelector("code");
+    expect(heading).toBeTruthy();
+    expect(codeBlock).toBeTruthy();
+
+    // Simulate a parent re-render (e.g. a streamed agent delta) that hands the
+    // editor a fresh controller object with identical content.
+    rerender(
+      <WorkspaceFileEditor
+        controller={controllerFixture({ filePath: "docs/readme.md", fileBody: body, fileViewMode: "preview" })}
+        theme="dark"
+        contentAriaLabel="File content"
+      />
+    );
+
+    expect(preview.querySelector("h1")).toBe(heading);
+    expect(preview.querySelector("code")).toBe(codeBlock);
+  });
+
   it("restores markdown preview scroll positions by tab", () => {
     const saveTabMarkdownPreviewScrollTop = vi.fn();
     const { rerender } = render(

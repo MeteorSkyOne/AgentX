@@ -141,16 +141,20 @@ export function WorkspaceFileEditor({
     editorInstance.restoreViewState(viewState as editor.ICodeEditorViewState);
   });
 
-  const handleOpenPreviewPath = useCallback(
-    (target: WorkspacePathTarget) => {
-      void controller.loadFile(target.path, {
-        position: target.lineNumber
-          ? { lineNumber: target.lineNumber, column: target.column ?? 1 }
-          : undefined,
-      });
-    },
-    [controller]
-  );
+  // The controller object is rebuilt on every render of the workspace browser
+  // hook, and the whole pane re-renders on every streamed agent delta. Keep the
+  // preview link handler identity stable so MarkdownRenderer's memo holds;
+  // otherwise it rebuilds its component map and React remounts every code
+  // block and diagram in the preview on each delta.
+  const controllerRef = useRef(controller);
+  controllerRef.current = controller;
+  const handleOpenPreviewPath = useCallback((target: WorkspacePathTarget) => {
+    void controllerRef.current.loadFile(target.path, {
+      position: target.lineNumber
+        ? { lineNumber: target.lineNumber, column: target.column ?? 1 }
+        : undefined,
+    });
+  }, []);
 
   const editorElement = (
     <Editor
