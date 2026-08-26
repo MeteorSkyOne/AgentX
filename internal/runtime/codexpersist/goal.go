@@ -209,6 +209,9 @@ func (s *persistentSession) processGoalNotifications(ctx context.Context) {
 				s.handleServerRequest(msg)
 				continue
 			}
+			if s.isForeignThreadNotification(msg) {
+				continue
+			}
 			if isGoalActivitySignal(msg.Method) {
 				// A turn is actively producing output, so codex is still working
 				// on the goal: cancel any pending "stopped" grace timer.

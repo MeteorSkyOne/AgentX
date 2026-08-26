@@ -115,6 +115,9 @@ func (s *persistentSession) processNotifications(ctx context.Context) {
 				s.handleServerRequest(msg)
 				continue
 			}
+			if s.isForeignThreadNotification(msg) {
+				continue
+			}
 
 			terminal := s.handleNotification(msg, state)
 			if terminal {
@@ -122,6 +125,20 @@ func (s *persistentSession) processNotifications(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// isForeignThreadNotification reports whether a notification belongs to a
+// different codex thread than the one this session drives. The app-server
+// shares one connection for every thread it manages, including the sub-agent
+// threads codex spawns for parallel work (spawn_agent), whose item and turn
+// notifications would otherwise be merged into this session's output stream.
+// Notifications without a threadId are kept.
+func (s *persistentSession) isForeignThreadNotification(msg jsonRPCMessage) bool {
+	if s.threadID == "" {
+		return false
+	}
+	threadID := stringVal(notificationParams(msg), "threadId")
+	return threadID != "" && threadID != s.threadID
 }
 
 func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notificationState) bool {

@@ -599,6 +599,39 @@ func TestStreamingAgentMessageInterleavedWithToolsStaysFinalText(t *testing.T) {
 	}
 }
 
+func TestForeignThreadNotificationsAreIgnored(t *testing.T) {
+	s := &persistentSession{threadID: "thr_main"}
+
+	foreign := jsonRPCMessage{
+		Method: "item/agentMessage/delta",
+		Params: map[string]any{"threadId": "thr_subagent", "itemId": "msg_1", "delta": "## sub-agent report"},
+	}
+	own := jsonRPCMessage{
+		Method: "item/agentMessage/delta",
+		Params: map[string]any{"threadId": "thr_main", "itemId": "msg_2", "delta": "final answer"},
+	}
+	noThread := jsonRPCMessage{
+		Method: "thread/goal/updated",
+		Params: map[string]any{"status": "completed"},
+	}
+
+	if !s.isForeignThreadNotification(foreign) {
+		t.Fatalf("sub-agent thread notification should be ignored")
+	}
+	if s.isForeignThreadNotification(own) {
+		t.Fatalf("own thread notification must not be ignored")
+	}
+	if s.isForeignThreadNotification(noThread) {
+		t.Fatalf("notification without threadId must not be ignored")
+	}
+
+	// Before the thread is known, nothing can be classified as foreign.
+	unknown := &persistentSession{}
+	if unknown.isForeignThreadNotification(foreign) {
+		t.Fatalf("notifications must not be dropped before the thread id is known")
+	}
+}
+
 func TestAgentMessageDeltaWithoutToolBecomesFinalText(t *testing.T) {
 	s := &persistentSession{events: make(chan runtime.Event, 4)}
 	state := newNotificationState()
