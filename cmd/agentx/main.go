@@ -278,11 +278,14 @@ type serverRunner struct {
 
 func newServer(addr string, handler http.Handler) *http.Server {
 	return &http.Server{
-		Addr:              addr,
-		Handler:           handler,
+		Addr:    addr,
+		Handler: handler,
+		// Attachment uploads and downloads are unbounded in size, so whole-request
+		// read and write deadlines are deliberately left off: they would cut a
+		// large transfer mid-stream purely because it took a while. Slow-header
+		// attacks are still bounded by ReadHeaderTimeout, and idle keep-alive
+		// connections by IdleTimeout.
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 }

@@ -22,6 +22,25 @@ import (
 	sqlitestore "github.com/meteorsky/agentx/internal/store/sqlite"
 )
 
+// Attachment uploads and downloads have no size cap, so a whole-request read or
+// write deadline would cut large transfers mid-stream — an upload that ran past
+// ReadTimeout used to surface as "malformed multipart form".
+func TestNewServerLeavesWholeRequestDeadlinesOff(t *testing.T) {
+	server := newServer("127.0.0.1:0", http.NotFoundHandler())
+	if server.ReadTimeout != 0 {
+		t.Fatalf("ReadTimeout = %v, want 0 so slow uploads are not truncated", server.ReadTimeout)
+	}
+	if server.WriteTimeout != 0 {
+		t.Fatalf("WriteTimeout = %v, want 0 so slow downloads are not truncated", server.WriteTimeout)
+	}
+	if server.ReadHeaderTimeout == 0 {
+		t.Fatal("ReadHeaderTimeout = 0, want slow request headers still bounded")
+	}
+	if server.IdleTimeout == 0 {
+		t.Fatal("IdleTimeout = 0, want idle keep-alive connections still reaped")
+	}
+}
+
 func TestServeHTTPShutsDownWhenContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

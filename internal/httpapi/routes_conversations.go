@@ -249,6 +249,9 @@ func (s *Server) readSendMessageRequest(r *http.Request) (sendMessageRequest, []
 
 func readMultipartSendMessageRequest(r *http.Request) (sendMessageRequest, []app.AttachmentUpload, error) {
 	if err := r.ParseMultipartForm(multipartMemoryBytes); err != nil {
+		// The client-facing message stays generic, but the cause (a truncated
+		// body, a full temp dir, a missing boundary) is worth having in the log.
+		slog.Warn("failed to parse multipart message upload", "error", err)
 		return sendMessageRequest{}, nil, errors.New("malformed multipart form")
 	}
 

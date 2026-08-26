@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"log/slog"
 	"mime"
 	"net/http"
 	"strings"
@@ -86,6 +87,7 @@ func (s *Server) readCreateThreadRequest(r *http.Request) (threadCreateRequest, 
 	contentType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if strings.EqualFold(contentType, "multipart/form-data") {
 		if err := r.ParseMultipartForm(multipartMemoryBytes); err != nil {
+			slog.Warn("failed to parse multipart thread upload", "error", err)
 			return threadCreateRequest{}, nil, errors.New("malformed multipart form")
 		}
 		req := threadCreateRequest{
