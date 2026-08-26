@@ -1,3 +1,4 @@
+import type { UploadProgress } from "../../api/client";
 import type {
   Agent,
   Channel,
@@ -131,7 +132,12 @@ export interface ShellProps {
   ) => Promise<Channel>;
   onDeleteChannel: (channel: Channel) => Promise<void>;
   onSelectThread: (thread: Thread) => void;
-  onCreateThread: (title: string, body: string, files?: File[]) => Promise<CreateThreadResponse>;
+  onCreateThread: (
+    title: string,
+    body: string,
+    files?: File[],
+    onUploadProgress?: (progress: UploadProgress) => void
+  ) => Promise<CreateThreadResponse>;
   onUpdateThread: (threadID: string, title: string) => Promise<Thread>;
   onDeleteThread: (thread: Thread) => Promise<void>;
   onSaveChannelAgents: (

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { skipToken, useQuery } from "@tanstack/react-query";
 import { AlertCircle, ArrowUp, BookOpen, Paperclip, Reply, Send, Terminal, X } from "lucide-react";
-import { conversationSkills, sendMessage } from "../api/client";
+import { conversationSkills, sendMessage, type UploadProgress } from "../api/client";
 import type { Agent, ConversationType, Message } from "../api/types";
 import type { QueuedPrompt } from "./shell/types";
 import {
@@ -18,6 +18,7 @@ import {
   type SlashCommandDefinition
 } from "./composerAutocomplete";
 import { AttachmentPreviews } from "./attachments/AttachmentPreviews";
+import { UploadProgressBar } from "./attachments/UploadProgressBar";
 import { revokeAttachmentPreviews } from "./attachments/draft";
 import { useDraftAttachments } from "./attachments/useDraftAttachments";
 import { Button } from "@/components/ui/button";
@@ -59,6 +60,7 @@ export function Composer({
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [steeringQueueIDs, setSteeringQueueIDs] = useState<Set<string>>(() => new Set());
   const [deletingQueueIDs, setDeletingQueueIDs] = useState<Set<string>>(() => new Set());
   const [caret, setCaret] = useState(0);
@@ -181,10 +183,12 @@ export function Composer({
     setMentionIndex(0);
     setDismissedCommandKey(null);
     setDismissedMentionKey(null);
+    const files = submittedAttachments.map((attachment) => attachment.file);
     try {
       const message = await sendMessage(conversation.type, conversation.id, submittedBody, {
         replyToMessageID: replyToMessage?.id,
-        files: submittedAttachments.map((attachment) => attachment.file)
+        files,
+        onUploadProgress: files.length > 0 ? setUploadProgress : undefined
       });
       onSent(message);
       revokeAttachmentPreviews(submittedAttachments);
@@ -195,6 +199,7 @@ export function Composer({
       setError(err instanceof Error ? err.message : "Message failed");
     } finally {
       setSubmitting(false);
+      setUploadProgress(null);
     }
   }
 
@@ -485,6 +490,7 @@ export function Composer({
             onRemove={removeAttachment}
             disabled={submitting}
           />
+          <UploadProgressBar progress={uploadProgress} />
           <div
             className={cn(
               "flex min-h-11 items-center gap-2 rounded-2xl border-2 border-input bg-card px-3 py-2 shadow-chunk-sm transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25",

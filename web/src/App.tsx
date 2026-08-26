@@ -51,6 +51,7 @@ import {
   steerQueuedPrompt,
   deleteQueuedPrompt
 } from "./api/client";
+import type { UploadProgress } from "./api/client";
 import type {
   Agent,
   AuthResponse,
@@ -841,9 +842,13 @@ export default function App() {
   async function handleCreateThread(
     title: string,
     body: string,
-    files?: File[]
+    files?: File[],
+    onUploadProgress?: (progress: UploadProgress) => void
   ): Promise<CreateThreadResponse> {
-    const created = await createThread(selectedChannelID as string, title, body, { files });
+    const created = await createThread(selectedChannelID as string, title, body, {
+      files,
+      onUploadProgress
+    });
     await queryClient.invalidateQueries({ queryKey: ["threads", selectedChannelID] });
     return created;
   }

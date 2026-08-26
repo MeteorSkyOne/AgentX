@@ -102,6 +102,81 @@ async function errorMessage(response: Response): Promise<string> {
   }
 }
 
+export interface UploadProgress {
+  loaded: number;
+  /** Total bytes, or 0 when the browser cannot compute it. */
+  total: number;
+  /** 0-100, or 0 while the total is unknown. */
+  percent: number;
+}
+
+/**
+ * uploadRequest posts a multipart body over XMLHttpRequest rather than fetch,
+ * which cannot report upload progress. Attachments have no size cap, so a large
+ * upload has to be able to show that it is still moving.
+ */
+function uploadRequest<T>(
+  path: string,
+  form: FormData,
+  onProgress?: (progress: UploadProgress) => void
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", path);
+    const token = getToken();
+    if (token) {
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    }
+
+    let latest: UploadProgress = { loaded: 0, total: 0, percent: 0 };
+    if (onProgress) {
+      onProgress(latest);
+      xhr.upload.addEventListener("progress", (event) => {
+        const total = event.lengthComputable ? event.total : 0;
+        latest = {
+          loaded: event.loaded,
+          total,
+          percent: total > 0 ? Math.min(100, Math.round((event.loaded / total) * 100)) : 0
+        };
+        onProgress(latest);
+      });
+    }
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(uploadErrorMessage(xhr)));
+        return;
+      }
+      // The last progress event can land short of the end, and the server still
+      // has to store the attachments before replying — report a full bar so the
+      // UI can switch to its processing state.
+      onProgress?.({ loaded: latest.total || latest.loaded, total: latest.total, percent: 100 });
+      if (xhr.status === 204 || xhr.responseText === "") {
+        resolve(undefined as T);
+        return;
+      }
+      try {
+        resolve(JSON.parse(xhr.responseText) as T);
+      } catch {
+        reject(new Error("malformed response"));
+      }
+    });
+    xhr.addEventListener("error", () => reject(new Error("Upload failed")));
+    xhr.addEventListener("abort", () => reject(new Error("Upload canceled")));
+    xhr.send(form);
+  });
+}
+
+function uploadErrorMessage(xhr: XMLHttpRequest): string {
+  const fallback = `${xhr.status} ${xhr.statusText}`.trim();
+  try {
+    const body = JSON.parse(xhr.responseText) as { error?: string; message?: string };
+    return body.error ?? body.message ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export function authStatus(): Promise<AuthStatus> {
   return request<AuthStatus>("/api/auth/status");
 }
@@ -581,7 +656,7 @@ export function createThread(
   channelID: string,
   title: string,
   body: string,
-  options: { files?: File[] } = {}
+  options: { files?: File[]; onUploadProgress?: (progress: UploadProgress) => void } = {}
 ): Promise<CreateThreadResponse> {
   const url = `/api/channels/${encodeURIComponent(channelID)}/threads`;
   if (options.files && options.files.length > 0) {
@@ -591,7 +666,7 @@ export function createThread(
     for (const file of options.files) {
       form.append("files[]", file);
     }
-    return request<CreateThreadResponse>(url, { method: "POST", body: form });
+    return uploadRequest<CreateThreadResponse>(url, form, options.onUploadProgress);
   }
   return request<CreateThreadResponse>(url, {
     method: "POST",
@@ -954,7 +1029,11 @@ export function sendMessage(
   type: ConversationType,
   id: string,
   body: string,
-  options: { replyToMessageID?: string; files?: File[] } = {}
+  options: {
+    replyToMessageID?: string;
+    files?: File[];
+    onUploadProgress?: (progress: UploadProgress) => void;
+  } = {}
 ): Promise<Message> {
   if (options.files && options.files.length > 0) {
     const form = new FormData();
@@ -965,12 +1044,10 @@ export function sendMessage(
     for (const file of options.files) {
       form.append("files[]", file);
     }
-    return request<Message>(
+    return uploadRequest<Message>(
       `/api/conversations/${encodeURIComponent(type)}/${encodeURIComponent(id)}/messages`,
-      {
-        method: "POST",
-        body: form
-      }
+      form,
+      options.onUploadProgress
     );
   }
 

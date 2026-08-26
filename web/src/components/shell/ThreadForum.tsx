@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { skipToken, useQuery } from "@tanstack/react-query";
 import { BookOpen, MessageSquare, Paperclip, Pencil, Save, Terminal, Trash2, X } from "lucide-react";
-import { conversationSkills } from "../../api/client";
+import { conversationSkills, type UploadProgress } from "../../api/client";
 import type { Agent, ConversationType, CreateThreadResponse, Thread } from "../../api/types";
 import {
   buildSlashCommandOptions,
@@ -15,6 +15,7 @@ import {
   type SlashCommandDefinition
 } from "../composerAutocomplete";
 import { AttachmentPreviews } from "../attachments/AttachmentPreviews";
+import { UploadProgressBar } from "../attachments/UploadProgressBar";
 import { revokeAttachmentPreviews } from "../attachments/draft";
 import { useDraftAttachments } from "../attachments/useDraftAttachments";
 import { Button } from "@/components/ui/button";
@@ -36,7 +37,12 @@ export function ThreadForum({
   conversation?: { type: ConversationType; id: string };
   mentionAgents?: Pick<Agent, "id" | "name" | "handle" | "kind" | "bot_user_id">[];
   onSelectThread: (thread: Thread) => void;
-  onCreateThread: (title: string, body: string, files?: File[]) => Promise<CreateThreadResponse>;
+  onCreateThread: (
+    title: string,
+    body: string,
+    files?: File[],
+    onUploadProgress?: (progress: UploadProgress) => void
+  ) => Promise<CreateThreadResponse>;
   onUpdateThread: (threadID: string, title: string) => Promise<Thread>;
   onDeleteThread: (thread: Thread) => Promise<void>;
 }) {
@@ -44,6 +50,7 @@ export function ThreadForum({
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const {
     attachments,
     draggingFiles,
@@ -214,11 +221,13 @@ export function ThreadForum({
     setSubmitting(true);
     const submittedBody = mentionDisplayNamesToHandles(body.trim(), mentionAgents);
     const submittedAttachments = attachments;
+    const files = submittedAttachments.map((attachment) => attachment.file);
     try {
       const created = await onCreateThread(
         title,
         submittedBody,
-        submittedAttachments.map((attachment) => attachment.file)
+        files,
+        files.length > 0 ? setUploadProgress : undefined
       );
       setTitle("");
       setBody("");
@@ -230,6 +239,7 @@ export function ThreadForum({
       setError(err instanceof Error ? err.message : "Post failed");
     } finally {
       setSubmitting(false);
+      setUploadProgress(null);
     }
   }
 
@@ -449,6 +459,7 @@ export function ThreadForum({
             className="flex min-h-[80px] w-full rounded-xl border-2 border-input bg-card px-3 py-2 text-base md:text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50"
           />
         </div>
+        <UploadProgressBar progress={uploadProgress} className="mb-0" />
         <AttachmentPreviews
           attachments={attachments}
           onRemove={removeAttachment}
