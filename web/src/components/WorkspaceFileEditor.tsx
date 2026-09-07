@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils";
 import type { WorkspacePathTarget } from "@/lib/workspacePaths";
 import type { WorkspaceGitDiff } from "@/api/types";
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { copyTextToClipboard } from "./message-pane/utils";
+import { workspaceEditorCopyText } from "./workspaceEditorCopy";
 import { isImageFilePath, isMarkdownFilePath, isPdfFilePath, monacoLanguageForPath } from "./workspaceFileLanguages";
 
 type WorkspaceEditorNode = HTMLDivElement & {
@@ -26,6 +28,7 @@ export function WorkspaceFileEditor({
 }: WorkspaceFileEditorProps) {
   const saveFileRef = useRef<() => void>(() => undefined);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const lastPositionRequestRef = useRef(0);
   const editorContainerRef = useRef<WorkspaceEditorNode | null>(null);
   const editorTheme = theme === "dark" ? "vs-dark" : "light";
@@ -90,6 +93,26 @@ export function WorkspaceFileEditor({
       editorInstance.addCommand(monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyS, () => {
         saveFileRef.current();
       });
+      for (const includeContent of [false, true]) {
+        editorInstance.addAction({
+          id: includeContent ? "agentx.copyWithLineNumbers" : "agentx.copyLineNumbers",
+          label: includeContent ? "Copy with Path and Line Numbers" : "Copy Path and Line Numbers",
+          contextMenuGroupId: "9_cutcopypaste",
+          contextMenuOrder: includeContent ? 4 : 3,
+          run: async (instance) => {
+            setCopyError(null);
+            const text = workspaceEditorCopyText(instance, includeContent, controllerRef.current.trimmedPath);
+            if (text === null) return;
+            try {
+              await copyTextToClipboard(text);
+            } catch {
+              setCopyError("Copy failed. Please try again.");
+            } finally {
+              instance.focus();
+            }
+          },
+        });
+      }
       if (controller.fileOpenPosition && !controller.fileLoading) {
         requestAnimationFrame(() => {
           if (lastPositionRequestRef.current === controller.fileOpenRequestID) return;
@@ -183,6 +206,11 @@ export function WorkspaceFileEditor({
       role="region"
       aria-label="File editor"
     >
+      {copyError && (
+        <div role="alert" className="absolute right-3 top-3 z-10 rounded border border-destructive/30 bg-background px-2 py-1 text-xs text-destructive shadow-sm">
+          {copyError}
+        </div>
+      )}
       {controller.fileLoading && (
         <div className="absolute right-3 top-3 z-10 rounded border border-border bg-background/95 px-2 py-1 text-xs text-muted-foreground shadow-sm">
           Loading...
