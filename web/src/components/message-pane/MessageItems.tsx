@@ -18,7 +18,7 @@ import type { WorkspacePathTarget } from "@/lib/workspacePaths";
 import type { MentionLabels } from "../MarkdownRenderer";
 import { cn } from "@/lib/utils";
 import { AgentAvatar } from "../AgentAvatar";
-import { messageMetricsParts, messageWorkingLabel } from "../messageMetrics";
+import { contextUsageLabel, messageMetricsParts, messageWorkingLabel } from "../messageMetrics";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -211,7 +211,10 @@ function ConversationMessageItem({
       : null;
   const metricsParts = isBot ? messageMetricsParts(message.metadata?.metrics, preferences) : [];
   const workingLabel = isBot ? messageWorkingLabel(message.metadata?.metrics) : null;
-  const footerMetricsParts = workingLabel ? [workingLabel, ...metricsParts] : metricsParts;
+  const contextLabel = isBot ? contextUsageLabel(message.metadata?.context_usage) : null;
+  const footerMetricsParts = [workingLabel, ...metricsParts, contextLabel].filter(
+    (part): part is string => Boolean(part)
+  );
   const hideAvatar = preferences.hide_avatars;
 
   useEffect(() => {

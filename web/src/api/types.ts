@@ -58,14 +58,30 @@ export interface TeamMetadata {
   source_message_id?: string;
 }
 
+export interface MessageContextUsage {
+  total_tokens?: number | null;
+  context_window_tokens?: number | null;
+  used_percent?: number | null;
+  model?: string;
+  source?: string;
+}
+
 export interface MessageMetadata {
   thinking?: string;
   process?: ProcessItem[];
   metrics?: MessageMetricsSummary;
+  /** Context-window fill reported by the agent at the end of this reply. */
+  context_usage?: MessageContextUsage;
   team?: TeamMetadata;
   error?: string;
   suppress_notifications?: boolean;
-  [key: string]: JsonValue | ProcessItem[] | MessageMetricsSummary | TeamMetadata | undefined;
+  [key: string]:
+    | JsonValue
+    | ProcessItem[]
+    | MessageMetricsSummary
+    | MessageContextUsage
+    | TeamMetadata
+    | undefined;
 }
 
 export interface MessageReference {

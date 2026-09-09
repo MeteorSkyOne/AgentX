@@ -1,4 +1,4 @@
-import type { MessageMetricsSummary, UserPreferences } from "../api/types";
+import type { MessageContextUsage, MessageMetricsSummary, UserPreferences } from "../api/types";
 
 export function messageMetricsParts(
   metrics: MessageMetricsSummary | undefined,
@@ -15,6 +15,43 @@ export function messageMetricsParts(
     parts.push(`TPS ${formatTPS(metrics.tps)}`);
   }
   return parts;
+}
+
+/**
+ * Footer label for the context-window fill after a reply, e.g. "76k/200k (38%)".
+ * Returns null when the agent reported nothing usable.
+ */
+export function contextUsageLabel(usage: MessageContextUsage | undefined): string | null {
+  if (!usage) {
+    return null;
+  }
+  const used = isFiniteNumber(usage.total_tokens) ? usage.total_tokens : null;
+  const window = isFiniteNumber(usage.context_window_tokens) && usage.context_window_tokens > 0
+    ? usage.context_window_tokens
+    : null;
+  let percent = isFiniteNumber(usage.used_percent) ? usage.used_percent : null;
+  if (percent === null && used !== null && window !== null) {
+    percent = (used / window) * 100;
+  }
+  if (used === null) {
+    return percent === null ? null : `Context ${formatPercent(percent)}`;
+  }
+  const ratio = window === null ? formatTokenCount(used) : `${formatTokenCount(used)}/${formatTokenCount(window)}`;
+  return percent === null ? `Context ${ratio}` : `Context ${ratio} (${formatPercent(percent)})`;
+}
+
+export function formatTokenCount(value: number): string {
+  if (value >= 1_000_000) {
+    return `${formatTrimmedNumber(Math.round((value / 1_000_000) * 10) / 10)}m`;
+  }
+  if (value >= 1000) {
+    return `${Math.round(value / 1000)}k`;
+  }
+  return String(Math.round(value));
+}
+
+function formatPercent(value: number): string {
+  return `${Math.round(Math.max(0, value))}%`;
 }
 
 export function messageWorkingLabel(metrics: MessageMetricsSummary | undefined): string | null {

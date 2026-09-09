@@ -314,8 +314,8 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 					return
 				}
 				if evt.Usage != nil {
-					usage = evt.Usage
-					activeRun.setContextUsage(evt.Usage.Context)
+					usage = mergeRunUsage(usage, evt.Usage)
+					activeRun.setContextUsage(usage.Context)
 				}
 				switch evt.Type {
 				case agentruntime.EventDelta:

@@ -905,6 +905,8 @@ func TestAgentRunStreamsAndPersistsProcessMetadata(t *testing.T) {
 	cachedTokens := int64(12)
 	outputTokens := int64(7)
 	totalTokens := int64(49)
+	contextTokens := int64(76420)
+	contextWindow := int64(200000)
 	app := New(st, bus, Options{
 		AdminToken: "secret",
 		DataDir:    t.TempDir(),
@@ -929,7 +931,10 @@ func TestAgentRunStreamsAndPersistsProcessMetadata(t *testing.T) {
 						Raw:        map[string]any{"type": "tool_use"},
 					}},
 				},
-				{Type: agentruntime.EventDelta, Text: "done"},
+				{Type: agentruntime.EventDelta, Text: "done", Usage: &agentruntime.Usage{
+					Model:   "fake-test",
+					Context: &agentruntime.ContextUsage{TotalTokens: &contextTokens, ContextWindowTokens: &contextWindow},
+				}},
 				{Type: agentruntime.EventCompleted, Text: "done", Usage: &agentruntime.Usage{
 					Model:             "fake-test",
 					InputTokens:       &inputTokens,
@@ -1031,6 +1036,15 @@ func TestAgentRunStreamsAndPersistsProcessMetadata(t *testing.T) {
 	completedAt, completedOK := metricsMeta["completed_at"].(string)
 	if !startedOK || startedAt == "" || !completedOK || completedAt == "" || metricsMeta["duration_ms"] == nil {
 		t.Fatalf("metrics metadata missing timing fields = %#v", metricsMeta)
+	}
+	// The context snapshot arrived on a delta and the completion usage lacked
+	// one, so the reply must still carry it for the footer.
+	contextMeta, ok := botMessage.Metadata["context_usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("context_usage metadata = %#v", botMessage.Metadata["context_usage"])
+	}
+	if contextMeta["total_tokens"] != float64(76420) || contextMeta["context_window_tokens"] != float64(200000) {
+		t.Fatalf("context_usage metadata = %#v", contextMeta)
 	}
 	var rows []domain.AgentRunMetric
 	requireEventuallyApp(t, time.Second, func() bool {

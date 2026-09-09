@@ -37,6 +37,10 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 		metadata = map[string]any{}
 	}
 	metadata["metrics"] = metricSummary
+	if usage != nil && usage.Context != nil {
+		// Lets the reply footer show context-window fill without a /status probe.
+		metadata["context_usage"] = contextUsageToDomain(usage.Context)
+	}
 	if team != nil {
 		metadata["team"] = *team
 	}
@@ -234,4 +238,20 @@ func (a *App) setAgentSessionContextUsage(ctx context.Context, agentID string, c
 		return nil
 	}
 	return a.store.Sessions().SetAgentSessionContextUsage(ctx, agentID, conversationType, conversationID, contextUsageToDomain(usage.Context))
+}
+
+// mergeRunUsage keeps the latest usage of a run while carrying the last known
+// context-window snapshot forward. Claude reports context usage on assistant
+// events but not on the final result event, so a plain overwrite would drop it
+// right before completion.
+func mergeRunUsage(previous *agentruntime.Usage, next *agentruntime.Usage) *agentruntime.Usage {
+	if next == nil {
+		return previous
+	}
+	if next.Context != nil || previous == nil || previous.Context == nil {
+		return next
+	}
+	merged := *next
+	merged.Context = previous.Context
+	return &merged
 }

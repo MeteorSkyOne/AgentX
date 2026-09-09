@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration, messageMetricsParts, messageWorkingLabel, workingDurationBetween } from "./messageMetrics";
+import {
+  contextUsageLabel,
+  formatDuration,
+  formatTokenCount,
+  messageMetricsParts,
+  messageWorkingLabel,
+  workingDurationBetween,
+} from "./messageMetrics";
 
 describe("messageMetricsParts", () => {
   it("honors TTFT and TPS preferences independently", () => {
@@ -44,5 +51,34 @@ describe("messageMetricsParts", () => {
     expect(
       workingDurationBetween("2026-04-20T20:47:00Z", undefined, new Date("2026-04-20T20:47:01.200Z"))
     ).toBe("Working 1.2s");
+  });
+});
+
+describe("contextUsageLabel", () => {
+  it("shows used over window with a percentage", () => {
+    expect(
+      contextUsageLabel({ total_tokens: 76_420, context_window_tokens: 200_000, used_percent: 38.21 })
+    ).toBe("Context 76k/200k (38%)");
+  });
+
+  it("derives the percentage when the agent only reports counts", () => {
+    expect(contextUsageLabel({ total_tokens: 100_000, context_window_tokens: 1_000_000 })).toBe(
+      "Context 100k/1m (10%)"
+    );
+  });
+
+  it("degrades to whatever fields are present", () => {
+    expect(contextUsageLabel({ total_tokens: 512 })).toBe("Context 512");
+    expect(contextUsageLabel({ used_percent: 42 })).toBe("Context 42%");
+    expect(contextUsageLabel({})).toBeNull();
+    expect(contextUsageLabel(undefined)).toBeNull();
+  });
+
+  it("formats token counts in k and m", () => {
+    expect(formatTokenCount(999)).toBe("999");
+    expect(formatTokenCount(1_500)).toBe("2k");
+    expect(formatTokenCount(200_000)).toBe("200k");
+    expect(formatTokenCount(1_250_000)).toBe("1.3m");
+    expect(formatTokenCount(1_000_000)).toBe("1m");
   });
 });
