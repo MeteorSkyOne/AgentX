@@ -18,6 +18,10 @@ import (
 )
 
 var (
+	// Current Claude Code versions do not emit their init event until the first
+	// stream-json input arrives. Keep a short grace period for older versions
+	// and immediate startup failures without delaying every new session.
+	claudeStartupInitGrace  = 250 * time.Millisecond
 	claudeResultSettleDelay = 100 * time.Millisecond
 	claudeResultMaxWait     = 30 * time.Second
 	// claudeBackgroundIdleTimeout bounds a turn that is being held open for a
@@ -73,7 +77,7 @@ func (s *persistentSession) waitForSystemEvent(ctx context.Context) error {
 	s.process.AttachReader()
 	defer s.process.DetachReader()
 
-	timeout := time.NewTimer(10 * time.Second)
+	timeout := time.NewTimer(claudeStartupInitGrace)
 	defer timeout.Stop()
 	for {
 		select {
@@ -228,6 +232,13 @@ func (s *persistentSession) ContextUsage(ctx context.Context) (*runtime.ContextU
 	if !s.alive {
 		s.mu.Unlock()
 		return nil, procpool.ErrProcessDead
+	}
+	// Claude Code initializes stream-json sessions on the first user input.
+	// A control request cannot be that first input, so let the caller fall back
+	// to the synthetic /context command until this process has a real session ID.
+	if strings.HasPrefix(s.sessionID, "claude:") {
+		s.mu.Unlock()
+		return nil, nil
 	}
 	if s.started {
 		s.mu.Unlock()

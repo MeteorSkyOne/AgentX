@@ -183,6 +183,34 @@ done`)
 	}
 }
 
+func TestWaitForSystemEventAllowsInputDrivenInitialization(t *testing.T) {
+	pool := procpool.New(procpool.Options{IdleTimeout: time.Hour})
+	defer pool.Shutdown(context.Background())
+
+	proc, _, err := pool.GetOrCreate("input-driven-init", func(ctx context.Context) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", `while IFS= read -r line; do :; done`)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sess := newPersistentSession(proc, "input-driven-init", &Runtime{pool: pool})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	started := time.Now()
+	if err := sess.waitForSystemEvent(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed >= time.Second {
+		t.Fatalf("startup wait = %s, want input-driven initialization without a one-second delay", elapsed)
+	}
+
+	usage, err := sess.ContextUsage(ctx)
+	if err != nil || usage != nil {
+		t.Fatalf("pre-init context usage = %#v, error = %v; want /context fallback", usage, err)
+	}
+}
+
 func TestStartSessionReturnsStderrWhenProcessDiesDuringInitialization(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "claude")

@@ -26,6 +26,7 @@ func (r *Runtime) processStartFunc(req runtime.StartSessionRequest) procpool.Sta
 
 func (r *Runtime) buildArgs(req runtime.StartSessionRequest) []string {
 	args := []string{
+		"--print",
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--permission-prompt-tool", "stdio",
