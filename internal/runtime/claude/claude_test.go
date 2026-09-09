@@ -289,6 +289,47 @@ func TestLineHandlerParsesAssistantContextUsage(t *testing.T) {
 	}
 }
 
+// Claude Code's stream-json carries no context_usage block; the fill has to be
+// derived from the assistant message's own API usage, and the window size only
+// arrives with the result under modelUsage.
+func TestLineHandlerDerivesContextUsageFromMessageUsage(t *testing.T) {
+	handler := newLineHandler("fallback")
+
+	events, err := handler.HandleLine([]byte(`{"type":"assistant","message":{"model":"claude-haiku-4-5-20251001","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":10,"cache_creation_input_tokens":8000,"cache_read_input_tokens":13557,"output_tokens":3}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Usage == nil || events[0].Usage.Context == nil {
+		t.Fatalf("events = %#v", events)
+	}
+	if got := events[0].Usage.Context; ptrValue(got.TotalTokens) != 21567 || got.Model != "claude-haiku-4-5-20251001" || got.Source != "claude_message_usage" {
+		t.Fatalf("delta context = %#v", got)
+	}
+
+	// A subagent's API call has its own context; it must not replace the main agent's snapshot.
+	if _, err := handler.HandleLine([]byte(`{"type":"assistant","parent_tool_use_id":"toolu_sub","message":{"model":"claude-haiku-4-5-20251001","content":[{"type":"text","text":"sub"}],"usage":{"input_tokens":5,"cache_read_input_tokens":100}}}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err = handler.HandleLine([]byte(`{"type":"result","subtype":"success","result":"ok","usage":{"input_tokens":15,"output_tokens":40},"modelUsage":{"claude-haiku-4-5-20251001":{"inputTokens":10,"outputTokens":40,"contextWindow":200000}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != runtime.EventCompleted || events[0].Usage == nil || events[0].Usage.Context == nil {
+		t.Fatalf("events = %#v", events)
+	}
+	got := events[0].Usage.Context
+	if ptrValue(got.TotalTokens) != 21567 || ptrValue(got.ContextWindowTokens) != 200000 {
+		t.Fatalf("completed context = %#v", got)
+	}
+	if got.UsedPercent == nil || *got.UsedPercent < 10.7 || *got.UsedPercent > 10.9 {
+		t.Fatalf("completed percent = %#v", got.UsedPercent)
+	}
+	if ptrValue(events[0].Usage.InputTokens) != 15 {
+		t.Fatalf("result usage should be kept alongside context: %#v", events[0].Usage)
+	}
+}
+
 func TestLineHandlerParsesThinkingContent(t *testing.T) {
 	handler := newLineHandler("fallback")
 

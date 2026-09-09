@@ -36,16 +36,21 @@ func claudeUsage(payload map[string]any) *runtime.Usage {
 	return usage
 }
 
+// claudeContextUsage reads the context-window fill from an assistant event.
+// A structured context_usage block wins when present; otherwise the fill is
+// derived from the API call's own usage the way Claude Code's status line does:
+// everything the model was sent (fresh input plus cache writes and reads) is
+// what currently occupies the window.
 func claudeContextUsage(payload map[string]any) *runtime.ContextUsage {
 	value, _ := firstPresent(payload, "context_usage", "contextUsage")
 	values, _ := value.(map[string]any)
+	message, _ := payload["message"].(map[string]any)
 	if values == nil {
-		message, _ := payload["message"].(map[string]any)
 		value, _ = firstPresent(message, "context_usage", "contextUsage")
 		values, _ = value.(map[string]any)
 	}
 	if values == nil {
-		return nil
+		return claudeMessageContextUsage(message)
 	}
 
 	usage := &runtime.ContextUsage{
@@ -59,6 +64,75 @@ func claudeContextUsage(payload map[string]any) *runtime.ContextUsage {
 		return nil
 	}
 	return usage
+}
+
+func claudeMessageContextUsage(message map[string]any) *runtime.ContextUsage {
+	usageMap, _ := message["usage"].(map[string]any)
+	if usageMap == nil {
+		return nil
+	}
+	input := int64Field(usageMap, "input_tokens", "inputTokens")
+	cacheCreation := int64Field(usageMap, "cache_creation_input_tokens", "cacheCreationInputTokens")
+	cacheRead := int64Field(usageMap, "cache_read_input_tokens", "cacheReadInputTokens")
+	if input == nil && cacheCreation == nil && cacheRead == nil {
+		return nil
+	}
+	total := ptrInt64(input) + ptrInt64(cacheCreation) + ptrInt64(cacheRead)
+	return &runtime.ContextUsage{
+		TotalTokens:       &total,
+		InputTokens:       input,
+		CachedInputTokens: cacheRead,
+		OutputTokens:      int64Field(usageMap, "output_tokens", "outputTokens"),
+		Model:             firstTextValue(message, "model"),
+		Source:            "claude_message_usage",
+	}
+}
+
+// CompleteContextUsage finishes a turn's last context snapshot with the model's
+// window size, which Claude Code only reports on the result event under
+// modelUsage. The percentage is derived once both sides are known.
+func CompleteContextUsage(last *runtime.ContextUsage, result map[string]any) *runtime.ContextUsage {
+	if last == nil {
+		return nil
+	}
+	usage := *last
+	if usage.ContextWindowTokens == nil {
+		usage.ContextWindowTokens = claudeResultContextWindow(result, usage.Model)
+	}
+	if usage.UsedPercent == nil && usage.TotalTokens != nil && usage.ContextWindowTokens != nil && *usage.ContextWindowTokens > 0 {
+		percent := float64(*usage.TotalTokens) / float64(*usage.ContextWindowTokens) * 100
+		usage.UsedPercent = &percent
+	}
+	return &usage
+}
+
+func claudeResultContextWindow(result map[string]any, model string) *int64 {
+	value, _ := firstPresent(result, "modelUsage", "model_usage")
+	models, _ := value.(map[string]any)
+	if len(models) == 0 {
+		return nil
+	}
+	if entry, ok := models[model].(map[string]any); ok {
+		if window := int64Field(entry, "contextWindow", "context_window"); window != nil {
+			return window
+		}
+	}
+	// Without a per-model match, only an unambiguous single entry is trusted.
+	if len(models) == 1 {
+		for _, raw := range models {
+			if entry, ok := raw.(map[string]any); ok {
+				return int64Field(entry, "contextWindow", "context_window")
+			}
+		}
+	}
+	return nil
+}
+
+func ptrInt64(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func hasClaudeUsagePayload(values map[string]any) bool {

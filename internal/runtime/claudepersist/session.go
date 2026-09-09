@@ -563,6 +563,9 @@ func (s *persistentSession) handleLine(line []byte, state *claudeTurnState) (boo
 			s.emit(runtime.Event{Type: runtime.EventDelta, Thinking: thinking, Process: process})
 			return false, nil
 		}
+		if contextUsage != nil {
+			state.lastContext = contextUsage
+		}
 		if thinking != "" && thinking == state.lastThinkingText {
 			thinking = ""
 			filtered := process[:0]
@@ -606,7 +609,8 @@ func (s *persistentSession) handleLine(line []byte, state *claudeTurnState) (boo
 		if text == "" {
 			text = state.text()
 		}
-		evt := runtime.Event{Type: runtime.EventCompleted, Text: text, Usage: claude.ClaudeUsage(payload)}
+		completedUsage := claude.WithContext(claude.ClaudeUsage(payload), claude.CompleteContextUsage(state.lastContext, payload))
+		evt := runtime.Event{Type: runtime.EventCompleted, Text: text, Usage: completedUsage}
 		state.deferCompletion(evt)
 		return false, nil
 
@@ -643,6 +647,9 @@ type claudeTurnState struct {
 	lastThinkingText  string
 	processItemCount  int
 	pendingCompletion *runtime.Event
+	// lastContext is the main agent's most recent context snapshot; the
+	// result event completes it with the model's window size.
+	lastContext *runtime.ContextUsage
 	// usageAcc holds token usage from results that are no longer the pending
 	// completion — a turn spanning background subagents sees several results,
 	// and each one's usage must survive into the final tally.

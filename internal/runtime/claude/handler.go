@@ -18,6 +18,9 @@ type lineHandler struct {
 	// Accessed only from the single goroutine that scans stdout.
 	background        *BackgroundTracker
 	pendingCompletion *runtime.Event
+	// lastContext is the main agent's most recent context snapshot; the
+	// result event completes it with the model's window size.
+	lastContext *runtime.ContextUsage
 }
 
 func newLineHandler(fallbackID string) *lineHandler {
@@ -65,6 +68,9 @@ func (h *lineHandler) HandleLine(line []byte) ([]runtime.Event, error) {
 			}
 			return []runtime.Event{{Type: runtime.EventDelta, Thinking: thinking, Process: process}}, nil
 		}
+		if contextUsage != nil {
+			h.lastContext = contextUsage
+		}
 		if text != "" {
 			h.appendText(text)
 		}
@@ -91,7 +97,7 @@ func (h *lineHandler) HandleLine(line []byte) ([]runtime.Event, error) {
 		if text == "" {
 			text = h.text()
 		}
-		evt := runtime.Event{Type: runtime.EventCompleted, Text: text, Usage: claudeUsage(payload)}
+		evt := runtime.Event{Type: runtime.EventCompleted, Text: text, Usage: withContext(claudeUsage(payload), CompleteContextUsage(h.lastContext, payload))}
 		if stage := h.stageThinkingForResult(text); stage != "" {
 			evt.Thinking = stage
 			evt.Process = []runtime.ProcessItem{{Type: "thinking", Text: stage}}
@@ -120,6 +126,24 @@ func contextEventUsage(contextUsage *runtime.ContextUsage) *runtime.Usage {
 		return nil
 	}
 	return &runtime.Usage{Model: contextUsage.Model, Context: contextUsage}
+}
+
+// WithContext attaches a context snapshot to a result's usage, creating the
+// usage when the result carried none.
+func WithContext(usage *runtime.Usage, contextUsage *runtime.ContextUsage) *runtime.Usage {
+	return withContext(usage, contextUsage)
+}
+
+func withContext(usage *runtime.Usage, contextUsage *runtime.ContextUsage) *runtime.Usage {
+	if contextUsage == nil {
+		return usage
+	}
+	if usage == nil {
+		return contextEventUsage(contextUsage)
+	}
+	copied := *usage
+	copied.Context = contextUsage
+	return &copied
 }
 
 func (h *lineHandler) Finish(stderr string, waitErr error) (runtime.Event, bool) {
@@ -162,6 +186,9 @@ func MergeUsage(a *runtime.Usage, b *runtime.Usage) *runtime.Usage {
 	merged := *b
 	if merged.Model == "" {
 		merged.Model = a.Model
+	}
+	if merged.Context == nil {
+		merged.Context = a.Context
 	}
 	merged.InputTokens = addTokens(a.InputTokens, b.InputTokens)
 	merged.CachedInputTokens = addTokens(a.CachedInputTokens, b.CachedInputTokens)

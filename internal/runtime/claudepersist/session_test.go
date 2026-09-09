@@ -337,6 +337,27 @@ func TestHandleLineInsertsProcessBreakMarker(t *testing.T) {
 	}
 }
 
+func TestHandleLineCompletesContextUsageFromResultModelUsage(t *testing.T) {
+	sess := &persistentSession{events: make(chan runtime.Event, 4)}
+	state := newClaudeTurnState()
+
+	sess.handleLine([]byte(`{"type":"assistant","message":{"model":"claude-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":10,"cache_creation_input_tokens":6000,"cache_read_input_tokens":10000}}}`), state)
+	evt := <-sess.events
+	if evt.Usage == nil || evt.Usage.Context == nil || evt.Usage.Context.TotalTokens == nil || *evt.Usage.Context.TotalTokens != 16010 {
+		t.Fatalf("delta usage = %#v", evt.Usage)
+	}
+
+	sess.handleLine([]byte(`{"type":"result","subtype":"success","result":"hi","modelUsage":{"claude-test":{"contextWindow":200000}}}`), state)
+	evt = state.completionEvent()
+	if evt.Type != runtime.EventCompleted || evt.Usage == nil || evt.Usage.Context == nil {
+		t.Fatalf("completed = %#v", evt)
+	}
+	got := evt.Usage.Context
+	if got.ContextWindowTokens == nil || *got.ContextWindowTokens != 200000 || got.UsedPercent == nil {
+		t.Fatalf("completed context = %#v", got)
+	}
+}
+
 func TestHandleLineProcessBreakAfterToolActivity(t *testing.T) {
 	sess := &persistentSession{events: make(chan runtime.Event, 10)}
 	state := newClaudeTurnState()
