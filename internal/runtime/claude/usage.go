@@ -36,6 +36,31 @@ func claudeUsage(payload map[string]any) *runtime.Usage {
 	return usage
 }
 
+func claudeContextUsage(payload map[string]any) *runtime.ContextUsage {
+	value, _ := firstPresent(payload, "context_usage", "contextUsage")
+	values, _ := value.(map[string]any)
+	if values == nil {
+		message, _ := payload["message"].(map[string]any)
+		value, _ = firstPresent(message, "context_usage", "contextUsage")
+		values, _ = value.(map[string]any)
+	}
+	if values == nil {
+		return nil
+	}
+
+	usage := &runtime.ContextUsage{
+		TotalTokens:         int64Field(values, "total_tokens", "totalTokens"),
+		ContextWindowTokens: int64Field(values, "raw_max_tokens", "rawMaxTokens", "max_tokens", "maxTokens"),
+		UsedPercent:         float64Field(values, "percentage", "used_percent", "usedPercent"),
+		Model:               firstTextValue(values, "model", "model_id", "modelId"),
+		Source:              "claude_context_usage",
+	}
+	if usage.TotalTokens == nil && usage.ContextWindowTokens == nil && usage.UsedPercent == nil && usage.Model == "" {
+		return nil
+	}
+	return usage
+}
+
 func hasClaudeUsagePayload(values map[string]any) bool {
 	if stringValue(values, "model") != "" || stringValue(values, "model_id") != "" {
 		return true

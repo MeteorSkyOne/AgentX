@@ -48,10 +48,12 @@ func (h *lineHandler) HandleLine(line []byte) ([]runtime.Event, error) {
 		return nil, nil
 	case "assistant", "user":
 		text, thinking, process := assistantContent(payload)
+		contextUsage := claudeContextUsage(payload)
 		if stringValue(payload, "type") != "assistant" {
 			text = ""
+			contextUsage = nil
 		}
-		if text == "" && thinking == "" && len(process) == 0 {
+		if text == "" && thinking == "" && len(process) == 0 && contextUsage == nil {
 			return nil, nil
 		}
 
@@ -79,7 +81,7 @@ func (h *lineHandler) HandleLine(line []byte) ([]runtime.Event, error) {
 		if text != "" {
 			h.appendPendingText(text)
 		}
-		return []runtime.Event{{Type: runtime.EventDelta, Text: text, Thinking: thinking, Process: process, ClearText: clearText}}, nil
+		return []runtime.Event{{Type: runtime.EventDelta, Text: text, Thinking: thinking, Process: process, ClearText: clearText, Usage: contextEventUsage(contextUsage)}}, nil
 	case "result":
 		if isErrorResult(payload) {
 			errText := resultError(payload)
@@ -111,6 +113,13 @@ func (h *lineHandler) HandleLine(line []byte) ([]runtime.Event, error) {
 	default:
 		return nil, nil
 	}
+}
+
+func contextEventUsage(contextUsage *runtime.ContextUsage) *runtime.Usage {
+	if contextUsage == nil {
+		return nil
+	}
+	return &runtime.Usage{Model: contextUsage.Model, Context: contextUsage}
 }
 
 func (h *lineHandler) Finish(stderr string, waitErr error) (runtime.Event, bool) {

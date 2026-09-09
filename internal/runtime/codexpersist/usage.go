@@ -71,10 +71,16 @@ func threadTokenUsageUpdatedUsage(params map[string]any, model string) *runtime.
 	}
 }
 
+// contextUsageFromTokenUsage derives the current context-window fill from a
+// Codex tokenUsage object. Codex reports both a cumulative "total" across the
+// whole thread and a "last" snapshot for the most recent model call. Only the
+// latter reflects what is actually in the context window (the same value the
+// Codex CLI /status uses), so prefer it and fall back to "total" only when no
+// per-call snapshot is available.
 func contextUsageFromTokenUsage(usage map[string]any, model string, source string) *runtime.ContextUsage {
-	total := tokenUsageTotalMap(usage)
+	total, _ := usage["last"].(map[string]any)
 	if total == nil {
-		total, _ = usage["last"].(map[string]any)
+		total = tokenUsageTotalMap(usage)
 	}
 	if total == nil {
 		return nil

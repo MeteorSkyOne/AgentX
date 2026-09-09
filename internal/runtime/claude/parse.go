@@ -10,6 +10,10 @@ func ClaudeUsage(payload map[string]any) *runtime.Usage {
 	return claudeUsage(payload)
 }
 
+func ClaudeContextUsage(payload map[string]any) *runtime.ContextUsage {
+	return claudeContextUsage(payload)
+}
+
 func IsErrorResult(payload map[string]any) bool {
 	return isErrorResult(payload)
 }

@@ -543,10 +543,12 @@ func (s *persistentSession) handleLine(line []byte, state *claudeTurnState) (boo
 	case "assistant", "user":
 		payloadType := claude.StringValue(payload, "type")
 		text, thinking, process := claude.AssistantContent(payload)
+		contextUsage := claude.ClaudeContextUsage(payload)
 		if payloadType != "assistant" {
 			text = ""
+			contextUsage = nil
 		}
-		if text == "" && thinking == "" && len(process) == 0 {
+		if text == "" && thinking == "" && len(process) == 0 && contextUsage == nil {
 			return false, nil
 		}
 
@@ -591,7 +593,7 @@ func (s *persistentSession) handleLine(line []byte, state *claudeTurnState) (boo
 			state.sawToolsSinceText = false
 		}
 		state.trackProcess(process)
-		s.emit(runtime.Event{Type: runtime.EventDelta, Text: text, Thinking: thinking, Process: process})
+		s.emit(runtime.Event{Type: runtime.EventDelta, Text: text, Thinking: thinking, Process: process, Usage: contextEventUsage(contextUsage)})
 		return false, nil
 
 	case "result":
@@ -620,6 +622,13 @@ func (s *persistentSession) handleLine(line []byte, state *claudeTurnState) (boo
 	default:
 		return false, nil
 	}
+}
+
+func contextEventUsage(contextUsage *runtime.ContextUsage) *runtime.Usage {
+	if contextUsage == nil {
+		return nil
+	}
+	return &runtime.Usage{Model: contextUsage.Model, Context: contextUsage}
 }
 
 func sameNormalizedText(left string, right string) bool {

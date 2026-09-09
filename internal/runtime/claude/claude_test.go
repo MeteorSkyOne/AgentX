@@ -270,6 +270,25 @@ func TestLineHandlerParsesClaudeResultUsage(t *testing.T) {
 	}
 }
 
+func TestLineHandlerParsesAssistantContextUsage(t *testing.T) {
+	handler := newLineHandler("fallback")
+
+	events, err := handler.HandleLine([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"context"}]},"context_usage":{"model":"claude-test","total_tokens":14146,"raw_max_tokens":1000000,"percentage":1}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Usage == nil || events[0].Usage.Context == nil {
+		t.Fatalf("events = %#v", events)
+	}
+	usage := events[0].Usage.Context
+	if ptrValue(usage.TotalTokens) != 14146 || ptrValue(usage.ContextWindowTokens) != 1000000 || usage.UsedPercent == nil || *usage.UsedPercent != 1 {
+		t.Fatalf("context usage = %#v", usage)
+	}
+	if usage.Model != "claude-test" || usage.Source != "claude_context_usage" {
+		t.Fatalf("context metadata = %#v", usage)
+	}
+}
+
 func TestLineHandlerParsesThinkingContent(t *testing.T) {
 	handler := newLineHandler("fallback")
 

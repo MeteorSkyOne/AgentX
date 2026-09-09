@@ -102,12 +102,16 @@ func (a *App) probeStatusContextUsage(ctx context.Context, req SendMessageReques
 	}
 
 	var text strings.Builder
+	var structuredUsage *domain.ContextUsage
 	for {
 		select {
 		case <-probeCtx.Done():
 			return nil, probeCtx.Err()
 		case evt, ok := <-session.Events():
 			if !ok {
+				if structuredUsage != nil {
+					return structuredUsage, nil
+				}
 				return parseClaudeContextOutput(text.String()), nil
 			}
 			if evt.Text != "" {
@@ -117,10 +121,13 @@ func (a *App) probeStatusContextUsage(ctx context.Context, req SendMessageReques
 				text.WriteString(evt.Text)
 			}
 			if evt.Usage != nil && evt.Usage.Context != nil {
-				return contextUsageToDomain(evt.Usage.Context), nil
+				structuredUsage = contextUsageToDomain(evt.Usage.Context)
 			}
 			switch evt.Type {
 			case agentruntime.EventCompleted:
+				if structuredUsage != nil {
+					return structuredUsage, nil
+				}
 				if usage := parseClaudeContextOutput(evt.Text); usage != nil {
 					return usage, nil
 				}

@@ -227,6 +227,13 @@ func TestThreadTokenUsageUpdatedEmitsContextUsage(t *testing.T) {
 		Params: map[string]any{
 			"tokenUsage": map[string]any{
 				"total": map[string]any{
+					"inputTokens":           float64(7000),
+					"cachedInputTokens":     float64(1000),
+					"outputTokens":          float64(200),
+					"reasoningOutputTokens": float64(50),
+					"totalTokens":           float64(7250),
+				},
+				"last": map[string]any{
 					"inputTokens":           float64(700),
 					"cachedInputTokens":     float64(100),
 					"outputTokens":          float64(20),
@@ -245,7 +252,11 @@ func TestThreadTokenUsageUpdatedEmitsContextUsage(t *testing.T) {
 	if evt.Type != runtime.EventDelta || evt.Usage == nil || evt.Usage.Context == nil {
 		t.Fatalf("event = %#v", evt)
 	}
+	if ptrValue(evt.Usage.TotalTokens) != 7250 {
+		t.Fatalf("cumulative usage total = %d, want 7250", ptrValue(evt.Usage.TotalTokens))
+	}
 	contextUsage := evt.Usage.Context
+	// Context fill must come from the last model call, not the thread-wide cumulative total.
 	if ptrValue(contextUsage.TotalTokens) != 725 || ptrValue(contextUsage.ContextWindowTokens) != 4000 || contextUsage.Model != "gpt-thread" || contextUsage.Source != "thread/tokenUsage/updated" {
 		t.Fatalf("context usage = %#v", contextUsage)
 	}
