@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  Sparkles,
   Square,
   Wrench,
 } from "lucide-react";
@@ -379,6 +380,7 @@ function ToolProcessRow({ item, messageID }: { item: DisplayProcessItem; message
   const [open, setOpen] = useState(!hasResult && !canLazyLoad);
   const raw = rawProcessValue(activeItem);
   const preview = toolPreview(activeItem);
+  const skill = skillInvocation(activeItem);
 
   useEffect(() => {
     setDetail(null);
@@ -445,10 +447,23 @@ function ToolProcessRow({ item, messageID }: { item: DisplayProcessItem; message
             <Wrench className="h-3.5 w-3.5" />
           )}
         </span>
-        <span className="font-medium text-foreground">
-          {activeItem.result ? "Tool" : isResultOnly ? "Tool result" : "Tool call"}
-        </span>
-        {activeItem.tool_name && <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{activeItem.tool_name}</span>}
+        {skill ? (
+          <>
+            <span className="font-medium text-foreground">Skill</span>
+            <span className="flex items-center gap-1 rounded bg-violet-500/10 px-1.5 py-0.5 font-mono text-violet-400">
+              <Sparkles className="h-3 w-3" />
+              {`/${skill.name}`}
+            </span>
+            {skill.args && <span className="min-w-0 truncate text-muted-foreground">{skill.args}</span>}
+          </>
+        ) : (
+          <>
+            <span className="font-medium text-foreground">
+              {activeItem.result ? "Tool" : isResultOnly ? "Tool result" : "Tool call"}
+            </span>
+            {activeItem.tool_name && <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{activeItem.tool_name}</span>}
+          </>
+        )}
         {status && (
           <span className={cn("rounded px-1.5 py-0.5", isError ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground")}>
             {status}
@@ -543,9 +558,10 @@ function toolPreview(item: DisplayProcessItem): ToolPreview {
     extractString(resultRaw, "description", "reason");
   const body = resultItem ? toolOutputText(outputValue) : undefined;
   const params = previewParams(inputValue, new Set(["command", "cmd", "cwd", "workdir", "working_directory", "description", "reason"]));
+  const skill = skillInvocation(item);
 
   return {
-    title: description ?? (cwd ? `cwd: ${cwd}` : undefined),
+    title: skill ? skillLabel(skill) : description ?? (cwd ? `cwd: ${cwd}` : undefined),
     command,
     body: body && body !== command ? clampText(body, 4000) : undefined,
     params
@@ -577,6 +593,24 @@ function extractString(value: unknown, ...keys: string[]): string | undefined {
     if (typeof item === "string" && item.trim() !== "") return item;
   }
   return undefined;
+}
+
+interface SkillInvocation {
+  name: string;
+  args?: string;
+}
+
+/** Claude Code invokes a skill through the "Skill" tool; its input names the skill. */
+export function skillInvocation(item: ProcessItem): SkillInvocation | undefined {
+  if (item.tool_name !== "Skill") return undefined;
+  const name = extractString(item.input, "skill") ?? extractString(asRecord(item.raw)?.input, "skill");
+  if (!name) return undefined;
+  const args = extractString(item.input, "args") ?? extractString(asRecord(item.raw)?.input, "args");
+  return { name, args: args?.trim() || undefined };
+}
+
+function skillLabel(skill: SkillInvocation): string {
+  return skill.args ? `/${skill.name} ${skill.args}` : `/${skill.name}`;
 }
 
 function previewParams(value: unknown, excluded: Set<string>): Array<[string, string]> {
@@ -738,7 +772,14 @@ function processEntryKey(item: DisplayProcessEntry, index: number): string {
 
 function toolFragmentNames(items: DisplayProcessItem[]): string {
   const names = Array.from(
-    new Set(items.map((item) => item.tool_name).filter((name): name is string => Boolean(name)))
+    new Set(
+      items
+        .map((item) => {
+          const skill = skillInvocation(item);
+          return skill ? `/${skill.name}` : item.tool_name;
+        })
+        .filter((name): name is string => Boolean(name))
+    )
   );
   if (names.length === 0) {
     return "";

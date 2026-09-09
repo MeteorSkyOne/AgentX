@@ -118,8 +118,32 @@ func processItemSummary(item map[string]any, index int) map[string]any {
 		// Pure state signals: everything they carry survives the summary.
 		return summary
 	}
+	if skillInput := skillCallSummaryInput(item); skillInput != nil {
+		// A skill invocation is identified by its name, so keep that visible
+		// in the timeline header instead of hiding it behind the lazy detail.
+		summary["input"] = skillInput
+	}
 	summary["has_detail"] = true
 	return summary
+}
+
+// skillCallSummaryInput returns the skill name and arguments of a Skill tool
+// call, or nil for any other tool. Only these two fields survive redaction.
+func skillCallSummaryInput(item map[string]any) map[string]any {
+	if stringValue(item, "type") != "tool_call" || stringValue(item, "tool_name") != "Skill" {
+		return nil
+	}
+	input, ok := item["input"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := map[string]any{}
+	copyStringField(out, input, "skill")
+	copyStringField(out, input, "args")
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func matchingToolResult(items []map[string]any, index int, item map[string]any) map[string]any {

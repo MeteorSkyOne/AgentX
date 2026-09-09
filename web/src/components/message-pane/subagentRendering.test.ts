@@ -211,4 +211,44 @@ describe("subagent rendering", () => {
     expect(el.textContent).toContain("Bash");
     expect(el.textContent).not.toContain("Subagent");
   });
+
+  it("names the skill an agent invoked instead of showing a generic tool call", () => {
+    const el = render([
+      {
+        type: "tool_call",
+        tool_name: "Skill",
+        tool_call_id: "toolu_skill",
+        input: { skill: "code-review", args: "--fix" },
+      },
+      { type: "tool_result", tool_call_id: "toolu_skill", output: "loaded" },
+    ]);
+
+    // The collapsed tools summary already names the skill.
+    expect(el.textContent).toContain("/code-review");
+
+    const trigger = Array.from(el.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("1 tool")
+    );
+    expect(trigger).toBeDefined();
+    act(() => {
+      trigger!.click();
+    });
+
+    expect(el.textContent).toContain("Skill");
+    expect(el.textContent).toContain("/code-review");
+    expect(el.textContent).toContain("--fix");
+    expect(el.textContent).not.toContain("Tool call");
+  });
+
+  it("names invoked skills in the collapsed tools summary", () => {
+    const el = render([
+      { type: "tool_call", tool_name: "Skill", tool_call_id: "s1", input: { skill: "pdf" } },
+      { type: "tool_result", tool_call_id: "s1" },
+      { type: "tool_call", tool_name: "Read", tool_call_id: "r1", input: { file_path: "a.md" } },
+      { type: "tool_result", tool_call_id: "r1" },
+    ]);
+
+    expect(el.textContent).toContain("2 tools");
+    expect(el.textContent).toContain("/pdf, Read");
+  });
 });

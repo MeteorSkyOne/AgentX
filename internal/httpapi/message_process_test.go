@@ -48,3 +48,46 @@ func TestRedactionKeepsSubagentAttribution(t *testing.T) {
 		t.Errorf("main-agent item should not carry an attribution: %#v", process[0])
 	}
 }
+
+// A skill invocation is only meaningful by its name, so redaction keeps the
+// skill name and arguments while still dropping every other tool's input.
+func TestRedactionKeepsSkillName(t *testing.T) {
+	message := domain.Message{
+		Metadata: map[string]any{
+			"process": []any{
+				map[string]any{
+					"type":         "tool_call",
+					"tool_name":    "Skill",
+					"tool_call_id": "toolu_skill",
+					"input":        map[string]any{"skill": "code-review", "args": "--fix", "extra": "dropped"},
+				},
+				map[string]any{
+					"type":         "tool_call",
+					"tool_name":    "Bash",
+					"tool_call_id": "toolu_bash",
+					"input":        map[string]any{"command": "echo hi"},
+				},
+			},
+		},
+	}
+
+	redacted := redactMessageProcessDetails(message)
+	process, ok := redacted.Metadata["process"].([]map[string]any)
+	if !ok || len(process) != 2 {
+		t.Fatalf("process = %#v", redacted.Metadata["process"])
+	}
+
+	input, ok := process[0]["input"].(map[string]any)
+	if !ok {
+		t.Fatalf("skill input missing from summary: %#v", process[0])
+	}
+	if input["skill"] != "code-review" || input["args"] != "--fix" {
+		t.Errorf("skill summary input = %#v", input)
+	}
+	if _, leaked := input["extra"]; leaked {
+		t.Errorf("skill summary leaked unrelated input: %#v", input)
+	}
+	if _, leaked := process[1]["input"]; leaked {
+		t.Errorf("redaction leaked tool input: %#v", process[1])
+	}
+}
