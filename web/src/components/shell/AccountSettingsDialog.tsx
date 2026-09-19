@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { formatToolVersion } from "./toolUpdateStatus";
 import type { BrowserNotificationPermission } from "@/notifications/browser";
 import { browserPermissionLabel } from "./utils";
 
@@ -625,9 +626,10 @@ export function AccountSettingsDialog({
                           <span className="text-muted-foreground">{tool.state}</span>
                         </div>
                         <p className="truncate text-muted-foreground">
-                          {tool.current_version || "unknown"}{tool.latest_version ? ` -> ${tool.latest_version}` : ""}
+                          {formatToolVersion(tool)}
                           {tool.runtime_reset_pending ? " · restart pending" : ""}
                         </p>
+                        {tool.last_error && <p className="line-clamp-2 text-destructive">{tool.last_error}</p>}
                       </div>
                     ))}
                     {(toolActionError || toolActionStatus) && (

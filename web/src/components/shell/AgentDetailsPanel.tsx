@@ -44,6 +44,7 @@ import {
 } from "../AgentAvatar";
 import { WorkspaceFileBrowser } from "../WorkspaceFileBrowser";
 import { AgentProviderLimitsView } from "./AgentProviderLimits";
+import { formatToolVersion } from "./toolUpdateStatus";
 import type { ShellProps } from "./types";
 import {
   AGENT_EFFORT_OPTIONS,
@@ -447,7 +448,7 @@ export function AgentDetailsPanel({
                       <p className="mt-1 truncate text-xs text-muted-foreground">
                         {toolUpdatesLoading
                           ? "Loading versions..."
-                          : `${selectedToolStatus?.current_version || "unknown"}${selectedToolStatus?.latest_version ? ` -> ${selectedToolStatus.latest_version}` : ""}`}
+                          : formatToolVersion(selectedToolStatus)}
                       </p>
                     </div>
                     <Badge variant="outline" className="shrink-0 text-[10px]">
