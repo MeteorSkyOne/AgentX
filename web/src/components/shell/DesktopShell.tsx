@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { Dispatch, PointerEvent as ReactPointerEvent, RefObject, SetStateAction } from "react";
 import {
   Activity,
@@ -14,6 +15,7 @@ import {
   Pencil,
   Plus,
   Rows3,
+  Search,
   Settings,
   SquareTerminal,
   Sun,
@@ -37,6 +39,7 @@ import { ConversationPanel } from "./ConversationPanel";
 import { MembersPanel } from "./MembersPanel";
 import { MetricsPanel } from "./MetricsPanel";
 import { ProjectFilesOverlay } from "./ProjectFilesOverlay";
+import { ProjectSearchDialog } from "./ProjectSearchDialog";
 import { RoadmapPanel } from "./RoadmapPanel";
 import { TasksPanel } from "./TasksPanel";
 import { TerminalDockBoundary } from "./LazyTerminalDock";
@@ -244,6 +247,19 @@ export function DesktopShell({
   setProjectFileTreeCollapsed,
   setMobileProjectFilesView,
 }: DesktopShellProps) {
+  const [projectSearchOpen, setProjectSearchOpen] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setProjectSearchOpen((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   return (
       <div className="flex h-full min-h-0 min-w-0 flex-1" data-testid="desktop-shell">
       {/* Project Rail */}
@@ -261,6 +277,23 @@ export function DesktopShell({
           </Tooltip>
 
           <div className="mx-auto h-0.5 w-8 shrink-0 rounded-full bg-border" />
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className={cn(
+                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground",
+                  projectSearchOpen && "text-foreground"
+                )}
+                title="Search projects"
+                aria-label="Search projects"
+                onClick={() => setProjectSearchOpen(true)}
+              >
+                <Search className="h-5 w-5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Search projects (Ctrl+K)</TooltipContent>
+          </Tooltip>
 
           <ScrollArea className="min-h-0 w-full flex-1">
             <div className="flex flex-col items-center gap-2">
@@ -754,6 +787,13 @@ export function DesktopShell({
           </>
         )}
       </ResizablePanelGroup>
+      <ProjectSearchDialog
+        open={projectSearchOpen}
+        onOpenChange={setProjectSearchOpen}
+        projects={projects}
+        currentProjectID={project?.id}
+        onSelectProject={onSelectProject}
+      />
       <ProjectFilesOverlay
         open={projectFilesOpen}
         controller={projectFilesController}

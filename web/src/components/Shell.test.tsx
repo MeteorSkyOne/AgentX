@@ -294,6 +294,37 @@ describe("Shell main views", () => {
   });
 });
 
+describe("Shell project search", () => {
+  it("filters projects and selects the highlighted match with Enter", () => {
+    const props = shellProps();
+    const alpha = { ...props.project!, id: "p-alpha", name: "Alpha Service" };
+    const beta = { ...props.project!, id: "p-beta", name: "Beta Web" };
+    render(<Shell {...props} projects={[props.project!, alpha, beta]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Search projects" }));
+    const input = screen.getByRole("textbox", { name: "Search projects" });
+    fireEvent.change(input, { target: { value: "web" } });
+
+    const listbox = screen.getByRole("listbox", { name: "Projects" });
+    expect(Array.from(listbox.querySelectorAll('[role="option"]')).map((node) => node.textContent)).toEqual([
+      "BWBeta Web",
+    ]);
+
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(props.onSelectProject).toHaveBeenCalledWith("p-beta");
+    expect(screen.queryByRole("listbox", { name: "Projects" })).toBeNull();
+  });
+
+  it("opens project search with the Ctrl+K shortcut", () => {
+    render(<Shell {...shellProps()} />);
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+
+    expect(screen.getByRole("textbox", { name: "Search projects" })).toBeTruthy();
+  });
+});
+
 describe("Shell mobile panels", () => {
   it("opens agent settings as a full-screen mobile dialog", () => {
     setMatchMedia(true);
