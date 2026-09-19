@@ -24,7 +24,9 @@ const (
 	toolUpdateProviderCodex  = "codex"
 	toolUpdateAll            = "all"
 	toolUpdateOutputLimit    = 16 * 1024
-	defaultToolUpdateTimeout = 5 * time.Minute
+	toolUpdateCheckTimeout   = 2 * time.Minute
+	toolUpdateInstallTimeout = 30 * time.Minute
+	toolUpdateWaitInterval   = 500 * time.Millisecond
 )
 
 type ToolUpdateOptions struct {
@@ -73,6 +75,7 @@ type toolUpdateService struct {
 	codexCommand  string
 	exec          toolUpdateExecFunc
 	now           func() time.Time
+	waitInterval  time.Duration
 
 	mu     sync.Mutex
 	states map[string]*toolUpdateState
@@ -122,6 +125,7 @@ func newToolUpdateService(_ store.Store, dataDir string, runtimes map[string]age
 		codexCommand:  codexCommand,
 		exec:          execFn,
 		now:           now,
+		waitInterval:  toolUpdateWaitInterval,
 		states: map[string]*toolUpdateState{
 			toolUpdateProviderClaude: {State: "idle"},
 			toolUpdateProviderCodex:  {State: "idle"},
@@ -130,8 +134,6 @@ func newToolUpdateService(_ store.Store, dataDir string, runtimes map[string]age
 }
 
 func defaultToolUpdateExec(ctx context.Context, name string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, defaultToolUpdateTimeout)
-	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = providerProbeEnv(nil)
 	configureProviderProbeCommand(cmd)
@@ -160,13 +162,21 @@ func (a *App) StartToolUpdates(ctx context.Context) error {
 	if a.toolUpdates == nil {
 		return nil
 	}
-	return a.toolUpdates.start(ctx, func() {
+	if err := a.toolUpdates.start(ctx, func() {
 		a.startBackground("tool-auto-update", func(ctx context.Context) {
 			if _, err := a.RunToolUpdate(ctx, toolUpdateAll); err != nil {
 				slog.Warn("tool auto update failed", "error", err)
 			}
 		})
+	}); err != nil {
+		return err
+	}
+	// Version status lives in memory, so probe it at startup instead of reporting
+	// unknown versions until the next manual check or scheduled update.
+	a.startBackground("tool-version-check", func(ctx context.Context) {
+		_, _ = a.CheckToolUpdates(ctx, toolUpdateAll)
 	})
+	return nil
 }
 
 func (a *App) StopToolUpdates() {
@@ -285,13 +295,12 @@ func (a *App) CheckToolUpdates(ctx context.Context, tool string) (ToolUpdateOver
 	if len(providers) == 0 {
 		return ToolUpdateOverview{}, invalidInput("tool must be claude, codex, or all")
 	}
+	// A failed probe is recorded in that tool's status, so report it through the
+	// overview instead of failing the whole check and hiding the other tools.
 	if err := runToolUpdateProviders(providers, func(provider string) error {
-		if err := a.toolUpdates.check(ctx, provider); err != nil {
-			return err
-		}
-		return nil
+		return a.toolUpdates.check(ctx, provider)
 	}); err != nil {
-		return ToolUpdateOverview{}, err
+		slog.Warn("tool version check failed", "error", err)
 	}
 	return a.ToolUpdateOverview(ctx, "")
 }
@@ -395,12 +404,12 @@ func (s *toolUpdateService) check(ctx context.Context, provider string) error {
 }
 
 func (s *toolUpdateService) checkStarted(ctx context.Context, provider string, completedState string) error {
-	currentOut, err := s.exec(ctx, s.commandForProvider(provider), "--version")
+	currentOut, err := s.execWithTimeout(ctx, toolUpdateCheckTimeout, s.commandForProvider(provider), "--version")
 	if err != nil {
 		s.setState(provider, "error", "", err.Error())
 		return err
 	}
-	latestOut, latestErr := s.exec(ctx, "npm", "view", toolUpdatePackage(provider), "version")
+	latestOut, latestErr := s.execWithTimeout(ctx, toolUpdateCheckTimeout, "npm", "view", toolUpdatePackage(provider), "version")
 	current := parseToolVersion(provider, currentOut)
 	latest := parseToolVersion(provider, latestOut)
 	var available *bool
@@ -431,35 +440,97 @@ func (s *toolUpdateService) update(ctx context.Context, provider string) error {
 }
 
 func (s *toolUpdateService) updateStarted(ctx context.Context, provider string) error {
-	out, err := s.exec(ctx, s.commandForProvider(provider), "update")
-	now := s.now().UTC()
-	s.mu.Lock()
-	state := s.stateLocked(provider)
+	command := s.commandForProvider(provider)
+	// Installers leave a broken tool behind when killed midway (npm drops the bin link
+	// and platform package), so AgentX shutdown or restart must not cancel them.
+	ctx = context.WithoutCancel(ctx)
+	out, err := s.execWithTimeout(ctx, toolUpdateInstallTimeout, command, "update")
 	if err != nil {
+		s.mu.Lock()
+		state := s.stateLocked(provider)
 		state.State = "error"
 		state.LastError = err.Error()
 		state.Message = err.Error()
 		s.mu.Unlock()
 		return err
 	}
-	state.State = "idle"
+	// Read the installed version back: the updater may follow a release channel that
+	// lags the npm latest tag, or finish without replacing the binary.
+	versionOut, versionErr := s.execWithTimeout(ctx, toolUpdateCheckTimeout, command, "--version")
+	now := s.now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.stateLocked(provider)
 	state.LastUpdatedAt = &now
+	if versionErr != nil {
+		state.State = "error"
+		state.LastError = versionErr.Error()
+		state.Message = "Update finished but the installed version could not be read: " + versionErr.Error()
+		return versionErr
+	}
+	current := parseToolVersion(provider, versionOut)
+	state.State = "idle"
 	state.LastError = ""
 	state.Message = out
-	if state.LatestVersion != "" {
-		state.CurrentVersion = state.LatestVersion
-		v := false
-		state.UpdateAvailable = &v
+	state.CurrentVersion = current
+	state.LastCheckedAt = &now
+	state.UpdateAvailable = nil
+	if current != "" && state.LatestVersion != "" {
+		available := current != state.LatestVersion
+		state.UpdateAvailable = &available
+		if available {
+			state.Message = fmt.Sprintf("Update finished but %s is still %s (latest %s)", command, current, state.LatestVersion)
+		}
 	}
-	s.mu.Unlock()
 	return nil
+}
+
+func (s *toolUpdateService) execWithTimeout(ctx context.Context, timeout time.Duration, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return s.exec(ctx, name, args...)
+}
+
+// waitForToolUpdates blocks while a runtime check or update is in progress so a
+// restart does not interrupt an installer midway. It gives up once ctx ends or the
+// longest possible check plus install has elapsed.
+func (a *App) waitForToolUpdates(ctx context.Context) {
+	if a.toolUpdates == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, toolUpdateCheckTimeout+toolUpdateInstallTimeout+toolUpdateCheckTimeout)
+	defer cancel()
+	ticker := time.NewTicker(a.toolUpdates.waitInterval)
+	defer ticker.Stop()
+	for a.toolUpdates.inProgress() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *toolUpdateService) inProgress() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, state := range s.states {
+		if toolUpdateBusy(state.State) {
+			return true
+		}
+	}
+	return false
+}
+
+func toolUpdateBusy(state string) bool {
+	return state == "checking" || state == "updating"
 }
 
 func (s *toolUpdateService) beginUpdate(provider string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	state := s.stateLocked(provider)
-	if state.State == "checking" || state.State == "updating" {
+	if toolUpdateBusy(state.State) {
 		return false
 	}
 	state.State = "updating"

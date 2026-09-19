@@ -143,7 +143,7 @@ func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
 		}
 	}
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
-	return &App{
+	a := &App{
 		store:          st,
 		bus:            bus,
 		opts:           opts,
@@ -178,6 +178,15 @@ func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
 		backgroundCtx:    backgroundCtx,
 		backgroundCancel: backgroundCancel,
 	}
+	if onUpdated := opts.SelfUpdates.OnUpdated; onUpdated != nil {
+		// Self-update and runtime updates share a default schedule; restarting while
+		// npm is mid-install leaves the runtime CLI broken.
+		a.selfUpdates.onUpdated = func() {
+			a.waitForToolUpdates(backgroundCtx)
+			onUpdated()
+		}
+	}
+	return a
 }
 
 func (a *App) beginBackground() (context.Context, func(), bool) {

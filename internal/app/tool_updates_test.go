@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -212,21 +213,160 @@ func TestRuntimeResetBlocksNewRunRegistration(t *testing.T) {
 	<-registered
 }
 
-func newToolUpdateTestApp(t *testing.T, rt agentruntime.Runtime) *App {
-	t.Helper()
+func TestRunToolUpdateReportsInstalledVersionWhenUpdateLagsLatest(t *testing.T) {
 	exec := func(_ context.Context, name string, args ...string) (string, error) {
-		joined := name + " " + strings.Join(args, " ")
-		switch joined {
+		switch name + " " + strings.Join(args, " ") {
 		case "claude --version":
 			return "2.1.1 (Claude Code)", nil
 		case "npm view @anthropic-ai/claude-code version":
 			return "2.1.2", nil
+		default:
+			return "", nil
+		}
+	}
+	app := newToolUpdateTestAppWithExec(t, &resetRuntime{}, exec)
+
+	overview, err := app.RunToolUpdate(context.Background(), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := overview.Tools[0]
+	if status.CurrentVersion != "2.1.1" || status.UpdateAvailable == nil || !*status.UpdateAvailable {
+		t.Fatalf("status = %#v, want installed 2.1.1 with update still available", status)
+	}
+	if !strings.Contains(status.Message, "still 2.1.1") {
+		t.Fatalf("message = %q, want lagging version message", status.Message)
+	}
+}
+
+func TestToolUpdateInstallSurvivesCallerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	exec := func(execCtx context.Context, name string, args ...string) (string, error) {
+		switch name + " " + strings.Join(args, " ") {
 		case "claude update":
+			cancel()
+			if err := execCtx.Err(); err != nil {
+				return "", err
+			}
+			return "updated", nil
+		case "claude --version":
+			return "2.1.2 (Claude Code)", nil
+		default:
+			return "", nil
+		}
+	}
+	app := newToolUpdateTestAppWithExec(t, &resetRuntime{}, exec)
+
+	if err := app.toolUpdates.updateStarted(ctx, toolUpdateProviderClaude); err != nil {
+		t.Fatalf("updateStarted after caller cancellation: %v", err)
+	}
+}
+
+func TestStartToolUpdatesChecksVersionsInBackground(t *testing.T) {
+	app := newToolUpdateTestApp(t, &resetRuntime{})
+	if err := app.StartToolUpdates(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = app.Shutdown(ctx)
+	})
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		overview, err := app.ToolUpdateOverview(context.Background(), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		status := overview.Tools[0]
+		if status.State == "idle" && status.CurrentVersion == "2.1.1" && status.LatestVersion == "2.1.2" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("status = %#v, want startup version check", status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestSelfUpdateRestartWaitsForToolUpdate(t *testing.T) {
+	restarted := make(chan struct{})
+	app := New(nil, eventbus.New(), Options{
+		DataDir:     t.TempDir(),
+		SelfUpdates: SelfUpdateOptions{OnUpdated: func() { close(restarted) }},
+	})
+	app.toolUpdates.waitInterval = 5 * time.Millisecond
+	if !app.toolUpdates.beginUpdate(toolUpdateProviderCodex) {
+		t.Fatal("beginUpdate = false, want true")
+	}
+	go app.selfUpdates.onUpdated()
+
+	select {
+	case <-restarted:
+		t.Fatal("restart ran while a runtime update was in progress")
+	case <-time.After(50 * time.Millisecond):
+	}
+	app.toolUpdates.setState(toolUpdateProviderCodex, "idle", "", "")
+	select {
+	case <-restarted:
+	case <-time.After(time.Second):
+		t.Fatal("restart did not run after the runtime update finished")
+	}
+}
+
+func newToolUpdateTestApp(t *testing.T, rt agentruntime.Runtime) *App {
+	t.Helper()
+	var updated atomic.Bool
+	exec := func(_ context.Context, name string, args ...string) (string, error) {
+		joined := name + " " + strings.Join(args, " ")
+		switch joined {
+		case "claude --version":
+			if updated.Load() {
+				return "2.1.2 (Claude Code)", nil
+			}
+			return "2.1.1 (Claude Code)", nil
+		case "npm view @anthropic-ai/claude-code version":
+			return "2.1.2", nil
+		case "claude update":
+			updated.Store(true)
 			return "updated", nil
 		default:
 			return "", nil
 		}
 	}
+	return newToolUpdateTestAppWithExec(t, rt, exec)
+}
+
+func TestCheckToolUpdatesReportsProbeFailurePerTool(t *testing.T) {
+	exec := func(_ context.Context, name string, args ...string) (string, error) {
+		switch name + " " + strings.Join(args, " ") {
+		case "claude --version":
+			return "2.1.1 (Claude Code)", nil
+		case "codex --version":
+			return "", errors.New("codex --version failed: executable file not found")
+		default:
+			return "2.1.2", nil
+		}
+	}
+	app := newToolUpdateTestAppWithExec(t, &resetRuntime{}, exec)
+
+	overview, err := app.CheckToolUpdates(context.Background(), toolUpdateAll)
+	if err != nil {
+		t.Fatalf("CheckToolUpdates error = %v, want per-tool status", err)
+	}
+	claude, codex := overview.Tools[0], overview.Tools[1]
+	if claude.State != "idle" || claude.CurrentVersion != "2.1.1" {
+		t.Fatalf("claude status = %#v, want checked 2.1.1", claude)
+	}
+	if codex.State != "error" || !strings.Contains(codex.LastError, "not found") {
+		t.Fatalf("codex status = %#v, want probe error", codex)
+	}
+}
+
+func newToolUpdateTestAppWithExec(t *testing.T, rt agentruntime.Runtime, exec toolUpdateExecFunc) *App {
+	t.Helper()
 	return New(nil, eventbus.New(), Options{
 		DataDir: t.TempDir(),
 		ToolUpdateSettings: config.ToolUpdateSettings{
