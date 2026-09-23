@@ -28,6 +28,9 @@ func (r Runtime) buildArgs(req runtime.StartSessionRequest, input runtime.Input)
 	if req.FastMode {
 		args = append(args, "--settings", `{"fastMode":true}`)
 	}
+	if display := strings.TrimSpace(r.opts.ThinkingDisplay); display != "" {
+		args = append(args, "--thinking-display", display)
+	}
 	mode := strings.TrimSpace(r.opts.PermissionMode)
 	if override := strings.TrimSpace(req.PermissionMode); override != "" {
 		mode = override

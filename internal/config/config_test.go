@@ -23,6 +23,7 @@ func TestFromEnvDefaults(t *testing.T) {
 	t.Setenv("AGENTX_CLAUDE_ALLOWED_TOOLS", "")
 	t.Setenv("AGENTX_CLAUDE_DISALLOWED_TOOLS", "")
 	t.Setenv("AGENTX_CLAUDE_APPEND_SYSTEM_PROMPT", "")
+	t.Setenv("AGENTX_CLAUDE_THINKING_DISPLAY", "")
 	t.Setenv("AGENTX_D2_COMMAND", "")
 	t.Setenv("AGENTX_D2_TIMEOUT_SECONDS", "")
 	t.Setenv("AGENTX_D2_CACHE_TTL_MINUTES", "")
@@ -61,6 +62,9 @@ func TestFromEnvDefaults(t *testing.T) {
 	if cfg.ClaudeCommand != "claude" || cfg.ClaudePermissionMode != "acceptEdits" {
 		t.Fatalf("claude config = %#v", cfg)
 	}
+	if cfg.ClaudeThinkingDisplay != "summarized" {
+		t.Fatalf("ClaudeThinkingDisplay = %q, want summarized", cfg.ClaudeThinkingDisplay)
+	}
 	if cfg.D2Command != "d2" || cfg.D2TimeoutSeconds != 10 || cfg.D2CacheTTLMinutes != 1440 || cfg.D2CacheMaxEntries != 256 {
 		t.Fatalf("D2 config = %#v", cfg)
 	}
@@ -85,6 +89,7 @@ func TestFromEnvOverrides(t *testing.T) {
 	t.Setenv("AGENTX_CLAUDE_ALLOWED_TOOLS", "Read,Bash")
 	t.Setenv("AGENTX_CLAUDE_DISALLOWED_TOOLS", "WebSearch Edit")
 	t.Setenv("AGENTX_CLAUDE_APPEND_SYSTEM_PROMPT", "be brief")
+	t.Setenv("AGENTX_CLAUDE_THINKING_DISPLAY", "omitted")
 	t.Setenv("AGENTX_D2_COMMAND", "/usr/local/bin/d2")
 	t.Setenv("AGENTX_D2_TIMEOUT_SECONDS", "3")
 	t.Setenv("AGENTX_D2_CACHE_TTL_MINUTES", "60")
@@ -125,6 +130,9 @@ func TestFromEnvOverrides(t *testing.T) {
 	}
 	if cfg.ClaudeAppendSystemText != "be brief" {
 		t.Fatalf("ClaudeAppendSystemText = %q", cfg.ClaudeAppendSystemText)
+	}
+	if cfg.ClaudeThinkingDisplay != "omitted" {
+		t.Fatalf("ClaudeThinkingDisplay = %q", cfg.ClaudeThinkingDisplay)
 	}
 	if cfg.D2Command != "/usr/local/bin/d2" || cfg.D2TimeoutSeconds != 3 || cfg.D2CacheTTLMinutes != 60 || cfg.D2CacheMaxEntries != 12 {
 		t.Fatalf("D2 overrides = %#v", cfg)

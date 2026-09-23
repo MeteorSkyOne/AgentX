@@ -46,6 +46,7 @@ type Config struct {
 	ClaudeAllowedTools          []string
 	ClaudeDisallowedTools       []string
 	ClaudeAppendSystemText      string
+	ClaudeThinkingDisplay       string
 	ClaudePersistentIdleMinutes int
 	CodexPersistentIdleMinutes  int
 	D2Command                   string
@@ -154,6 +155,7 @@ func FromEnv() Config {
 		ClaudeAllowedTools:          getenvList("AGENTX_CLAUDE_ALLOWED_TOOLS"),
 		ClaudeDisallowedTools:       getenvList("AGENTX_CLAUDE_DISALLOWED_TOOLS"),
 		ClaudeAppendSystemText:      getenv("AGENTX_CLAUDE_APPEND_SYSTEM_PROMPT", ""),
+		ClaudeThinkingDisplay:       getenv("AGENTX_CLAUDE_THINKING_DISPLAY", "summarized"),
 		ClaudePersistentIdleMinutes: getenvInt("AGENTX_CLAUDE_PERSISTENT_IDLE_MINUTES", 30),
 		CodexPersistentIdleMinutes:  getenvInt("AGENTX_CODEX_PERSISTENT_IDLE_MINUTES", 30),
 		D2Command:                   getenv("AGENTX_D2_COMMAND", "d2"),

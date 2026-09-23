@@ -15,9 +15,13 @@ type Options struct {
 	AllowedTools       []string
 	DisallowedTools    []string
 	AppendSystemPrompt string
-	ExtraArgs          []string
-	Env                map[string]string
-	IdleTimeout        time.Duration
+	// ThinkingDisplay is passed as --thinking-display (summarized, omitted,
+	// highlights). Newer models omit thinking text in print mode unless
+	// summaries are requested explicitly.
+	ThinkingDisplay string
+	ExtraArgs       []string
+	Env             map[string]string
+	IdleTimeout     time.Duration
 }
 
 type Runtime struct {

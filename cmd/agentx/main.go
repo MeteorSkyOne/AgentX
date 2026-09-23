@@ -102,6 +102,7 @@ func main() {
 			AllowedTools:       cfg.ClaudeAllowedTools,
 			DisallowedTools:    cfg.ClaudeDisallowedTools,
 			AppendSystemPrompt: cfg.ClaudeAppendSystemText,
+			ThinkingDisplay:    cfg.ClaudeThinkingDisplay,
 		}),
 		domain.AgentKindClaudePersistent: claudepersist.New(claudepersist.Options{
 			Command:            cfg.ClaudeCommand,
@@ -109,6 +110,7 @@ func main() {
 			AllowedTools:       cfg.ClaudeAllowedTools,
 			DisallowedTools:    cfg.ClaudeDisallowedTools,
 			AppendSystemPrompt: cfg.ClaudeAppendSystemText,
+			ThinkingDisplay:    cfg.ClaudeThinkingDisplay,
 			IdleTimeout:        time.Duration(cfg.ClaudePersistentIdleMinutes) * time.Minute,
 		}),
 		domain.AgentKindCodexPersistent: codexpersist.New(codexpersist.Options{

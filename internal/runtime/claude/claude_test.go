@@ -13,6 +13,16 @@ import (
 	"github.com/meteorsky/agentx/internal/runtime"
 )
 
+func TestBuildArgsRequestsThinkingDisplay(t *testing.T) {
+	rt := Runtime{opts: Options{PermissionMode: "acceptEdits", ThinkingDisplay: "summarized"}}
+	args := rt.buildArgs(runtime.StartSessionRequest{Effort: "high"}, runtime.Input{Prompt: "hello"})
+	want := []string{
+		"--print", "--verbose", "--output-format", "stream-json", "--input-format", "text",
+		"--effort", "high", "--thinking-display", "summarized", "--permission-mode", "acceptEdits", "hello",
+	}
+	assertArgs(t, args, want)
+}
+
 func TestBuildArgsStartsAndResumesClaudePrint(t *testing.T) {
 	rt := Runtime{opts: Options{
 		PermissionMode:     "acceptEdits",

@@ -154,6 +154,7 @@ AgentX is configured through environment variables and a small `config.toml`. En
 | `AGENTX_CLAUDE_ALLOWED_TOOLS` | | Comma-separated allowed tool names |
 | `AGENTX_CLAUDE_DISALLOWED_TOOLS` | | Comma-separated disallowed tool names |
 | `AGENTX_CLAUDE_APPEND_SYSTEM_PROMPT` | | Text appended to the system prompt of every Claude session |
+| `AGENTX_CLAUDE_THINKING_DISPLAY` | summarized | Claude `--thinking-display` mode: `summarized`, `omitted`, or `highlights` |
 | `AGENTX_CLAUDE_PERSISTENT_IDLE_MINUTES` | `30` | Idle timeout before a persistent Claude process is stopped |
 | `AGENTX_CODEX_COMMAND` | `codex` | Codex CLI binary |
 | `AGENTX_CODEX_FULL_AUTO` | `true` | Run Codex in full-auto mode |

@@ -86,6 +86,7 @@ cmd/agentx/main.go (bootstrap)
 | `AGENTX_CLAUDE_ALLOWED_TOOLS` | | Comma-separated allowed tool names |
 | `AGENTX_CLAUDE_DISALLOWED_TOOLS` | | Comma-separated disallowed tool names |
 | `AGENTX_CLAUDE_APPEND_SYSTEM_PROMPT` | | System prompt appended to all Claude sessions |
+| `AGENTX_CLAUDE_THINKING_DISPLAY` | summarized | Claude `--thinking-display` mode (`summarized`, `omitted`, `highlights`) |
 | `AGENTX_CLAUDE_PERSISTENT_IDLE_MINUTES` | 30 | Idle timeout for persistent Claude processes |
 | `AGENTX_CODEX_COMMAND` | codex | Path to Codex CLI |
 | `AGENTX_CODEX_FULL_AUTO` | true | Auto-approve Codex operations |
