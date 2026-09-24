@@ -178,6 +178,11 @@ export function WorkspaceFileEditor({
         : undefined,
     });
   }, []);
+  const handleFetchPreviewFile = useCallback(
+    (path: string) => controllerRef.current.fetchFileBlob(path),
+    []
+  );
+  const previewFileFetcher = controller.canFetchFileBlob ? handleFetchPreviewFile : undefined;
 
   const editorElement = (
     <Editor
@@ -231,6 +236,7 @@ export function WorkspaceFileEditor({
         <MarkdownPreview
           controller={controller}
           onOpenWorkspacePath={handleOpenPreviewPath}
+          onFetchWorkspaceFile={previewFileFetcher}
         />
       ) : viewMode === "split" ? (
         <div className="flex h-full min-h-0 min-w-0 flex-col md:flex-row">
@@ -240,6 +246,7 @@ export function WorkspaceFileEditor({
           <MarkdownPreview
             controller={controller}
             onOpenWorkspacePath={handleOpenPreviewPath}
+          onFetchWorkspaceFile={previewFileFetcher}
             className="min-h-[12rem] flex-1 md:min-h-0"
           />
         </div>
@@ -559,10 +566,12 @@ export function WorkspaceGitDiffViewer({
 function MarkdownPreview({
   controller,
   onOpenWorkspacePath,
+  onFetchWorkspaceFile,
   className,
 }: {
   controller: WorkspaceFileEditorProps["controller"];
   onOpenWorkspacePath: (target: WorkspacePathTarget) => void;
+  onFetchWorkspaceFile?: (path: string) => Promise<Blob>;
   className?: string;
 }) {
   const previewRef = useRef<HTMLDivElement | null>(null);
@@ -676,6 +685,7 @@ function MarkdownPreview({
           workspacePath={controller.workspacePath}
           relativeLinkBasePath={controller.trimmedPath}
           onOpenWorkspacePath={onOpenWorkspacePath}
+          onFetchWorkspaceFile={onFetchWorkspaceFile}
         />
       </div>
     </div>

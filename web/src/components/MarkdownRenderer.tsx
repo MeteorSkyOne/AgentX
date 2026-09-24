@@ -2,7 +2,10 @@ import {
   lazy,
   memo,
   Suspense,
+  useEffect,
   useMemo,
+  useState,
+  type ComponentPropsWithoutRef,
   type ReactNode,
 } from "react";
 import Markdown, { defaultUrlTransform, type Components, type UrlTransform } from "react-markdown";
@@ -15,6 +18,7 @@ import {
   splitWorkspacePathTargets,
   type WorkspacePathTarget,
 } from "@/lib/workspacePaths";
+import { isBinaryPreviewFilePath } from "./workspaceFileLanguages";
 
 const CodeBlock = lazy(() =>
   import("./CodeBlock").then((module) => ({ default: module.CodeBlock }))
@@ -27,6 +31,7 @@ interface RendererOptions {
   workspacePath?: string;
   relativeLinkBasePath?: string;
   onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
+  onFetchWorkspaceFile?: (path: string) => Promise<Blob>;
   mentionLabels?: MentionLabels;
 }
 
@@ -140,8 +145,63 @@ function WorkspacePathButton({
   );
 }
 
+function WorkspaceImage({
+  path,
+  fetchFile,
+  ...props
+}: ComponentPropsWithoutRef<"img"> & {
+  path: string;
+  fetchFile: (path: string) => Promise<Blob>;
+}) {
+  const [objectURL, setObjectURL] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let nextURL: string | null = null;
+    setObjectURL(null);
+    fetchFile(path)
+      .then((blob) => {
+        if (cancelled) return;
+        nextURL = URL.createObjectURL(blob);
+        setObjectURL(nextURL);
+      })
+      .catch(() => {
+        // Leave the image empty so the browser shows the alt text.
+      });
+    return () => {
+      cancelled = true;
+      if (nextURL) {
+        URL.revokeObjectURL(nextURL);
+      }
+    };
+  }, [fetchFile, path]);
+
+  return (
+    <img
+      {...props}
+      src={objectURL ?? undefined}
+      data-workspace-path={path}
+    />
+  );
+}
+
 function createComponents(options: RendererOptions): Components {
   return {
+    img: ({ src, node: _node, ...props }) => {
+      const path = typeof src === "string" && options.onFetchWorkspaceFile
+        ? markdownWorkspaceFilePath(src, options)
+        : null;
+      if (path && options.onFetchWorkspaceFile) {
+        return (
+          <WorkspaceImage
+            {...props}
+            path={path}
+            fetchFile={options.onFetchWorkspaceFile}
+          />
+        );
+      }
+      return <img src={src} {...props} />;
+    },
     pre: ({ children }) => <>{children}</>,
     code: ({ node: _node, ...props }) => {
       const isBlockCode = isMarkdownCodeBlock(props.className, props.children);
@@ -243,7 +303,38 @@ function markdownLinkTarget(
   const targetHref = options.relativeLinkBasePath
     ? resolveMarkdownRelativeHref(href, options.relativeLinkBasePath)
     : href;
-  return parseWorkspacePathTarget(targetHref, options.workspacePath);
+  const target = parseWorkspacePathTarget(targetHref, options.workspacePath);
+  if (target || !options.workspacePath) return target;
+  // Path detection only accepts source and text extensions; explicit links to
+  // images and PDFs should still open in the workspace previewer.
+  const path = markdownWorkspaceFilePath(href, options);
+  return path && isBinaryPreviewFilePath(path) ? { path, label: path } : null;
+}
+
+function markdownWorkspaceFilePath(src: string, options: RendererOptions): string | null {
+  const trimmed = src.trim();
+  if (!trimmed || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(trimmed)) return null;
+  const path = safeDecodeURIComponent(trimmed.replace(/[?#].*$/, ""));
+  if (!path) return null;
+  if (path.startsWith("/")) {
+    const root = options.workspacePath?.trim().replace(/\/+$/, "");
+    // Absolute paths inside the workspace are opened directly; any other
+    // leading slash follows the GitHub convention of repository-root paths.
+    const relative = root && path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path;
+    return normalizeJoinedWorkspacePath("", relative);
+  }
+  const baseDirectory = options.relativeLinkBasePath
+    ? parentWorkspaceDirectoryPath(options.relativeLinkBasePath)
+    : "";
+  return normalizeJoinedWorkspacePath(baseDirectory, path);
+}
+
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function resolveMarkdownRelativeHref(href: string, basePath: string): string {
@@ -307,6 +398,7 @@ interface Props {
   workspacePath?: string;
   relativeLinkBasePath?: string;
   onOpenWorkspacePath?: (target: WorkspacePathTarget) => void;
+  onFetchWorkspaceFile?: (path: string) => Promise<Blob>;
   mentionLabels?: MentionLabels;
 }
 
@@ -315,11 +407,18 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   workspacePath,
   relativeLinkBasePath,
   onOpenWorkspacePath,
+  onFetchWorkspaceFile,
   mentionLabels,
 }: Props) {
   const components = useMemo(
-    () => createComponents({ workspacePath, relativeLinkBasePath, onOpenWorkspacePath, mentionLabels }),
-    [workspacePath, relativeLinkBasePath, onOpenWorkspacePath, mentionLabels]
+    () => createComponents({
+      workspacePath,
+      relativeLinkBasePath,
+      onOpenWorkspacePath,
+      onFetchWorkspaceFile,
+      mentionLabels,
+    }),
+    [workspacePath, relativeLinkBasePath, onOpenWorkspacePath, onFetchWorkspaceFile, mentionLabels]
   );
 
   return (

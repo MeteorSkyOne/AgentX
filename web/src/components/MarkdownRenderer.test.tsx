@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { waitFor } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { ReactElement } from "react";
 import type { WorkspacePathTarget } from "@/lib/workspacePaths";
 import { MarkdownRenderer } from "./MarkdownRenderer";
@@ -243,6 +243,57 @@ describe("MarkdownRenderer", () => {
         label: "docs/guide.md:4",
       },
     ]);
+  });
+
+  it("opens relative markdown links to images and PDFs", () => {
+    const opened: WorkspacePathTarget[] = [];
+    const { container } = renderClient(
+      <MarkdownRenderer
+        text="[Diagram](../images/rpc.png), [Paper](./paper.pdf) and [Binary](../bin/tool)"
+        workspacePath="/workspace/brpc"
+        relativeLinkBasePath="docs/en/overview.md"
+        onOpenWorkspacePath={(target) => opened.push(target)}
+      />
+    );
+
+    const buttons = workspacePathButtons(container);
+    expect(buttons.map((button) => button.textContent)).toEqual(["Diagram", "Paper"]);
+
+    click(buttons[0]);
+    click(buttons[1]);
+
+    expect(opened).toEqual([
+      { path: "docs/images/rpc.png", label: "docs/images/rpc.png" },
+      { path: "docs/en/paper.pdf", label: "docs/en/paper.pdf" },
+    ]);
+  });
+
+  it("loads relative workspace images through the file fetcher", async () => {
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => "blob:rpc");
+    URL.revokeObjectURL = vi.fn();
+    onTestFinished(() => {
+      URL.createObjectURL = originalCreateObjectURL;
+      URL.revokeObjectURL = originalRevokeObjectURL;
+    });
+    const fetchFile = vi.fn(async () => new Blob(["png"], { type: "image/png" }));
+    const { container } = renderClient(
+      <MarkdownRenderer
+        text={"![rpc](../images/rpc.png)\n\n![remote](https://example.com/a.png)\n\n![up](../../../x.png)"}
+        workspacePath="/workspace/brpc"
+        relativeLinkBasePath="docs/en/overview.md"
+        onFetchWorkspaceFile={fetchFile}
+      />
+    );
+
+    const images = Array.from(container.querySelectorAll("img"));
+    await waitFor(() => expect(images[0]?.getAttribute("src")).toBe("blob:rpc"));
+    expect(fetchFile).toHaveBeenCalledTimes(1);
+    expect(fetchFile).toHaveBeenCalledWith("docs/images/rpc.png");
+    expect(images[0]?.getAttribute("alt")).toBe("rpc");
+    expect(images[1]?.getAttribute("src")).toBe("https://example.com/a.png");
+    expect(images[2]?.getAttribute("src")).toBe("../../../x.png");
   });
 
   it("does not resolve markdown links that escape the workspace root", () => {
