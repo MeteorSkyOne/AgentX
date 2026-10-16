@@ -119,7 +119,8 @@ Use Conventional Commits for all commits. Never include Co-Authored-By lines.
 - `scope`: optional but preferred; use the main area touched, such as `api`, `store`, `web`, `e2e`, `scripts`, `runtime`, or `config`.
 - `summary`: imperative, lowercase, no trailing period, and keep it under 72 characters.
 - Use `feat` for user-visible capabilities, `fix` for behavior corrections, `refactor` for restructuring without intended behavior change, and `chore` only for maintenance that does not fit the other types.
-- If a commit mixes unrelated changes, split it before committing whenever practical.
+- One commit is one complete feature or fix. Keep its backend, frontend, and tests together in a single commit instead of splitting by layer; pick the scope of the main area touched (e.g. `web` for a UI feature backed by a small API change).
+- Only split a commit when it mixes genuinely unrelated changes.
 
 Examples:
 
