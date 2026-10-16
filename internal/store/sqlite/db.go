@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -48,6 +49,29 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if _, err := provider.Up(ctx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("sqlite migrate: %w", err)
+	}
+	return &Store{db: db}, nil
+}
+
+// OpenReadOnly opens an existing database without running migrations, so a
+// separate process can read while the server owns the schema.
+func OpenReadOnly(ctx context.Context, path string) (*Store, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("sqlite stat: %w", err)
+	}
+	dsn := (&url.URL{
+		Scheme:   "file",
+		OmitHost: true,
+		Path:     filepath.ToSlash(path),
+		RawQuery: "mode=ro&_pragma=busy_timeout(5000)&_pragma=query_only(1)",
+	}).String()
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite open: %w", err)
+	}
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("sqlite open: %w", err)
 	}
 	return &Store{db: db}, nil
 }

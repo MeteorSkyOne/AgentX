@@ -42,6 +42,10 @@ type Options struct {
 	D2CacheMaxEntries     int
 	ScheduledShellEnabled bool
 	Terminal              TerminalOptions
+	// SQLitePath and MCPCommand let the UI show how to launch `agentx mcp`
+	// against this instance's database.
+	SQLitePath string
+	MCPCommand string
 	// PasswordHashCost overrides the bcrypt cost used when hashing
 	// passwords; zero selects bcrypt.DefaultCost. Tests lower it to
 	// bcrypt.MinCost so hashing stays fast under the race detector.

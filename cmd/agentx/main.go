@@ -22,12 +22,14 @@ import (
 	"github.com/meteorsky/agentx/internal/domain"
 	"github.com/meteorsky/agentx/internal/eventbus"
 	"github.com/meteorsky/agentx/internal/httpapi"
+	"github.com/meteorsky/agentx/internal/mcpserver"
 	"github.com/meteorsky/agentx/internal/runtime"
 	"github.com/meteorsky/agentx/internal/runtime/claude"
 	"github.com/meteorsky/agentx/internal/runtime/claudepersist"
 	"github.com/meteorsky/agentx/internal/runtime/codex"
 	"github.com/meteorsky/agentx/internal/runtime/codexpersist"
 	"github.com/meteorsky/agentx/internal/runtime/fake"
+	"github.com/meteorsky/agentx/internal/store"
 	sqlitestore "github.com/meteorsky/agentx/internal/store/sqlite"
 	"github.com/meteorsky/agentx/internal/version"
 	"github.com/meteorsky/agentx/internal/webdist"
@@ -136,6 +138,8 @@ func main() {
 		D2CacheTTL:            time.Duration(cfg.D2CacheTTLMinutes) * time.Minute,
 		D2CacheMaxEntries:     cfg.D2CacheMaxEntries,
 		ScheduledShellEnabled: cfg.ScheduledShellEnabled,
+		SQLitePath:            absPath(cfg.SQLitePath),
+		MCPCommand:            mcpExecutable(),
 		OnRestart:             triggerShutdown,
 		Terminal: app.TerminalOptions{
 			Shell:                   cfg.TerminalShell,
@@ -210,10 +214,82 @@ func main() {
 	restartPath = a.RestartPath()
 }
 
+// runMCP serves the read-only post lookup MCP server over stdio.
+func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
+	fs := flag.NewFlagSet("agentx mcp", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dbPath := fs.String("db", "", "path to the AgentX SQLite database (default: $AGENTX_SQLITE_PATH or <data-dir>/agentx.db)")
+	dataDir := fs.String("data-dir", "", "AgentX data directory (default: $AGENTX_DATA_DIR or ~/.agentx)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		_, _ = fmt.Fprintln(stderr, "usage: agentx mcp [--db <path>] [--data-dir <dir>]")
+		return 2
+	}
+	path := mcpDatabasePath(config.FromEnv(), *dbPath, *dataDir)
+
+	var opened *sqlitestore.Store
+	defer func() {
+		if opened != nil {
+			_ = opened.Close()
+		}
+	}()
+	server := mcpserver.New(func(ctx context.Context) (store.Store, error) {
+		st, err := sqlitestore.OpenReadOnly(ctx, path)
+		if err != nil {
+			return nil, err
+		}
+		opened = st
+		return st, nil
+	}, version.Short())
+	if err := server.Serve(ctx, stdin, stdout); err != nil && !errors.Is(err, context.Canceled) {
+		_, _ = fmt.Fprintf(stderr, "agentx mcp: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// mcpExecutable returns the running binary path for the MCP setup hint, or ""
+// for `go run` builds whose temporary binary disappears on exit.
+func mcpExecutable() string {
+	path, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	if strings.HasPrefix(path, filepath.Clean(os.TempDir())+string(filepath.Separator)) {
+		return ""
+	}
+	return path
+}
+
+func absPath(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
+}
+
+func mcpDatabasePath(cfg config.Config, dbPath string, dataDir string) string {
+	if dbPath = strings.TrimSpace(dbPath); dbPath != "" {
+		return dbPath
+	}
+	if dataDir = strings.TrimSpace(dataDir); dataDir != "" {
+		return filepath.Join(dataDir, "agentx.db")
+	}
+	return cfg.SQLitePath
+}
+
 func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) (bool, int) {
 	if len(args) == 1 && (args[0] == "--version" || args[0] == "version") {
 		_, _ = fmt.Fprintln(stdout, version.Info())
 		return true, 0
+	}
+	if len(args) > 0 && args[0] == "mcp" {
+		return true, runMCP(ctx, args[1:], stdin, stdout, stderr)
 	}
 	if len(args) == 0 || args[0] != "auth" {
 		return false, 0
