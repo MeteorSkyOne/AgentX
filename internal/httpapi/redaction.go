@@ -20,6 +20,15 @@ func redactConversationAgents(agents []app.ConversationAgentContext) []app.Conve
 	return agents
 }
 
+// agentWithEnv is used by the agent management endpoints, which return env
+// values in full so they can be viewed and edited.
+func agentWithEnv(agent domain.Agent) domain.Agent {
+	if agent.Env == nil {
+		agent.Env = map[string]string{}
+	}
+	return agent
+}
+
 func redactAgent(agent domain.Agent) domain.Agent {
 	if len(agent.Env) == 0 {
 		agent.Env = map[string]string{}

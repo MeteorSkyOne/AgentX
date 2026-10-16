@@ -23,16 +23,23 @@ type agentCreateRequest struct {
 }
 
 type agentUpdateRequest struct {
-	Name        *string           `json:"name"`
-	Description *string           `json:"description"`
-	Handle      *string           `json:"handle"`
-	Kind        *string           `json:"kind"`
-	Model       *string           `json:"model"`
-	Effort      *string           `json:"effort"`
-	Enabled     *bool             `json:"enabled"`
-	FastMode    *bool             `json:"fast_mode"`
-	YoloMode    *bool             `json:"yolo_mode"`
-	Env         map[string]string `json:"env"`
+	Name        *string               `json:"name"`
+	Description *string               `json:"description"`
+	Handle      *string               `json:"handle"`
+	Kind        *string               `json:"kind"`
+	Model       *string               `json:"model"`
+	Effort      *string               `json:"effort"`
+	Enabled     *bool                 `json:"enabled"`
+	FastMode    *bool                 `json:"fast_mode"`
+	YoloMode    *bool                 `json:"yolo_mode"`
+	Env         map[string]string     `json:"env"`
+	EnvPatch    *agentEnvPatchRequest `json:"env_patch"`
+}
+
+type agentEnvPatchRequest struct {
+	Set    map[string]string `json:"set"`
+	Unset  []string          `json:"unset"`
+	Rename map[string]string `json:"rename"`
 }
 
 type channelAgentsRequest struct {
@@ -64,7 +71,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i := range agents {
-		agents[i] = redactAgent(agents[i])
+		agents[i] = agentWithEnv(agents[i])
 	}
 	writeJSON(w, http.StatusOK, agents)
 }
@@ -105,7 +112,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, redactAgent(agent))
+	writeJSON(w, http.StatusOK, agentWithEnv(agent))
 }
 
 func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
@@ -142,12 +149,20 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		YoloMode:    req.YoloMode,
 		Env:         req.Env,
 		EnvSet:      req.Env != nil,
+		EnvPatch:    agentEnvPatch(req.EnvPatch),
 	})
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, redactAgent(updated))
+	writeJSON(w, http.StatusOK, agentWithEnv(updated))
+}
+
+func agentEnvPatch(req *agentEnvPatchRequest) *app.AgentEnvPatch {
+	if req == nil {
+		return nil
+	}
+	return &app.AgentEnvPatch{Set: req.Set, Unset: req.Unset, Rename: req.Rename}
 }
 
 func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {

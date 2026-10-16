@@ -54,6 +54,7 @@ import {
 import type { UploadProgress } from "./api/client";
 import type {
   Agent,
+  AgentEnvPatch,
   AuthResponse,
   Channel,
   CreateThreadResponse,
@@ -963,6 +964,7 @@ export default function App() {
     agentID: string,
     payload: Partial<Pick<Agent, "name" | "description" | "handle" | "kind" | "model" | "effort" | "enabled" | "fast_mode" | "yolo_mode">> & {
       env?: Record<string, string>;
+      env_patch?: AgentEnvPatch;
     }
   ) {
     await updateAgent(agentID, payload);

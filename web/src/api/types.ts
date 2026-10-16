@@ -414,6 +414,12 @@ export interface Agent {
   updated_at: string;
 }
 
+export interface AgentEnvPatch {
+  set?: Record<string, string>;
+  unset?: string[];
+  rename?: Record<string, string>;
+}
+
 export type AgentProviderLimitStatus = "ok" | "unavailable" | "error";
 
 export interface AgentProviderLimitAuth {

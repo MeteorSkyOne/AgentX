@@ -3,6 +3,7 @@ import type {
   AuthResponse,
   AuthStatus,
   Agent,
+  AgentEnvPatch,
   AgentChannelContext,
   AgentProviderLimits,
   Channel,
@@ -743,6 +744,7 @@ export function updateAgent(
   agentID: string,
   payload: Partial<Pick<Agent, "name" | "description" | "handle" | "kind" | "model" | "effort" | "enabled" | "fast_mode" | "yolo_mode">> & {
     env?: Record<string, string>;
+    env_patch?: AgentEnvPatch;
   }
 ): Promise<Agent> {
   return request<Agent>(`/api/agents/${encodeURIComponent(agentID)}`, {

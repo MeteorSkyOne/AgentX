@@ -43,6 +43,7 @@ import {
   setAgentAvatar,
 } from "../AgentAvatar";
 import { WorkspaceFileBrowser } from "../WorkspaceFileBrowser";
+import { AgentEnvEditor } from "./AgentEnvEditor";
 import { AgentProviderLimitsView } from "./AgentProviderLimits";
 import { formatToolVersion } from "./toolUpdateStatus";
 import type { ShellProps } from "./types";
@@ -121,7 +122,6 @@ export function AgentDetailsPanel({
   const [avatarEmoji, setAvatarEmoji] = useState("");
   const [avatarColor, setAvatarColor] = useState("");
   const [activeTab, setActiveTab] = useState("settings");
-  const [envBody, setEnvBody] = useState("{}");
   const [status, setStatus] = useState<string | null>(null);
   const [toolAction, setToolAction] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -177,7 +177,6 @@ export function AgentDetailsPanel({
     setEnabled(selected.enabled);
     setFastMode(selected.fast_mode);
     setYoloMode(selected.yolo_mode);
-    setEnvBody("{}");
     const av = getAgentAvatar(selected.id);
     setAvatarEmoji(av?.emoji ?? "");
     setAvatarColor(av?.color ?? "");
@@ -229,24 +228,6 @@ export function AgentDetailsPanel({
       setToolAction("Update started");
     } catch (err) {
       setToolAction(err instanceof Error ? err.message : "Update failed");
-    }
-  }
-
-  async function saveEnv() {
-    if (!selected) return;
-    try {
-      const parsed = JSON.parse(envBody) as unknown;
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error("env must be an object");
-      }
-      const env: Record<string, string> = {};
-      for (const [key, value] of Object.entries(parsed)) {
-        env[key] = String(value);
-      }
-      await onUpdateAgent(selected.id, { env });
-      setStatus("Saved");
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Invalid JSON");
     }
   }
 
@@ -647,32 +628,16 @@ export function AgentDetailsPanel({
         {/* Env Tab */}
         <TabsContent value="env" className="min-h-0 flex-1 overflow-hidden px-4 pb-4">
           <ScrollArea className="h-full">
-            <div className="space-y-3 pr-2">
-              <span className="text-xs font-medium text-muted-foreground uppercase">Current</span>
-              {envEntries.length > 0 ? (
-                envEntries.map(([key, value]) => (
-                  <div key={key} className="flex items-center justify-between rounded-lg border border-border p-2 text-xs">
-                    <span className="font-mono font-medium">{key}</span>
-                    <code className="text-muted-foreground">{value}</code>
-                  </div>
-                ))
+            <div className="py-1 pl-1 pr-3">
+              {selected ? (
+                <AgentEnvEditor
+                  key={selected.id}
+                  env={selected.env ?? {}}
+                  onSave={(env_patch) => onUpdateAgent(selected.id, { env_patch })}
+                />
               ) : (
-                <p className="text-xs text-muted-foreground">empty</p>
+                <p className="text-xs text-muted-foreground">No agent selected</p>
               )}
-
-              <span className="text-xs font-medium text-muted-foreground uppercase">Update (JSON)</span>
-              <Textarea
-                className="resize-none font-mono text-xs"
-                value={envBody}
-                onChange={(e) => setEnvBody(e.target.value)}
-                aria-label="Environment JSON"
-                rows={4}
-              />
-              <Button size="sm" className="w-full gap-2" onClick={saveEnv}>
-                <Save className="h-4 w-4" />
-                Save env
-              </Button>
-              {status && <p className="text-xs text-muted-foreground">{status}</p>}
             </div>
           </ScrollArea>
         </TabsContent>

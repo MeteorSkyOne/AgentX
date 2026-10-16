@@ -1,6 +1,7 @@
 import type { UploadProgress } from "../../api/client";
 import type {
   Agent,
+  AgentEnvPatch,
   Channel,
   ConversationAgentContext,
   ConversationContext,
@@ -159,6 +160,7 @@ export interface ShellProps {
     agentID: string,
     payload: Partial<Pick<Agent, "name" | "description" | "handle" | "kind" | "model" | "effort" | "enabled" | "fast_mode" | "yolo_mode">> & {
       env?: Record<string, string>;
+      env_patch?: AgentEnvPatch;
     }
   ) => Promise<void>;
   onDeleteAgent: (agentID: string) => Promise<void>;

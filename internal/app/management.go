@@ -494,6 +494,16 @@ type AgentUpdateRequest struct {
 	YoloMode    *bool
 	Env         map[string]string
 	EnvSet      bool
+	EnvPatch    *AgentEnvPatch
+}
+
+// AgentEnvPatch edits individual env entries so callers can change some keys
+// without resending the (redacted) values of the others. Unsets apply first,
+// then renames (which keep the existing value), then sets.
+type AgentEnvPatch struct {
+	Set    map[string]string
+	Unset  []string
+	Rename map[string]string
 }
 
 func (a *App) UpdateAgent(ctx context.Context, agentID string, req AgentUpdateRequest) (domain.Agent, error) {
@@ -547,8 +557,18 @@ func (a *App) UpdateAgent(ctx context.Context, agentID string, req AgentUpdateRe
 	if req.YoloMode != nil {
 		agent.YoloMode = *req.YoloMode
 	}
+	if req.EnvSet && req.EnvPatch != nil {
+		return domain.Agent{}, ErrInvalidInput
+	}
 	if req.EnvSet {
 		agent.Env = copyStringMap(req.Env)
+	}
+	if req.EnvPatch != nil {
+		env, err := applyAgentEnvPatch(agent.Env, *req.EnvPatch)
+		if err != nil {
+			return domain.Agent{}, err
+		}
+		agent.Env = env
 	}
 	agent.UpdatedAt = time.Now().UTC()
 	if err := a.store.Agents().Update(ctx, agent); err != nil {
@@ -575,6 +595,40 @@ func (a *App) DeleteAgent(ctx context.Context, agentID string) error {
 		}
 		return tx.Agents().Update(ctx, agent)
 	})
+}
+
+func applyAgentEnvPatch(current map[string]string, patch AgentEnvPatch) (map[string]string, error) {
+	env := copyStringMap(current)
+	for _, key := range patch.Unset {
+		delete(env, strings.TrimSpace(key))
+	}
+	renamed := make(map[string]string, len(patch.Rename))
+	for from, to := range patch.Rename {
+		from, to = strings.TrimSpace(from), strings.TrimSpace(to)
+		value, ok := current[from]
+		if from == "" || to == "" || !ok {
+			return nil, ErrInvalidInput
+		}
+		delete(env, from)
+		renamed[to] = value
+	}
+	for to, value := range renamed {
+		if _, exists := env[to]; exists {
+			return nil, ErrInvalidInput
+		}
+		env[to] = value
+	}
+	if len(renamed) != len(patch.Rename) {
+		return nil, ErrInvalidInput
+	}
+	for key, value := range patch.Set {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return nil, ErrInvalidInput
+		}
+		env[key] = value
+	}
+	return env, nil
 }
 
 func deletedAgentHandle(agent domain.Agent) string {

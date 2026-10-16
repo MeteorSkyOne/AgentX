@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -178,6 +179,43 @@ func TestHTTPSlashCommandErrorsAndSuccess(t *testing.T) {
 	if message.SenderType != domain.SenderSystem || !strings.Contains(message.Body, "effort") {
 		t.Fatalf("slash command response = %#v", message)
 	}
+}
+
+func TestHTTPAgentEnvPatchEditsIndividualEntries(t *testing.T) {
+	ts := newTestServer(t)
+
+	bootstrap := setupHTTP(t, ts.URL)
+	agentURL := ts.URL + "/api/agents/" + bootstrap.Agent.ID
+	patchJSON(t, agentURL, bootstrap.SessionToken, map[string]any{
+		"env": map[string]string{"KEEP": "keep", "OLD": "secret", "DROP": "drop"},
+	}, http.StatusOK, nil)
+
+	var agent domain.Agent
+	patchJSON(t, agentURL, bootstrap.SessionToken, map[string]any{
+		"env_patch": map[string]any{
+			"rename": map[string]string{"OLD": "NEW"},
+			"unset":  []string{"DROP"},
+			"set":    map[string]string{"ADDED": "value", "EMPTY": ""},
+		},
+	}, http.StatusOK, &agent)
+	want := map[string]string{"KEEP": "keep", "NEW": "secret", "ADDED": "value", "EMPTY": ""}
+	if !reflect.DeepEqual(agent.Env, want) {
+		t.Fatalf("env = %#v, want %#v", agent.Env, want)
+	}
+	var agents []domain.Agent
+	getJSON(t, ts.URL+"/api/organizations/"+bootstrap.Organization.ID+"/agents", bootstrap.SessionToken, http.StatusOK, &agents)
+	if len(agents) != 1 || !reflect.DeepEqual(agents[0].Env, want) {
+		t.Fatalf("listed agents = %#v, want env %#v", agents, want)
+	}
+	var context app.ConversationContext
+	getJSON(t, ts.URL+"/api/conversations/channel/"+bootstrap.Channel.ID+"/context", bootstrap.SessionToken, http.StatusOK, &context)
+	if context.Agent.Env["KEEP"] != "********" {
+		t.Fatalf("conversation context env = %#v, want redacted", context.Agent.Env)
+	}
+
+	patchJSON(t, agentURL, bootstrap.SessionToken, map[string]any{
+		"env_patch": map[string]any{"rename": map[string]string{"MISSING": "X"}},
+	}, http.StatusBadRequest, nil)
 }
 
 func TestHTTPConversationSkillsReturnsSummariesOnly(t *testing.T) {
