@@ -378,6 +378,15 @@ export interface Thread {
   archived_at?: string;
 }
 
+export interface MCPSetup {
+  command: string;
+  args: string[];
+  claude_command: string;
+  codex_command: string;
+  /** False when the server runs from a temporary `go run` binary. */
+  available: boolean;
+}
+
 export interface BotUser {
   id: string;
   organization_id: string;

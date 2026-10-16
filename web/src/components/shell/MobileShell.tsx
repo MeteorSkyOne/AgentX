@@ -38,6 +38,7 @@ import { AgentDetailsPanel } from "./AgentDetailsPanel";
 import { AgentsSidebar } from "./AgentsSidebar";
 import { ConversationPanel } from "./ConversationPanel";
 import { MembersPanel } from "./MembersPanel";
+import { PostShareActions } from "./PostShareActions";
 import { MetricsPanel } from "./MetricsPanel";
 import { RoadmapPanel } from "./RoadmapPanel";
 import { TasksPanel } from "./TasksPanel";
@@ -437,6 +438,7 @@ export function MobileShell({
               </span>
             )}
             <div className="ml-auto flex items-center gap-1">
+              <PostShareActions thread={activeThread} buttonClassName="h-9 w-9" />
               <Button
                 variant="ghost"
                 size="icon"

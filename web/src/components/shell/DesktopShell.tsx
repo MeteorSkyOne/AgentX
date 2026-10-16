@@ -37,6 +37,7 @@ import { AgentDetailsPanel } from "./AgentDetailsPanel";
 import { AgentsSidebar } from "./AgentsSidebar";
 import { ConversationPanel } from "./ConversationPanel";
 import { MembersPanel } from "./MembersPanel";
+import { PostShareActions } from "./PostShareActions";
 import { MetricsPanel } from "./MetricsPanel";
 import { ProjectFilesOverlay } from "./ProjectFilesOverlay";
 import { ProjectSearchDialog } from "./ProjectSearchDialog";
@@ -530,6 +531,7 @@ export function DesktopShell({
               <div className="flex items-center gap-2">
                 {activeThread && (
                   <>
+                    <PostShareActions thread={activeThread} buttonClassName="h-8 w-8" />
                     <Button
                       variant="ghost"
                       size="icon"

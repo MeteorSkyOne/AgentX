@@ -12,6 +12,7 @@ import type {
   ConversationType,
   CreateThreadResponse,
   D2RenderResponse,
+  MCPSetup,
   Message,
   MessageProcessItemDetail,
   MetricsProvider,
@@ -679,6 +680,33 @@ export function updateThread(threadID: string, title: string): Promise<Thread> {
     method: "PATCH",
     body: JSON.stringify({ title })
   });
+}
+
+export async function exportThreadMarkdown(
+  threadID: string,
+  options: { includeProcess?: boolean } = {}
+): Promise<Blob> {
+  const token = getToken();
+  const headers = new Headers();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  const params = new URLSearchParams({ format: "markdown" });
+  if (options.includeProcess) {
+    params.set("process", "1");
+  }
+  const response = await fetch(`/api/threads/${encodeURIComponent(threadID)}/export?${params.toString()}`, {
+    headers
+  });
+  if (!response.ok) {
+    const message = await errorMessage(response);
+    throw new Error(message);
+  }
+  return response.blob();
+}
+
+export function mcpSetup(): Promise<MCPSetup> {
+  return request<MCPSetup>("/api/mcp/setup");
 }
 
 export function deleteThread(threadID: string): Promise<void> {

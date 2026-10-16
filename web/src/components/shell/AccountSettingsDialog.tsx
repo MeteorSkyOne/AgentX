@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { McpSetupSection } from "./McpSetupSection";
 import { formatToolVersion } from "./toolUpdateStatus";
 import type { BrowserNotificationPermission } from "@/notifications/browser";
 import { browserPermissionLabel } from "./utils";
@@ -315,6 +316,7 @@ export function AccountSettingsDialog({
                     </label>
                     {preferencesError && <p className="text-sm text-destructive">{preferencesError}</p>}
                   </div>
+                  <McpSetupSection enabled={accountSettingsOpen} />
                   <div className="grid gap-3 rounded-md border border-border p-3">
                     <div className="flex items-center justify-between gap-3">
                       <div>

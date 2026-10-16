@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { CopyPostIDButton } from "./PostShareActions";
 import { formatDate } from "./utils";
 
 export function ThreadForum({
@@ -332,6 +333,10 @@ export function ThreadForum({
                     <span className="flex-1 truncate font-medium">{thread.title}</span>
                     <time className="hidden shrink-0 text-xs text-muted-foreground sm:block">{formatDate(thread.updated_at)}</time>
                   </button>
+                  <CopyPostIDButton
+                    thread={thread}
+                    className="h-9 w-9 opacity-100 transition-opacity md:h-8 md:w-8 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
+                  />
                   <Button
                     variant="ghost"
                     size="icon"
