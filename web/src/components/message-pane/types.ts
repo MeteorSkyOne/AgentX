@@ -1,4 +1,6 @@
 import type {
+  AgentGoal,
+  AgentPlan,
   ConversationAgentContext,
   Message,
   ProcessItem,
@@ -19,6 +21,8 @@ export interface StreamingMessage {
   process?: ProcessItem[];
   error?: string;
   team?: TeamMetadata;
+  goal?: AgentGoal;
+  plan?: AgentPlan;
 }
 
 export interface MessagePaneProps {

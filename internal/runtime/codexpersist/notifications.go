@@ -220,7 +220,12 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 		}
 
 	case "thread/goal/updated", "thread/goal/cleared":
-		// goal lifecycle notifications — feedback is provided by the turn events
+		if evt := s.goalProgressEvent(msg); evt != nil {
+			s.emit(*evt)
+		}
+
+	case "turn/plan/updated":
+		s.emit(runtime.Event{Type: runtime.EventDelta, Plan: planStateFromNotification(params)})
 
 	case "error":
 		errMsg := codexNotificationErrorMessage(msg)

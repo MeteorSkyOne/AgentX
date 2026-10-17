@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageMarkdown, messageBodyClassName } from "./markdown";
+import { RunProgress } from "./RunProgress";
 import type { DisplayProcessEntry, DisplayProcessItem, DisplayProcessToolFragment, StreamingMessage } from "./types";
 
 export function StreamingItem({
@@ -94,6 +95,7 @@ export function StreamingItem({
           defaultProcessOpen
           onStopSubagent={onStopSubagent}
         />
+        <RunProgress goal={item.goal} plan={item.plan} live={!isError} />
         {(workingLabel || subagents.length > 0) && (
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-[11px] font-medium text-muted-foreground">

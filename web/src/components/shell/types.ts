@@ -10,13 +10,11 @@ import type {
   Message,
   NotificationSettings,
   Organization,
-  ProcessItem,
   Project,
   ServerSettings,
   ServerSettingsUpdatePayload,
   SelfUpdateOverview,
   SelfUpdateSettings,
-  TeamMetadata,
   Thread,
   ToolUpdateOverview,
   ToolUpdateSettings,
@@ -44,17 +42,8 @@ export interface ActiveConversation {
   channelID: string;
 }
 
-export interface StreamingMessage {
-  runID: string;
-  agentID?: string;
-  startedAt?: string;
-  endedAt?: string;
-  text: string;
-  thinking?: string;
-  process?: ProcessItem[];
-  error?: string;
-  team?: TeamMetadata;
-}
+import type { StreamingMessage } from "@/components/message-pane/types";
+export type { StreamingMessage };
 
 export interface PendingQuestion {
   runID: string;

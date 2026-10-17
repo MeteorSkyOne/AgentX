@@ -317,6 +317,15 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 					usage = mergeRunUsage(usage, evt.Usage)
 					activeRun.setContextUsage(usage.Context)
 				}
+				if evt.Goal != nil || evt.Plan != nil {
+					a.publishConversationEvent(domain.Event{
+						Type:             domain.EventAgentRunProgress,
+						OrganizationID:   userMessage.OrganizationID,
+						ConversationType: userMessage.ConversationType,
+						ConversationID:   userMessage.ConversationID,
+						Payload:          activeRun.setProgress(runtimeGoalToDomain(evt.Goal), runtimePlanToDomain(evt.Plan), opts.Team),
+					})
+				}
 				switch evt.Type {
 				case agentruntime.EventDelta:
 					if firstTokenAt == nil && strings.TrimSpace(evt.Text) != "" {
@@ -353,7 +362,8 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 					if opts.TeamForCompletion != nil {
 						team = opts.TeamForCompletion(evt.Text)
 					}
-					botMessage, err := a.completeAgentRun(ctx, userMessage, agent, runID, session.CurrentSessionID(), evt.Text, thinkingBuf.String(), processBuf, runTracker.metric(agentRunMetricInput{
+					goal, plan := activeRun.progress()
+					botMessage, err := a.completeAgentRun(ctx, userMessage, agent, runID, session.CurrentSessionID(), evt.Text, thinkingBuf.String(), processBuf, goal, plan, runTracker.metric(agentRunMetricInput{
 						Status:            "completed",
 						ProviderSessionID: session.CurrentSessionID(),
 						FirstTokenAt:      firstTokenAt,

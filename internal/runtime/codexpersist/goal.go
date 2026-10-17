@@ -227,6 +227,9 @@ func (s *persistentSession) processGoalNotifications(ctx context.Context) {
 			case msg.Method == "turn/started":
 				s.handleNotification(msg, tracker.state) // registers the active turn id
 			default:
+				if evt := s.goalProgressEvent(msg); evt != nil {
+					s.emit(*evt)
+				}
 				events, ctrl, handled := tracker.handleControl(msg, s.deliveredProcessCount())
 				if !handled {
 					s.handleNotification(msg, tracker.state)

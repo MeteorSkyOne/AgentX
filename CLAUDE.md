@@ -60,6 +60,8 @@ cmd/agentx/main.go (bootstrap)
 
 **Interactive tool calls**: When agents invoke AskUserQuestion (Claude) or requestUserInput (Codex), the runtime emits `EventInputRequest`. The app layer registers a pending question, publishes it via WebSocket, and blocks the session goroutine. The frontend renders a QuestionPrompt with option buttons and a text input. The user's answer is routed back through `POST /api/conversations/{type}/{id}/input-response` → `App.RespondToInputRequest` → `Session.RespondToInputRequest` channel → subprocess stdin. For Claude, the response is a `control_response` with `updatedInput` containing the answers. For Codex, it's a JSON-RPC result with the answers structure.
 
+**Goal and step progress**: Runtimes report the agent's `/goal` and step list as `runtime.Event.Goal` / `Plan` snapshots (`internal/runtime/progress.go`). Codex app-server maps `thread/goal/updated` / `thread/goal/cleared` and `turn/plan/updated`, and `codex exec` maps `todo_list` items. Claude Code's `/goal` is a Stop-hook loop with no goal event, so `claude.ProgressTracker` infers it from the synthetic `Goal set:` reply, the `isSynthetic` "Stop hook feedback" messages (one per unmet check) and the final result; Claude steps come from `TodoWrite` and `TaskCreate`/`TaskUpdate`. The app publishes the run's full progress as `AgentRunProgress` (replayed to late subscribers) and stores the final state in message metadata (`goal`, `plan`); `web/src/components/message-pane/RunProgress.tsx` renders it under streaming and finished replies.
+
 **Slash commands**: Built-in commands (`/new`, `/compact`, `/plan`, `/init`, `/model`, `/effort`, `/commit`, `/push`, `/review`) defined in `internal/app/commands.go`. Targeted at specific agents via `@handle` syntax. The composer provides autocomplete for both commands and agent mentions.
 
 **Team coordination**: Multi-agent collaboration with leader/worker phases, tracked via `TeamMetadata` (session ID, leader agent, phase, turn counter). Channels configure team budgets via `team_max_batches` and `team_max_runs`.
@@ -68,7 +70,7 @@ cmd/agentx/main.go (bootstrap)
 
 **Notifications**: Organization-level webhook notifications (`internal/app/notifications.go`) with HMAC-SHA256 signing and URL templating. Browser native notifications (`web/src/notifications/browser.ts`) fire when agents reply and the page is inactive.
 
-**Event flow**: Agent subprocess → Runtime Session → App (publishes to EventBus) → WebSocket handler → Frontend. Events are scoped by organization + conversation type + conversation ID. Event types: `AgentRunStarted`, `AgentOutputDelta`, `AgentRunCompleted`, `AgentRunFailed`, `AgentInputRequest`, `MessageCreated`.
+**Event flow**: Agent subprocess → Runtime Session → App (publishes to EventBus) → WebSocket handler → Frontend. Events are scoped by organization + conversation type + conversation ID. Event types: `AgentRunStarted`, `AgentOutputDelta`, `AgentRunProgress`, `AgentRunCompleted`, `AgentRunFailed`, `AgentInputRequest`, `MessageCreated`.
 
 **Auth**: Bearer token middleware. First-run admin setup uses `AGENTX_ADMIN_TOKEN` as the setup token; normal login uses username/password and 30-day hashed API sessions.
 

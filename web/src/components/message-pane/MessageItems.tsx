@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Textarea } from "@/components/ui/textarea";
 import { MessageAttachments } from "./MessageAttachments";
+import { RunProgress } from "./RunProgress";
 import { InterleavedMessageBody, processFromMetadata } from "./ProcessTimeline";
 import type { MessageRenderItem } from "./types";
 import { MentionLabelsContext, displayMentionLabels, messageBodyClassName } from "./markdown";
@@ -442,6 +443,7 @@ function ConversationMessageItem({
                 <span className="min-w-0 whitespace-pre-wrap break-words">{errorText}</span>
               </div>
             )}
+            {isBot && <RunProgress goal={message.metadata?.goal} plan={message.metadata?.plan} />}
             <MessageAttachments attachments={message.attachments ?? []} theme={theme} />
             {footerMetricsParts.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-muted-foreground">

@@ -19,6 +19,25 @@ describe("isAgentXEvent", () => {
     expect(isAgentXEvent(event)).toBe(true);
   });
 
+  it("accepts run progress events from the socket stream", () => {
+    const event: SocketEvent = {
+      id: "evt_progress",
+      type: "AgentRunProgress",
+      organization_id: "org_1",
+      conversation_type: "channel",
+      conversation_id: "chn_1",
+      created_at: "2026-04-25T10:00:03Z",
+      payload: {
+        run_id: "run_1",
+        agent_id: "agt_1",
+        goal: { objective: "ship it", status: "active" },
+        plan: { steps: [{ step: "Inspect", status: "in_progress" }] }
+      }
+    };
+
+    expect(isAgentXEvent(event)).toBe(true);
+  });
+
   it("accepts message queue events from the socket stream", () => {
     const event: SocketEvent = {
       id: "evt_queue",

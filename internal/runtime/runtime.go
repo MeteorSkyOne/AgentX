@@ -113,6 +113,9 @@ type Event struct {
 	Error        string
 	StaleSession bool
 	InputRequest *InputRequest
+	// Goal and Plan carry the latest goal / step-list snapshot when it changes.
+	Goal *GoalState
+	Plan *PlanState
 }
 
 type InputRequest struct {

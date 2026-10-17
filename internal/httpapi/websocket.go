@@ -258,6 +258,9 @@ func activeRunEventRunID(event domain.Event) (string, bool) {
 	case domain.EventAgentInputRequest:
 		payload, ok := event.Payload.(domain.AgentInputRequestPayload)
 		return payload.RunID, ok && payload.RunID != ""
+	case domain.EventAgentRunProgress:
+		payload, ok := event.Payload.(domain.AgentRunProgressPayload)
+		return payload.RunID, ok && payload.RunID != ""
 	default:
 		return "", false
 	}

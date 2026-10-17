@@ -1,4 +1,4 @@
-import type { ConversationType, Message, ProcessItem, TeamMetadata } from "../api/types";
+import type { AgentGoal, AgentPlan, ConversationType, Message, ProcessItem, TeamMetadata } from "../api/types";
 
 interface BaseEvent {
   id: string;
@@ -117,6 +117,18 @@ export interface AgentInputRequestEvent extends BaseEvent {
   };
 }
 
+/** Carries the run's full latest goal and step-list state. */
+export interface AgentRunProgressEvent extends BaseEvent {
+  type: "AgentRunProgress";
+  payload: {
+    run_id: string;
+    agent_id: string;
+    goal?: AgentGoal;
+    plan?: AgentPlan;
+    team?: TeamMetadata;
+  };
+}
+
 export interface AgentPromptQueuedEvent extends BaseEvent {
   type: "AgentPromptQueued";
   payload: {
@@ -154,6 +166,7 @@ export type AgentXEvent =
   | AgentRunCanceledEvent
   | AgentRunFailedEvent
   | AgentInputRequestEvent
+  | AgentRunProgressEvent
   | AgentPromptQueuedEvent
   | AgentPromptQueueRemovedEvent;
 
@@ -173,6 +186,7 @@ export function isAgentXEvent(event: SocketEvent): event is AgentXEvent {
     event.type === "AgentRunCanceled" ||
     event.type === "AgentRunFailed" ||
     event.type === "AgentInputRequest" ||
+    event.type === "AgentRunProgress" ||
     event.type === "AgentPromptQueued" ||
     event.type === "AgentPromptQueueRemoved"
   );

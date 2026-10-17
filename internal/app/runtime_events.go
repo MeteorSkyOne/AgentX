@@ -157,3 +157,29 @@ func runtimeProcessItems(evt agentruntime.Event) []domain.ProcessItem {
 	}
 	return items
 }
+
+func runtimeGoalToDomain(goal *agentruntime.GoalState) *domain.AgentGoal {
+	if goal == nil {
+		return nil
+	}
+	return &domain.AgentGoal{
+		Objective:       goal.Objective,
+		Status:          goal.Status,
+		TokensUsed:      cloneInt64Ptr(goal.TokensUsed),
+		TokenBudget:     cloneInt64Ptr(goal.TokenBudget),
+		TimeUsedSeconds: cloneInt64Ptr(goal.TimeUsedSeconds),
+		Iterations:      goal.Iterations,
+		LastReason:      goal.LastReason,
+	}
+}
+
+func runtimePlanToDomain(plan *agentruntime.PlanState) *domain.AgentPlan {
+	if plan == nil {
+		return nil
+	}
+	steps := make([]domain.AgentPlanStep, 0, len(plan.Steps))
+	for _, step := range plan.Steps {
+		steps = append(steps, domain.AgentPlanStep{Step: step.Step, Status: step.Status})
+	}
+	return &domain.AgentPlan{Explanation: plan.Explanation, Steps: steps}
+}

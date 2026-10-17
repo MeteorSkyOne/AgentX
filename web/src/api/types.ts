@@ -66,6 +66,37 @@ export interface MessageContextUsage {
   source?: string;
 }
 
+/** Snapshot of an agent's autonomous /goal run. */
+export interface AgentGoal {
+  objective: string;
+  status:
+    | "active"
+    | "paused"
+    | "blocked"
+    | "usage_limited"
+    | "budget_limited"
+    | "complete"
+    | "cleared"
+    | string;
+  tokens_used?: number;
+  token_budget?: number;
+  time_used_seconds?: number;
+  /** Goal evaluations that found the goal not yet met (Claude Code). */
+  iterations?: number;
+  last_reason?: string;
+}
+
+export interface AgentPlanStep {
+  step: string;
+  status: "pending" | "in_progress" | "completed" | string;
+}
+
+/** Snapshot of the agent's step list (update_plan / TodoWrite / tasks). */
+export interface AgentPlan {
+  explanation?: string;
+  steps: AgentPlanStep[];
+}
+
 export interface MessageMetadata {
   thinking?: string;
   process?: ProcessItem[];
@@ -73,6 +104,10 @@ export interface MessageMetadata {
   /** Context-window fill reported by the agent at the end of this reply. */
   context_usage?: MessageContextUsage;
   team?: TeamMetadata;
+  /** Final goal state when the reply came from a /goal run. */
+  goal?: AgentGoal;
+  /** Final step list the agent tracked during the reply. */
+  plan?: AgentPlan;
   error?: string;
   suppress_notifications?: boolean;
   [key: string]:
@@ -81,6 +116,8 @@ export interface MessageMetadata {
     | MessageMetricsSummary
     | MessageContextUsage
     | TeamMetadata
+    | AgentGoal
+    | AgentPlan
     | undefined;
 }
 

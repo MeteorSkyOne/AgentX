@@ -18,6 +18,7 @@ const (
 	EventAgentRunCanceled           EventType = "AgentRunCanceled"
 	EventAgentRunFailed             EventType = "AgentRunFailed"
 	EventAgentInputRequest          EventType = "AgentInputRequest"
+	EventAgentRunProgress           EventType = "AgentRunProgress"
 	EventAgentPromptQueued          EventType = "AgentPromptQueued"
 	EventAgentPromptQueueRemoved    EventType = "AgentPromptQueueRemoved"
 )
@@ -65,6 +66,16 @@ type AgentOutputDeltaPayload struct {
 	Process   []ProcessItem `json:"process,omitempty"`
 	ClearText bool          `json:"clear_text,omitempty"`
 	Team      *TeamMetadata `json:"team,omitempty"`
+}
+
+// AgentRunProgressPayload carries the run's latest goal and step-list
+// snapshots; each field is present once the agent has reported it.
+type AgentRunProgressPayload struct {
+	RunID   string        `json:"run_id"`
+	AgentID string        `json:"agent_id"`
+	Goal    *AgentGoal    `json:"goal,omitempty"`
+	Plan    *AgentPlan    `json:"plan,omitempty"`
+	Team    *TeamMetadata `json:"team,omitempty"`
 }
 
 type AgentRunPayload struct {

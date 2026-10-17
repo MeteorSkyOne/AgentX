@@ -38,17 +38,20 @@ type persistentSession struct {
 	eventMu               sync.Mutex
 	processItemsDelivered int // guarded by eventMu
 	sessionID             string
-	alive              bool
-	started            bool
-	turnHeld           bool
-	activeTurnID       string
-	interruptRequested bool
-	interruptSent      bool
-	interruptCh        chan struct{}
-	interruptOnce      sync.Once
-	done               chan struct{}
-	closeOnce          sync.Once
-	pendingInput       chan inputAnswer
+	alive                 bool
+	started               bool
+	turnHeld              bool
+	activeTurnID          string
+	interruptRequested    bool
+	interruptSent         bool
+	interruptCh           chan struct{}
+	interruptOnce         sync.Once
+	done                  chan struct{}
+	closeOnce             sync.Once
+	pendingInput          chan inputAnswer
+	// lastGoal is the latest goal snapshot, kept so thread/goal/cleared (which
+	// carries no goal) can still report the cleared objective.
+	lastGoal *runtime.GoalState
 }
 
 func newPersistentSession(proc *procpool.ManagedProcess, rpc *rpcClient, key string, rt *Runtime, req runtime.StartSessionRequest) *persistentSession {
@@ -326,13 +329,18 @@ func (s *persistentSession) startTurnAndProcess(ctx context.Context, input runti
 // reaches a terminal status or is cleared, so completion is detected by
 // processGoalNotifications rather than the first turn/completed.
 func (s *persistentSession) handleGoalSet(ctx context.Context, input runtime.Input, objective string) {
-	_, err := s.rpc.Call(ctx, "thread/goal/set", map[string]any{
+	result, err := s.rpc.Call(ctx, "thread/goal/set", map[string]any{
 		"threadId":  s.threadID,
 		"objective": objective,
 	})
 	if err != nil {
 		s.emit(rpcFailureEvent("thread/goal/set failed", err))
 		return
+	}
+	// Surface the goal right away; the matching thread/goal/updated that codex
+	// sends after the response carries the same snapshot.
+	if evt := s.goalProgressEvent(jsonRPCMessage{Method: "thread/goal/updated", Params: result}); evt != nil {
+		s.emit(*evt)
 	}
 	goalInput := runtime.Input{
 		Prompt:      objective,

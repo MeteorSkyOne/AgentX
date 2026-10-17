@@ -17,6 +17,7 @@ type lineHandler struct {
 
 	// Accessed only from the single goroutine that scans stdout.
 	background        *BackgroundTracker
+	progress          *ProgressTracker
 	pendingCompletion *runtime.Event
 	// lastContext is the main agent's most recent context snapshot; the
 	// result event completes it with the model's window size.
@@ -24,7 +25,7 @@ type lineHandler struct {
 }
 
 func newLineHandler(fallbackID string) *lineHandler {
-	return &lineHandler{sessionID: fallbackID, background: NewBackgroundTracker()}
+	return &lineHandler{sessionID: fallbackID, background: NewBackgroundTracker(), progress: NewProgressTracker()}
 }
 
 func (h *lineHandler) HandleLine(line []byte) ([]runtime.Event, error) {
@@ -39,6 +40,12 @@ func (h *lineHandler) HandleLine(line []byte) ([]runtime.Event, error) {
 	}
 
 	h.setSessionID(stringValue(payload, "session_id"))
+	progress := h.progress.Track(payload)
+	events, err := h.handlePayload(payload)
+	return append(progress, events...), err
+}
+
+func (h *lineHandler) handlePayload(payload map[string]any) ([]runtime.Event, error) {
 	switch stringValue(payload, "type") {
 	case "system":
 		// A held result that turns out stale is harmless here: completion only
@@ -97,6 +104,10 @@ func (h *lineHandler) HandleLine(line []byte) ([]runtime.Event, error) {
 		if text == "" {
 			text = h.text()
 		}
+		var events []runtime.Event
+		if goal := h.progress.Finish(); goal != nil {
+			events = append(events, runtime.Event{Type: runtime.EventDelta, Goal: goal})
+		}
 		evt := runtime.Event{Type: runtime.EventCompleted, Text: text, Usage: withContext(claudeUsage(payload), CompleteContextUsage(h.lastContext, payload))}
 		if stage := h.stageThinkingForResult(text); stage != "" {
 			evt.Thinking = stage
@@ -113,9 +124,9 @@ func (h *lineHandler) HandleLine(line []byte) ([]runtime.Event, error) {
 		// the agent's replies in it.
 		if h.background.Seen() {
 			h.pendingCompletion = mergeCompletion(h.pendingCompletion, evt)
-			return nil, nil
+			return events, nil
 		}
-		return []runtime.Event{evt}, nil
+		return append(events, evt), nil
 	default:
 		return nil, nil
 	}

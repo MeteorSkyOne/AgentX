@@ -440,3 +440,28 @@ type ProcessItem struct {
 	// call that spawned it. Empty for the main agent's own items.
 	ParentToolCallID string `json:"parent_tool_call_id,omitempty"`
 }
+
+// AgentGoal is the latest snapshot of an agent's autonomous /goal run.
+// Status is one of active, paused, blocked, usage_limited, budget_limited,
+// complete or cleared.
+type AgentGoal struct {
+	Objective       string `json:"objective"`
+	Status          string `json:"status"`
+	TokensUsed      *int64 `json:"tokens_used,omitempty"`
+	TokenBudget     *int64 `json:"token_budget,omitempty"`
+	TimeUsedSeconds *int64 `json:"time_used_seconds,omitempty"`
+	Iterations      int    `json:"iterations,omitempty"`
+	LastReason      string `json:"last_reason,omitempty"`
+}
+
+// AgentPlan is the latest snapshot of an agent's step list.
+type AgentPlan struct {
+	Explanation string          `json:"explanation,omitempty"`
+	Steps       []AgentPlanStep `json:"steps"`
+}
+
+// AgentPlanStep status is one of pending, in_progress or completed.
+type AgentPlanStep struct {
+	Step   string `json:"step"`
+	Status string `json:"status"`
+}

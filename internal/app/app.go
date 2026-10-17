@@ -91,6 +91,8 @@ type activeAgentRun struct {
 	process          []domain.ProcessItem
 	team             *domain.TeamMetadata
 	pendingQuestion  *domain.AgentInputRequestPayload
+	goal             *domain.AgentGoal
+	plan             *domain.AgentPlan
 	contextUsage     *domain.ContextUsage
 	contextUsageAt   *time.Time
 	cancelRequested  bool
@@ -655,6 +657,40 @@ func (r *activeAgentRun) appendDelta(text string, thinking string, process []dom
 	}
 }
 
+// setProgress records the latest goal and/or step-list snapshot (nil keeps the
+// previous one) and returns the run's full progress for publishing. Snapshots
+// are replaced, never mutated, so they can be shared with published events.
+func (r *activeAgentRun) setProgress(goal *domain.AgentGoal, plan *domain.AgentPlan, team *domain.TeamMetadata) domain.AgentRunProgressPayload {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if goal != nil {
+		r.goal = goal
+	}
+	if plan != nil {
+		r.plan = plan
+	}
+	if team != nil {
+		r.team = cloneTeamMetadata(team)
+	}
+	return r.progressPayloadLocked()
+}
+
+func (r *activeAgentRun) progress() (*domain.AgentGoal, *domain.AgentPlan) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.goal, r.plan
+}
+
+func (r *activeAgentRun) progressPayloadLocked() domain.AgentRunProgressPayload {
+	return domain.AgentRunProgressPayload{
+		RunID:   r.runID,
+		AgentID: r.agentID,
+		Goal:    r.goal,
+		Plan:    r.plan,
+		Team:    cloneTeamMetadata(r.team),
+	}
+}
+
 func (r *activeAgentRun) snapshot() (text string, thinking string, process []domain.ProcessItem, team *domain.TeamMetadata) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -727,6 +763,16 @@ func (r *activeAgentRun) replayEvents() ([]domain.Event, time.Time) {
 				Team:     team,
 			},
 			CreatedAt: captured,
+		})
+	}
+	if r.goal != nil || r.plan != nil {
+		events = append(events, domain.Event{
+			Type:             domain.EventAgentRunProgress,
+			OrganizationID:   r.organizationID,
+			ConversationType: r.conversationType,
+			ConversationID:   r.conversationID,
+			Payload:          r.progressPayloadLocked(),
+			CreatedAt:        captured,
 		})
 	}
 	if r.pendingQuestion != nil {

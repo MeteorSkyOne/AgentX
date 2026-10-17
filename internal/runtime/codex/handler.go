@@ -42,6 +42,11 @@ func (h *lineHandler) HandleLine(line []byte) ([]runtime.Event, error) {
 	case "item.completed":
 		item, _ := payload["item"].(map[string]any)
 		return h.handleItemCompleted(item)
+	case "item.updated":
+		item, _ := payload["item"].(map[string]any)
+		if plan := todoListPlan(item); plan != nil {
+			return []runtime.Event{{Type: runtime.EventDelta, Plan: plan}}, nil
+		}
 	case "response_item":
 		item, _ := payload["payload"].(map[string]any)
 		return h.handleItem(item)
@@ -70,6 +75,9 @@ func (h *lineHandler) HandleLine(line []byte) ([]runtime.Event, error) {
 }
 
 func (h *lineHandler) handleItemStarted(item map[string]any) ([]runtime.Event, error) {
+	if plan := todoListPlan(item); plan != nil {
+		return []runtime.Event{{Type: runtime.EventDelta, Plan: plan}}, nil
+	}
 	itemType := normalizedType(stringValue(item, "type"))
 	switch itemType {
 	case "", "agent_message", "message", "reasoning", "user_message", "plan", "hook_prompt", "context_compaction":
@@ -84,6 +92,9 @@ func (h *lineHandler) handleItemStarted(item map[string]any) ([]runtime.Event, e
 }
 
 func (h *lineHandler) handleItemCompleted(item map[string]any) ([]runtime.Event, error) {
+	if plan := todoListPlan(item); plan != nil {
+		return []runtime.Event{{Type: runtime.EventDelta, Plan: plan}}, nil
+	}
 	switch normalizedType(stringValue(item, "type")) {
 	case "agent_message", "message":
 		text := codexMessageText(item)
@@ -263,4 +274,28 @@ func (h *lineHandler) currentUsage() *runtime.Usage {
 	}
 	copy := *h.usage
 	return &copy
+}
+
+// todoListPlan parses codex exec's running to-do list item
+// ({type:"todo_list", items:[{text, completed}]}) into a plan snapshot. It
+// returns nil for any other item.
+func todoListPlan(item map[string]any) *runtime.PlanState {
+	if normalizedType(stringValue(item, "type")) != "todo_list" {
+		return nil
+	}
+	rawItems, _ := item["items"].([]any)
+	plan := &runtime.PlanState{Steps: make([]runtime.PlanStep, 0, len(rawItems))}
+	for _, raw := range rawItems {
+		entry, _ := raw.(map[string]any)
+		text := strings.TrimSpace(stringValue(entry, "text"))
+		if text == "" {
+			continue
+		}
+		status := runtime.PlanStepPending
+		if completed, _ := entry["completed"].(bool); completed {
+			status = runtime.PlanStepCompleted
+		}
+		plan.Steps = append(plan.Steps, runtime.PlanStep{Step: text, Status: status})
+	}
+	return plan
 }

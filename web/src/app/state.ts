@@ -1,4 +1,4 @@
-import type { Agent, ConversationAgentContext, ConversationType, Message, ProcessItem, TeamMetadata } from "@/api/types";
+import type { Agent, ConversationAgentContext, ConversationType, Message } from "@/api/types";
 import type { QueuedPrompt } from "@/components/shell/types";
 
 export interface ActiveConversation {
@@ -16,17 +16,7 @@ export interface PageSelection {
   conversationID?: string;
 }
 
-export interface StreamingMessage {
-  runID: string;
-  agentID?: string;
-  startedAt?: string;
-  endedAt?: string;
-  text: string;
-  thinking?: string;
-  process?: ProcessItem[];
-  error?: string;
-  team?: TeamMetadata;
-}
+export type { StreamingMessage } from "@/components/message-pane/types";
 
 const PAGE_SELECTION_STORAGE_KEY = "agentx:last-selection";
 

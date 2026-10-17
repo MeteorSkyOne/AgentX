@@ -11,7 +11,7 @@ import (
 	agentruntime "github.com/meteorsky/agentx/internal/runtime"
 )
 
-func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, agent domain.Agent, runID string, providerSessionID string, body string, thinking string, process []domain.ProcessItem, metric domain.AgentRunMetric, usage *agentruntime.Usage, team *domain.TeamMetadata) (domain.Message, error) {
+func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, agent domain.Agent, runID string, providerSessionID string, body string, thinking string, process []domain.ProcessItem, goal *domain.AgentGoal, plan *domain.AgentPlan, metric domain.AgentRunMetric, usage *agentruntime.Usage, team *domain.TeamMetadata) (domain.Message, error) {
 	createdAt := time.Now().UTC()
 	if !createdAt.After(userMessage.CreatedAt) {
 		createdAt = userMessage.CreatedAt.Add(time.Nanosecond)
@@ -37,6 +37,12 @@ func (a *App) completeAgentRun(ctx context.Context, userMessage domain.Message, 
 		metadata = map[string]any{}
 	}
 	metadata["metrics"] = metricSummary
+	if goal != nil {
+		metadata["goal"] = goal
+	}
+	if plan != nil {
+		metadata["plan"] = plan
+	}
 	if usage != nil && usage.Context != nil {
 		// Lets the reply footer show context-window fill without a /status probe.
 		metadata["context_usage"] = contextUsageToDomain(usage.Context)

@@ -530,6 +530,10 @@ func (s *persistentSession) handleLine(line []byte, state *claudeTurnState) (boo
 		s.mu.Unlock()
 	}
 
+	for _, evt := range state.progress.Track(payload) {
+		s.emit(evt)
+	}
+
 	switch claude.StringValue(payload, "type") {
 	case "system":
 		outcome := state.trackSystemMessage(payload)
@@ -609,6 +613,9 @@ func (s *persistentSession) handleLine(line []byte, state *claudeTurnState) (boo
 		if text == "" {
 			text = state.text()
 		}
+		if goal := state.progress.Finish(); goal != nil {
+			s.emit(runtime.Event{Type: runtime.EventDelta, Goal: goal})
+		}
 		completedUsage := claude.WithContext(claude.ClaudeUsage(payload), claude.CompleteContextUsage(state.lastContext, payload))
 		evt := runtime.Event{Type: runtime.EventCompleted, Text: text, Usage: completedUsage}
 		state.deferCompletion(evt)
@@ -659,12 +666,15 @@ type claudeTurnState struct {
 
 	background      *claude.BackgroundTracker
 	backgroundTimer *time.Timer
+
+	progress *claude.ProgressTracker
 }
 
 func newClaudeTurnState() *claudeTurnState {
 	return &claudeTurnState{
 		openTools:  map[string]struct{}{},
 		background: claude.NewBackgroundTracker(),
+		progress:   claude.NewProgressTracker(),
 	}
 }
 

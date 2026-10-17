@@ -543,7 +543,27 @@ export default function App() {
                 process:
                   event.payload.process && event.payload.process.length > 0
                     ? [...(existing?.process ?? []), ...event.payload.process]
-                    : existing?.process
+                    : existing?.process,
+                goal: existing?.goal,
+                plan: existing?.plan
+              }
+            };
+          });
+          break;
+        case "AgentRunProgress":
+          setStreamingByRunID((current) => {
+            const existing = current[event.payload.run_id];
+            return {
+              ...current,
+              [event.payload.run_id]: {
+                ...existing,
+                runID: event.payload.run_id,
+                agentID: event.payload.agent_id ?? existing?.agentID,
+                startedAt: existing?.startedAt ?? event.created_at,
+                text: existing?.text ?? "",
+                team: event.payload.team ?? existing?.team,
+                goal: event.payload.goal ?? existing?.goal,
+                plan: event.payload.plan ?? existing?.plan
               }
             };
           });
@@ -596,6 +616,8 @@ export default function App() {
                 thinking: existing?.thinking,
                 process: existing?.process,
                 team: event.payload.team ?? existing?.team,
+                goal: existing?.goal,
+                plan: existing?.plan,
                 error: event.payload.error || "Agent run failed"
               }
             };
