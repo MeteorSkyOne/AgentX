@@ -11,11 +11,24 @@ import "github.com/meteorsky/agentx/internal/runtime"
 // producing a second result. A turn is only over when no background task is
 // outstanding and the main agent has had its final say.
 type BackgroundTracker struct {
-	// tasks maps each outstanding task to the tool call that spawned it, so a
-	// task reaching a terminal state can be attributed back to that call.
-	tasks               map[string]string
+	// tasks holds each outstanding task, keyed by task id.
+	tasks               map[string]*backgroundTask
 	awaitingFinalResult bool
 	seen                bool
+}
+
+type backgroundTask struct {
+	// toolUseID is the tool call that spawned the task, so its state changes
+	// can be attributed back to that call. It may only become known later:
+	// a task launched in the background joins background_tasks_changed (which
+	// carries no tool_use_id) before its task_started.
+	toolUseID string
+	// announced records that a started signal went out for toolUseID.
+	announced bool
+	// background marks tasks running in the background. Only those are listed
+	// by background_tasks_changed, so only they may be finished by dropping
+	// out of it; a foreground task ends with its own task_notification.
+	background bool
 }
 
 // TaskSignal describes one subagent task changing state, attributed to the
@@ -39,7 +52,7 @@ type TrackOutcome struct {
 }
 
 func NewBackgroundTracker() *BackgroundTracker {
-	return &BackgroundTracker{tasks: map[string]string{}}
+	return &BackgroundTracker{tasks: map[string]*backgroundTask{}}
 }
 
 // TrackSystemMessage folds a system message into the tracked task set.
@@ -47,14 +60,16 @@ func (t *BackgroundTracker) TrackSystemMessage(payload map[string]any) TrackOutc
 	var outcome TrackOutcome
 	switch StringValue(payload, "subtype") {
 	case "task_started":
-		if signal, added := t.add(StringValue(payload, "task_id"), StringValue(payload, "tool_use_id")); added {
+		background, _ := payload["is_backgrounded"].(bool)
+		if signal, ok := t.add(StringValue(payload, "task_id"), StringValue(payload, "tool_use_id"), background); ok {
 			outcome.Started = append(outcome.Started, signal)
 		}
 	case "background_tasks_changed":
-		// The message carries the full current task set, so reconcile against
-		// it: unknown live tasks are picked up, and a tracked task that is
-		// listed as terminal — or no longer listed at all — has finished, even
-		// if its task_notification was never seen.
+		// The message carries the full set of live background tasks, so
+		// reconcile against it: unknown live tasks are picked up, and a tracked
+		// background task that is listed as terminal — or no longer listed at
+		// all — has finished, even if its task_notification was never seen.
+		// Foreground tasks are never listed and are left alone.
 		tasks, _ := payload["tasks"].([]any)
 		live := map[string]struct{}{}
 		for _, item := range tasks {
@@ -64,15 +79,15 @@ func (t *BackgroundTracker) TrackSystemMessage(payload map[string]any) TrackOutc
 				continue
 			}
 			live[taskID] = struct{}{}
-			if signal, added := t.add(taskID, StringValue(task, "tool_use_id")); added {
+			if signal, ok := t.add(taskID, StringValue(task, "tool_use_id"), true); ok {
 				outcome.Started = append(outcome.Started, signal)
 			}
 		}
-		for taskID := range t.tasks {
-			if _, stillLive := live[taskID]; stillLive {
+		for taskID, task := range t.tasks {
+			if _, stillLive := live[taskID]; stillLive || !task.background {
 				continue
 			}
-			signal, drained := t.finish(taskID, "completed")
+			signal, drained := t.finish(taskID, "completed", "")
 			outcome.Finished = append(outcome.Finished, signal)
 			if drained {
 				outcome.Drained = true
@@ -82,17 +97,22 @@ func (t *BackgroundTracker) TrackSystemMessage(payload map[string]any) TrackOutc
 		if status := StringValue(payload, "status"); isTerminalTaskStatus(status) {
 			taskID := StringValue(payload, "task_id")
 			if _, tracked := t.tasks[taskID]; tracked {
-				signal, drained := t.finish(taskID, status)
+				signal, drained := t.finish(taskID, status, StringValue(payload, "tool_use_id"))
 				outcome.Finished = append(outcome.Finished, signal)
 				outcome.Drained = drained
 			}
 		}
 	case "task_updated":
 		patch, _ := payload["patch"].(map[string]any)
+		taskID := StringValue(payload, "task_id")
+		if backgrounded, _ := patch["is_backgrounded"].(bool); backgrounded {
+			if task, tracked := t.tasks[taskID]; tracked {
+				task.background = true
+			}
+		}
 		if status := StringValue(patch, "status"); isTerminalTaskStatus(status) {
-			taskID := StringValue(payload, "task_id")
 			if _, tracked := t.tasks[taskID]; tracked {
-				signal, drained := t.finish(taskID, status)
+				signal, drained := t.finish(taskID, status, "")
 				outcome.Finished = append(outcome.Finished, signal)
 				outcome.Drained = drained
 			}
@@ -101,21 +121,30 @@ func (t *BackgroundTracker) TrackSystemMessage(payload map[string]any) TrackOutc
 	return outcome
 }
 
-// add tracks a task, reporting whether it was new. An already-tracked task
-// keeps its known tool call unless this message supplies one.
-func (t *BackgroundTracker) add(taskID string, toolUseID string) (TaskSignal, bool) {
+// add tracks a task and reports a started signal the first time the task's
+// spawning tool call is known — which may be on a later message than the one
+// that first mentioned the task.
+func (t *BackgroundTracker) add(taskID string, toolUseID string, background bool) (TaskSignal, bool) {
 	if taskID == "" {
 		return TaskSignal{}, false
 	}
 	t.seen = true
-	if existing, tracked := t.tasks[taskID]; tracked {
-		if existing == "" && toolUseID != "" {
-			t.tasks[taskID] = toolUseID
-		}
+	task, tracked := t.tasks[taskID]
+	if !tracked {
+		task = &backgroundTask{}
+		t.tasks[taskID] = task
+	}
+	if background {
+		task.background = true
+	}
+	if task.toolUseID == "" {
+		task.toolUseID = toolUseID
+	}
+	if task.toolUseID == "" || task.announced {
 		return TaskSignal{}, false
 	}
-	t.tasks[taskID] = toolUseID
-	return TaskSignal{TaskID: taskID, ToolUseID: toolUseID}, true
+	task.announced = true
+	return TaskSignal{TaskID: taskID, ToolUseID: task.toolUseID}, true
 }
 
 // Seen reports whether this turn ever ran a task. Callers that see results only
@@ -127,8 +156,11 @@ func (t *BackgroundTracker) Seen() bool {
 }
 
 // finish closes a tracked task, reporting whether it was the last one.
-func (t *BackgroundTracker) finish(taskID string, status string) (TaskSignal, bool) {
-	toolUseID := t.tasks[taskID]
+// toolUseID fills in the spawning call when the task never reported it.
+func (t *BackgroundTracker) finish(taskID string, status string, toolUseID string) (TaskSignal, bool) {
+	if task := t.tasks[taskID]; task != nil && task.toolUseID != "" {
+		toolUseID = task.toolUseID
+	}
 	delete(t.tasks, taskID)
 	signal := TaskSignal{TaskID: taskID, ToolUseID: toolUseID, Status: status}
 	if len(t.tasks) > 0 {
@@ -178,7 +210,7 @@ func SubagentSignalItems(outcome TrackOutcome) []runtime.ProcessItem {
 
 func isTerminalTaskStatus(status string) bool {
 	switch status {
-	case "completed", "failed", "cancelled", "canceled", "error", "timeout":
+	case "completed", "failed", "stopped", "killed", "cancelled", "canceled", "error", "timeout":
 		return true
 	}
 	return false

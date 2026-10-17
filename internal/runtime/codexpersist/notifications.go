@@ -175,6 +175,9 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 			}
 			s.emit(runtime.Event{Type: runtime.EventDelta, Process: []runtime.ProcessItem{*pi}})
 		}
+		if signals := s.subagentSignals(item); len(signals) > 0 {
+			s.emit(runtime.Event{Type: runtime.EventDelta, Process: signals})
+		}
 
 	case "item/completed":
 		item, _ := params["item"].(map[string]any)
@@ -194,6 +197,9 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 				s.emit(state.flushCompletedAgentTextAsThinking())
 			}
 			s.emit(runtime.Event{Type: runtime.EventDelta, Process: []runtime.ProcessItem{*pi}})
+		}
+		if signals := s.subagentSignals(item); len(signals) > 0 {
+			s.emit(runtime.Event{Type: runtime.EventDelta, Process: signals})
 		}
 
 	case "turn/started":

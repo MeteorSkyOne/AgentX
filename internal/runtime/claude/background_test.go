@@ -225,3 +225,106 @@ func TestLineHandlerTagsSubagentProcessItems(t *testing.T) {
 		t.Fatalf("expected 1 tagged subagent process item, got %d (events=%#v)", tagged, events)
 	}
 }
+
+func subagentSignals(events []runtime.Event) []runtime.ProcessItem {
+	var items []runtime.ProcessItem
+	for _, evt := range events {
+		for _, item := range evt.Process {
+			if item.Type == "subagent_started" || item.Type == "subagent_completed" {
+				items = append(items, item)
+			}
+		}
+	}
+	return items
+}
+
+// Recorded from Claude Code 2.1.302: a background agent joins
+// background_tasks_changed (no tool_use_id) before its task_started. The
+// started signal must still go out once task_started names the tool call —
+// otherwise the UI only sees the spawning call's "launched" result and shows
+// the subagent as done while it runs.
+func TestBackgroundAgentListedBeforeTaskStartedIsAnnounced(t *testing.T) {
+	handler := newLineHandler("fallback")
+
+	events := handleLines(t, handler,
+		`{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"ad5a","task_type":"local_agent","subagent_type":"general-purpose","description":"Sleep then reply BETA"}]}`,
+		`{"type":"system","subtype":"task_started","task_id":"ad5a","tool_use_id":"toolu_bg","description":"Sleep then reply BETA","is_backgrounded":true,"task_type":"local_agent"}`,
+		`{"type":"system","subtype":"task_started","task_id":"ad5a","tool_use_id":"toolu_bg","is_backgrounded":true,"task_type":"local_agent"}`,
+	)
+	signals := subagentSignals(events)
+	if len(signals) != 1 || signals[0].Type != "subagent_started" || signals[0].ToolCallID != "toolu_bg" {
+		t.Fatalf("signals = %#v, want one subagent_started for toolu_bg", signals)
+	}
+
+	events = handleLines(t, handler,
+		`{"type":"system","subtype":"task_updated","task_id":"ad5a","patch":{"status":"completed"}}`,
+		`{"type":"system","subtype":"task_notification","task_id":"ad5a","tool_use_id":"toolu_bg","status":"completed"}`,
+		`{"type":"system","subtype":"background_tasks_changed","tasks":[]}`,
+	)
+	signals = subagentSignals(events)
+	if len(signals) != 1 || signals[0].Type != "subagent_completed" || signals[0].ToolCallID != "toolu_bg" {
+		t.Fatalf("signals = %#v, want one subagent_completed for toolu_bg", signals)
+	}
+}
+
+// background_tasks_changed lists background tasks only, so a running
+// foreground subagent missing from it has not finished.
+func TestForegroundAgentSurvivesBackgroundTasksChanged(t *testing.T) {
+	handler := newLineHandler("fallback")
+
+	events := handleLines(t, handler,
+		`{"type":"system","subtype":"task_started","task_id":"fg","tool_use_id":"toolu_fg","is_backgrounded":false,"task_type":"local_agent"}`,
+		`{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"sh","task_type":"local_bash","description":"sleep"}]}`,
+		`{"type":"system","subtype":"task_started","task_id":"sh","tool_use_id":"toolu_sh","is_backgrounded":true,"task_type":"local_bash"}`,
+		`{"type":"system","subtype":"background_tasks_changed","tasks":[]}`,
+	)
+	for _, signal := range subagentSignals(events) {
+		if signal.Type == "subagent_completed" && signal.ToolCallID == "toolu_fg" {
+			t.Fatalf("foreground subagent finished by background_tasks_changed: %#v", subagentSignals(events))
+		}
+	}
+
+	events = handleLines(t, handler,
+		`{"type":"system","subtype":"task_notification","task_id":"fg","tool_use_id":"toolu_fg","status":"completed"}`,
+	)
+	signals := subagentSignals(events)
+	if len(signals) != 1 || signals[0].Type != "subagent_completed" || signals[0].ToolCallID != "toolu_fg" {
+		t.Fatalf("signals = %#v, want subagent_completed for toolu_fg", signals)
+	}
+}
+
+// A foreground agent moved to the background is then subject to the
+// background level signal.
+func TestBackgroundedForegroundAgentFinishesWhenDroppedFromLevel(t *testing.T) {
+	handler := newLineHandler("fallback")
+
+	events := handleLines(t, handler,
+		`{"type":"system","subtype":"task_started","task_id":"fg","tool_use_id":"toolu_fg","is_backgrounded":false,"task_type":"local_agent"}`,
+		`{"type":"system","subtype":"task_updated","task_id":"fg","patch":{"is_backgrounded":true}}`,
+		`{"type":"system","subtype":"background_tasks_changed","tasks":[]}`,
+	)
+	signals := subagentSignals(events)
+	if len(signals) != 2 || signals[1].Type != "subagent_completed" || signals[1].ToolCallID != "toolu_fg" {
+		t.Fatalf("signals = %#v, want started then completed for toolu_fg", signals)
+	}
+}
+
+func TestStoppedAndKilledTasksFinish(t *testing.T) {
+	handler := newLineHandler("fallback")
+
+	events := handleLines(t, handler,
+		`{"type":"system","subtype":"task_started","task_id":"a","tool_use_id":"toolu_a","is_backgrounded":true}`,
+		`{"type":"system","subtype":"task_started","task_id":"b","tool_use_id":"toolu_b","is_backgrounded":true}`,
+		`{"type":"system","subtype":"task_notification","task_id":"a","tool_use_id":"toolu_a","status":"stopped"}`,
+		`{"type":"system","subtype":"task_updated","task_id":"b","patch":{"status":"killed"}}`,
+	)
+	var finished []string
+	for _, signal := range subagentSignals(events) {
+		if signal.Type == "subagent_completed" {
+			finished = append(finished, signal.ToolCallID+":"+signal.Status)
+		}
+	}
+	if strings.Join(finished, ",") != "toolu_a:stopped,toolu_b:killed" {
+		t.Fatalf("finished = %v", finished)
+	}
+}

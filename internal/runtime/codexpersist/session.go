@@ -52,6 +52,9 @@ type persistentSession struct {
 	// lastGoal is the latest goal snapshot, kept so thread/goal/cleared (which
 	// carries no goal) can still report the cleared objective.
 	lastGoal *runtime.GoalState
+	// subagents follows spawned codex subagents across the run; only the
+	// notification loop touches it.
+	subagents *subagentTracker
 }
 
 func newPersistentSession(proc *procpool.ManagedProcess, rpc *rpcClient, key string, rt *Runtime, req runtime.StartSessionRequest) *persistentSession {
