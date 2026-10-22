@@ -61,7 +61,7 @@ func (r *Runtime) buildArgs(req runtime.StartSessionRequest) []string {
 		args = append(args, "--disallowedTools", tools)
 	}
 
-	if prompt := strings.TrimSpace(r.opts.AppendSystemPrompt); prompt != "" {
+	if prompt := joinPrompts(r.opts.AppendSystemPrompt, req.SystemPrompt); prompt != "" {
 		args = append(args, "--append-system-prompt", prompt)
 	}
 
@@ -109,4 +109,15 @@ func mergeEnv(base []string, layers ...map[string]string) []string {
 		env = append(env, key+"="+value)
 	}
 	return env
+}
+
+// joinPrompts concatenates non-empty system prompt fragments.
+func joinPrompts(prompts ...string) string {
+	var parts []string
+	for _, prompt := range prompts {
+		if prompt = strings.TrimSpace(prompt); prompt != "" {
+			parts = append(parts, prompt)
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }

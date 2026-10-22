@@ -819,6 +819,7 @@ function agentContext(): ConversationAgentContext {
       name: "Agent",
       handle: "agent",
       description: "",
+      system_prompt: "",
       model: "",
       effort: "",
       config_workspace_id: "workspace-1",

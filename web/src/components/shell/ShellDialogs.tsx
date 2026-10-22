@@ -180,6 +180,8 @@ export interface ShellDialogsProps {
   setNewAgentName: StringSetter;
   newAgentDescription: string;
   setNewAgentDescription: StringSetter;
+  newAgentSystemPrompt: string;
+  setNewAgentSystemPrompt: StringSetter;
   newAgentHandle: string;
   setNewAgentHandle: StringSetter;
   newAgentKind: string;
@@ -351,6 +353,8 @@ export function ShellDialogs({
   setNewAgentName,
   newAgentDescription,
   setNewAgentDescription,
+  newAgentSystemPrompt,
+  setNewAgentSystemPrompt,
   newAgentHandle,
   setNewAgentHandle,
   newAgentKind,
@@ -836,6 +840,17 @@ export function ShellDialogs({
                       placeholder="What this agent is responsible for"
                       aria-label="New agent description"
                       rows={3}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="new-agent-system-prompt">System prompt</Label>
+                    <Textarea
+                      id="new-agent-system-prompt"
+                      value={newAgentSystemPrompt}
+                      onChange={(e) => setNewAgentSystemPrompt(e.target.value)}
+                      placeholder="Instructions appended to the runtime's system prompt for every session"
+                      aria-label="New agent system prompt"
+                      rows={4}
                     />
                   </div>
                   <div className="space-y-2">

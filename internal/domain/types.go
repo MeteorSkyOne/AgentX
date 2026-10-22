@@ -134,6 +134,7 @@ type Agent struct {
 	Name               string            `json:"name"`
 	Handle             string            `json:"handle"`
 	Description        string            `json:"description"`
+	SystemPrompt       string            `json:"system_prompt"`
 	Model              string            `json:"model"`
 	Effort             string            `json:"effort"`
 	ConfigWorkspaceID  string            `json:"config_workspace_id"`

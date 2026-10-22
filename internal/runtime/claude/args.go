@@ -71,6 +71,9 @@ func (r Runtime) appendSystemPrompt(req runtime.StartSessionRequest) string {
 	if prompt := strings.TrimSpace(r.opts.AppendSystemPrompt); prompt != "" {
 		parts = append(parts, prompt)
 	}
+	if prompt := strings.TrimSpace(req.SystemPrompt); prompt != "" {
+		parts = append(parts, prompt)
+	}
 	if instructions := claudeWorkspaceInstructions(req.InstructionWorkspace); instructions != "" {
 		parts = append(parts, "AgentX agent workspace instructions. Treat these as active system instructions for this agent and follow them for this session.\n\n"+instructions)
 	}

@@ -229,6 +229,7 @@ function agent(): Agent {
     name: "Agent",
     handle: "agent",
     description: "",
+    system_prompt: "",
     model: "",
     effort: "",
     config_workspace_id: "wsp_1",

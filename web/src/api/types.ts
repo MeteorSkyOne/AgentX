@@ -441,6 +441,7 @@ export interface Agent {
   name: string;
   handle: string;
   description: string;
+  system_prompt: string;
   model: string;
   effort: string;
   config_workspace_id: string;

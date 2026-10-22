@@ -111,6 +111,17 @@ func attachmentDirs(input runtime.Input) []string {
 }
 
 func codexDeveloperInstructions(req runtime.StartSessionRequest) string {
+	var parts []string
+	if prompt := strings.TrimSpace(req.SystemPrompt); prompt != "" {
+		parts = append(parts, prompt)
+	}
+	if text := codexWorkspaceInstructions(req); text != "" {
+		parts = append(parts, text)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func codexWorkspaceInstructions(req runtime.StartSessionRequest) string {
 	instructionWorkspace := strings.TrimSpace(req.InstructionWorkspace)
 	if instructionWorkspace == "" || samePath(req.Workspace, instructionWorkspace) {
 		return ""

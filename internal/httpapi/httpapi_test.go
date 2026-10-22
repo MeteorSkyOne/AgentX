@@ -90,15 +90,16 @@ func TestHTTPAgentCreateAndUpdateRoundTripsEffort(t *testing.T) {
 
 	var created domain.Agent
 	postJSON(t, ts.URL+"/api/organizations/"+bootstrap.Organization.ID+"/agents", bootstrap.SessionToken, map[string]any{
-		"name":        "Planner",
-		"description": "Plans implementation work",
-		"handle":      "planner",
-		"kind":        "codex",
-		"model":       "gpt-test",
-		"effort":      "medium",
-		"fast_mode":   true,
+		"name":          "Planner",
+		"description":   "Plans implementation work",
+		"system_prompt": "  Always answer in English. ",
+		"handle":        "planner",
+		"kind":          "codex",
+		"model":         "gpt-test",
+		"effort":        "medium",
+		"fast_mode":     true,
 	}, http.StatusOK, &created)
-	if created.Effort != "medium" || !created.FastMode || created.Description != "Plans implementation work" {
+	if created.Effort != "medium" || !created.FastMode || created.Description != "Plans implementation work" || created.SystemPrompt != "Always answer in English." {
 		t.Fatalf("created agent = %#v", created)
 	}
 	var memory struct {
@@ -125,12 +126,17 @@ func TestHTTPAgentCreateAndUpdateRoundTripsEffort(t *testing.T) {
 
 	var updated domain.Agent
 	patchJSON(t, ts.URL+"/api/agents/"+created.ID, bootstrap.SessionToken, map[string]any{
-		"description": "Updated planner",
-		"effort":      "high",
-		"fast_mode":   false,
+		"description":   "Updated planner",
+		"system_prompt": "Be terse.",
+		"effort":        "high",
+		"fast_mode":     false,
 	}, http.StatusOK, &updated)
-	if updated.Effort != "high" || updated.Model != "gpt-test" || updated.FastMode || updated.Description != "Updated planner" {
+	if updated.Effort != "high" || updated.Model != "gpt-test" || updated.FastMode || updated.Description != "Updated planner" || updated.SystemPrompt != "Be terse." {
 		t.Fatalf("updated agent = %#v", updated)
+	}
+	patchJSON(t, ts.URL+"/api/agents/"+created.ID, bootstrap.SessionToken, map[string]any{"effort": "low"}, http.StatusOK, &updated)
+	if updated.SystemPrompt != "Be terse." {
+		t.Fatalf("system prompt was dropped by an unrelated update: %#v", updated)
 	}
 
 	deleteJSON(t, ts.URL+"/api/agents/"+created.ID, bootstrap.SessionToken, http.StatusNoContent)

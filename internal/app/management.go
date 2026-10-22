@@ -402,6 +402,7 @@ type AgentCreateRequest struct {
 	OrganizationID string
 	Name           string
 	Description    string
+	SystemPrompt   string
 	Handle         string
 	Kind           string
 	Model          string
@@ -448,6 +449,7 @@ func (a *App) CreateAgent(ctx context.Context, req AgentCreateRequest) (domain.A
 		Name:               name,
 		Handle:             handle,
 		Description:        description,
+		SystemPrompt:       strings.TrimSpace(req.SystemPrompt),
 		Model:              strings.TrimSpace(req.Model),
 		Effort:             strings.TrimSpace(req.Effort),
 		ConfigWorkspaceID:  workspace.ID,
@@ -483,18 +485,19 @@ func (a *App) CreateAgent(ctx context.Context, req AgentCreateRequest) (domain.A
 }
 
 type AgentUpdateRequest struct {
-	Name        *string
-	Description *string
-	Handle      *string
-	Kind        *string
-	Model       *string
-	Effort      *string
-	Enabled     *bool
-	FastMode    *bool
-	YoloMode    *bool
-	Env         map[string]string
-	EnvSet      bool
-	EnvPatch    *AgentEnvPatch
+	Name         *string
+	Description  *string
+	SystemPrompt *string
+	Handle       *string
+	Kind         *string
+	Model        *string
+	Effort       *string
+	Enabled      *bool
+	FastMode     *bool
+	YoloMode     *bool
+	Env          map[string]string
+	EnvSet       bool
+	EnvPatch     *AgentEnvPatch
 }
 
 // AgentEnvPatch edits individual env entries so callers can change some keys
@@ -520,6 +523,9 @@ func (a *App) UpdateAgent(ctx context.Context, agentID string, req AgentUpdateRe
 	}
 	if req.Description != nil {
 		agent.Description = strings.TrimSpace(*req.Description)
+	}
+	if req.SystemPrompt != nil {
+		agent.SystemPrompt = strings.TrimSpace(*req.SystemPrompt)
 	}
 	if req.Handle != nil {
 		handle := normalizeHandle(*req.Handle)

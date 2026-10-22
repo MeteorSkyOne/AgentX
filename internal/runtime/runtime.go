@@ -12,12 +12,15 @@ type StartSessionRequest struct {
 	InstructionWorkspace string
 	Model                string
 	Effort               string
-	PermissionMode       string
-	FastMode             bool
-	YoloMode             bool
-	Env                  map[string]string
-	SessionKey           string
-	PreviousSessionID    string
+	// SystemPrompt is the agent's own instructions, appended to the runtime's
+	// system prompt for every session.
+	SystemPrompt      string
+	PermissionMode    string
+	FastMode          bool
+	YoloMode          bool
+	Env               map[string]string
+	SessionKey        string
+	PreviousSessionID string
 }
 
 type Input struct {

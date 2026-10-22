@@ -113,6 +113,7 @@ export function AgentDetailsPanel({
   const [agentID, setAgentID] = useState(selectedAgent?.id ?? "");
   const [name, setName] = useState(selectedAgent?.name ?? "");
   const [description, setDescription] = useState(selectedAgent?.description ?? "");
+  const [systemPrompt, setSystemPrompt] = useState(selectedAgent?.system_prompt ?? "");
   const [handle, setHandle] = useState(selectedAgent?.handle ?? "");
   const [kind, setKind] = useState(selectedAgent?.kind ?? "fake");
   const [persistentDraft, setPersistentDraft] = useState(agentPersistentFromKind(selectedAgent?.kind ?? "fake"));
@@ -171,6 +172,7 @@ export function AgentDetailsPanel({
     setAgentID(selected.id);
     setName(selected.name);
     setDescription(selected.description ?? "");
+    setSystemPrompt(selected.system_prompt ?? "");
     setHandle(selected.handle);
     setKind(selected.kind);
     setPersistentDraft(agentPersistentFromKind(selected.kind));
@@ -187,6 +189,7 @@ export function AgentDetailsPanel({
     selected?.id,
     selected?.name,
     selected?.description,
+    selected?.system_prompt,
     selected?.handle,
     selected?.kind,
     selected?.model,
@@ -205,7 +208,7 @@ export function AgentDetailsPanel({
 
   async function saveAgent() {
     if (!selected) return;
-    await onUpdateAgent(selected.id, { name, description, handle, kind, model, effort, enabled, fast_mode: fastMode, yolo_mode: yoloMode });
+    await onUpdateAgent(selected.id, { name, description, system_prompt: systemPrompt, handle, kind, model, effort, enabled, fast_mode: fastMode, yolo_mode: yoloMode });
     await queryClient.invalidateQueries({ queryKey: ["agent-limits", selected.id] });
     setAgentAvatar(selected.id, avatarEmoji ? { emoji: avatarEmoji, color: avatarColor || agentKindColor(kind) } : null);
     setStatus("Saved");
@@ -384,6 +387,16 @@ export function AgentDetailsPanel({
                   onChange={(e) => setDescription(e.target.value)}
                   aria-label="Agent description"
                   rows={3}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs">System prompt</Label>
+                <Textarea
+                  value={systemPrompt}
+                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  placeholder="Instructions appended to the runtime's system prompt for every session"
+                  aria-label="Agent system prompt"
+                  rows={4}
                 />
               </div>
               <div className="space-y-2">

@@ -29,6 +29,7 @@ function agent(id: string, name: string): Agent {
     name,
     handle: name.toLowerCase(),
     description: "",
+    system_prompt: "",
     model: "",
     effort: "",
     config_workspace_id: "wks_config",

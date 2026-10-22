@@ -331,3 +331,35 @@ func TestIdleReapingSkipsProcessWithActiveTurn(t *testing.T) {
 		t.Fatal("expected released idle process to be reaped")
 	}
 }
+
+func TestGetOrCreateSignedRestartsIdleProcessOnNewSignature(t *testing.T) {
+	pool := New(Options{IdleTimeout: 1 * time.Hour})
+	defer pool.Shutdown(context.Background())
+
+	proc1, isNew, err := pool.GetOrCreateSigned("key", "prompt-a", echoStartFunc)
+	if err != nil || !isNew {
+		t.Fatalf("first = %v, isNew=%v", err, isNew)
+	}
+	same, isNew, err := pool.GetOrCreateSigned("key", "prompt-a", echoStartFunc)
+	if err != nil || isNew || same != proc1 {
+		t.Fatalf("same signature should reuse: err=%v isNew=%v same=%v", err, isNew, same == proc1)
+	}
+
+	proc2, isNew, err := pool.GetOrCreateSigned("key", "prompt-b", echoStartFunc)
+	if err != nil || !isNew || proc2 == proc1 {
+		t.Fatalf("new signature should restart: err=%v isNew=%v", err, isNew)
+	}
+	if proc1.Alive() {
+		t.Fatal("old process should have been killed")
+	}
+
+	// A process in the middle of a turn is kept even when the signature changed.
+	if err := proc2.AcquireTurn(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	busy, isNew, err := pool.GetOrCreateSigned("key", "prompt-c", echoStartFunc)
+	if err != nil || isNew || busy != proc2 {
+		t.Fatalf("busy process should be reused: err=%v isNew=%v", err, isNew)
+	}
+	proc2.ReleaseTurn()
+}

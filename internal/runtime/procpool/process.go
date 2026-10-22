@@ -46,6 +46,10 @@ type ManagedProcess struct {
 
 	Mu       sync.Mutex
 	UserData map[any]any
+
+	// signature records the launch arguments the process was started with;
+	// see ProcessPool.GetOrCreateSigned.
+	signature string
 }
 
 func startProcess(pool *ProcessPool, key string, cmd *exec.Cmd) (*ManagedProcess, error) {

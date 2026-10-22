@@ -157,6 +157,7 @@ export function Shell({
   const [agentDraftOpen, setAgentDraftOpen] = useState(false);
   const [newAgentName, setNewAgentName] = useState("");
   const [newAgentDescription, setNewAgentDescription] = useState("");
+  const [newAgentSystemPrompt, setNewAgentSystemPrompt] = useState("");
   const [newAgentHandle, setNewAgentHandle] = useState("");
   const [newAgentKind, setNewAgentKind] = useState("fake");
   const [newAgentModel, setNewAgentModel] = useState("");
@@ -849,6 +850,7 @@ export function Shell({
       const created = await onCreateAgent({
         name,
         description: newAgentDescription.trim() || undefined,
+        system_prompt: newAgentSystemPrompt.trim() || undefined,
         handle: newAgentHandle || undefined,
         kind: newAgentKind,
         model: newAgentModel || undefined,
@@ -872,6 +874,7 @@ export function Shell({
       }
       setNewAgentName("");
       setNewAgentDescription("");
+      setNewAgentSystemPrompt("");
       setNewAgentHandle("");
       setNewAgentKind("fake");
       setNewAgentModel("");
@@ -1295,6 +1298,8 @@ export function Shell({
         setNewAgentName={setNewAgentName}
         newAgentDescription={newAgentDescription}
         setNewAgentDescription={setNewAgentDescription}
+        newAgentSystemPrompt={newAgentSystemPrompt}
+        setNewAgentSystemPrompt={setNewAgentSystemPrompt}
         newAgentHandle={newAgentHandle}
         setNewAgentHandle={setNewAgentHandle}
         newAgentKind={newAgentKind}

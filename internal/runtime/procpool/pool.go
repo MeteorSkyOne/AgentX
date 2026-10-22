@@ -68,6 +68,30 @@ func (p *ProcessPool) GetOrCreate(key string, start StartFunc) (*ManagedProcess,
 	return mp, true, nil
 }
 
+// GetOrCreateSigned is GetOrCreate for processes whose launch arguments can
+// change between sessions (for example the agent's system prompt). A live
+// idle process whose signature differs is replaced; a process that is in the
+// middle of a turn is reused as-is and picks the new arguments up later.
+func (p *ProcessPool) GetOrCreateSigned(key string, signature string, start StartFunc) (*ManagedProcess, bool, error) {
+	p.mu.Lock()
+	if mp, ok := p.processes[key]; ok && mp.Alive() && mp.signature != signature && !mp.InUse() {
+		delete(p.processes, key)
+		p.mu.Unlock()
+		slog.Info("procpool: restarting process with new launch arguments", "key", key)
+		mp.Kill()
+	} else {
+		p.mu.Unlock()
+	}
+	mp, isNew, err := p.GetOrCreate(key, start)
+	if err != nil {
+		return nil, false, err
+	}
+	if isNew {
+		mp.signature = signature
+	}
+	return mp, isNew, nil
+}
+
 func (p *ProcessPool) Get(key string) (*ManagedProcess, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

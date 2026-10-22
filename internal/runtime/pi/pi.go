@@ -104,7 +104,9 @@ func (r *Runtime) StartSession(ctx context.Context, req runtime.StartSessionRequ
 		startSessionID = newSessionID()
 	}
 
-	proc, isNew, err := r.pool.GetOrCreate(key, r.processStartFunc(req, startSessionID))
+	// The system prompt only applies at process start; a changed prompt
+	// restarts the idle process, and --session-id resumes the conversation.
+	proc, isNew, err := r.pool.GetOrCreateSigned(key, strings.TrimSpace(req.SystemPrompt), r.processStartFunc(req, startSessionID))
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +178,7 @@ func (r *Runtime) buildArgs(req runtime.StartSessionRequest, sessionID string) [
 	if level := thinkingLevelForEffort(req.Effort, modelThinking); level != "" {
 		args = append(args, "--thinking", level)
 	}
-	if prompt := strings.TrimSpace(r.opts.AppendSystemPrompt); prompt != "" {
+	if prompt := joinPrompts(r.opts.AppendSystemPrompt, req.SystemPrompt); prompt != "" {
 		args = append(args, "--append-system-prompt", prompt)
 	}
 	if len(r.opts.Tools) > 0 {
@@ -305,6 +307,17 @@ func piAgentDir(layers ...map[string]string) string {
 // AgentX data dir.
 func DefaultExtensionDir(dataDir string) string {
 	return filepath.Join(dataDir, "pi-extension")
+}
+
+// joinPrompts concatenates non-empty system prompt fragments.
+func joinPrompts(prompts ...string) string {
+	var parts []string
+	for _, prompt := range prompts {
+		if prompt = strings.TrimSpace(prompt); prompt != "" {
+			parts = append(parts, prompt)
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func sessionKey(req runtime.StartSessionRequest) string {

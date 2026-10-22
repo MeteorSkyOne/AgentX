@@ -51,7 +51,9 @@ func (r *Runtime) StartSession(ctx context.Context, req runtime.StartSessionRequ
 	}
 
 	key := sessionKey(req)
-	proc, isNew, err := r.pool.GetOrCreate(key, r.processStartFunc(req))
+	// The system prompt only applies at process start; a changed prompt
+	// restarts the idle process, and --resume continues the conversation.
+	proc, isNew, err := r.pool.GetOrCreateSigned(key, strings.TrimSpace(req.SystemPrompt), r.processStartFunc(req))
 	if err != nil {
 		return nil, err
 	}

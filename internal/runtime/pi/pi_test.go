@@ -289,3 +289,17 @@ func TestPiAgentDirPrefersAgentEnv(t *testing.T) {
 		t.Fatalf("dir = %q, want process env", got)
 	}
 }
+
+func TestBuildArgsAppendsAgentSystemPrompt(t *testing.T) {
+	rt := New(Options{AppendSystemPrompt: "global"})
+	args := rt.buildArgs(runtime.StartSessionRequest{SystemPrompt: "agent"}, "")
+	for i, arg := range args {
+		if arg == "--append-system-prompt" {
+			if args[i+1] != "global\n\nagent" {
+				t.Fatalf("prompt = %q, want global and agent joined", args[i+1])
+			}
+			return
+		}
+	}
+	t.Fatalf("args = %q, missing --append-system-prompt", args)
+}

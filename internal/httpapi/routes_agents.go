@@ -11,29 +11,31 @@ import (
 )
 
 type agentCreateRequest struct {
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Handle      string            `json:"handle"`
-	Kind        string            `json:"kind"`
-	Model       string            `json:"model"`
-	Effort      string            `json:"effort"`
-	FastMode    bool              `json:"fast_mode"`
-	YoloMode    bool              `json:"yolo_mode"`
-	Env         map[string]string `json:"env"`
+	Name         string            `json:"name"`
+	Description  string            `json:"description"`
+	SystemPrompt string            `json:"system_prompt"`
+	Handle       string            `json:"handle"`
+	Kind         string            `json:"kind"`
+	Model        string            `json:"model"`
+	Effort       string            `json:"effort"`
+	FastMode     bool              `json:"fast_mode"`
+	YoloMode     bool              `json:"yolo_mode"`
+	Env          map[string]string `json:"env"`
 }
 
 type agentUpdateRequest struct {
-	Name        *string               `json:"name"`
-	Description *string               `json:"description"`
-	Handle      *string               `json:"handle"`
-	Kind        *string               `json:"kind"`
-	Model       *string               `json:"model"`
-	Effort      *string               `json:"effort"`
-	Enabled     *bool                 `json:"enabled"`
-	FastMode    *bool                 `json:"fast_mode"`
-	YoloMode    *bool                 `json:"yolo_mode"`
-	Env         map[string]string     `json:"env"`
-	EnvPatch    *agentEnvPatchRequest `json:"env_patch"`
+	Name         *string               `json:"name"`
+	Description  *string               `json:"description"`
+	SystemPrompt *string               `json:"system_prompt"`
+	Handle       *string               `json:"handle"`
+	Kind         *string               `json:"kind"`
+	Model        *string               `json:"model"`
+	Effort       *string               `json:"effort"`
+	Enabled      *bool                 `json:"enabled"`
+	FastMode     *bool                 `json:"fast_mode"`
+	YoloMode     *bool                 `json:"yolo_mode"`
+	Env          map[string]string     `json:"env"`
+	EnvPatch     *agentEnvPatchRequest `json:"env_patch"`
 }
 
 type agentEnvPatchRequest struct {
@@ -100,6 +102,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		OrganizationID: orgID,
 		Name:           req.Name,
 		Description:    req.Description,
+		SystemPrompt:   req.SystemPrompt,
 		Handle:         req.Handle,
 		Kind:           req.Kind,
 		Model:          req.Model,
@@ -138,18 +141,19 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updated, err := s.app.UpdateAgent(r.Context(), agent.ID, app.AgentUpdateRequest{
-		Name:        req.Name,
-		Description: req.Description,
-		Handle:      req.Handle,
-		Kind:        req.Kind,
-		Model:       req.Model,
-		Effort:      req.Effort,
-		Enabled:     req.Enabled,
-		FastMode:    req.FastMode,
-		YoloMode:    req.YoloMode,
-		Env:         req.Env,
-		EnvSet:      req.Env != nil,
-		EnvPatch:    agentEnvPatch(req.EnvPatch),
+		Name:         req.Name,
+		Description:  req.Description,
+		SystemPrompt: req.SystemPrompt,
+		Handle:       req.Handle,
+		Kind:         req.Kind,
+		Model:        req.Model,
+		Effort:       req.Effort,
+		Enabled:      req.Enabled,
+		FastMode:     req.FastMode,
+		YoloMode:     req.YoloMode,
+		Env:          req.Env,
+		EnvSet:       req.Env != nil,
+		EnvPatch:     agentEnvPatch(req.EnvPatch),
 	})
 	if err != nil {
 		writeAppError(w, err)

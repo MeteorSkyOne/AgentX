@@ -246,6 +246,7 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 			InstructionWorkspace: target.ConfigWorkspace.Path,
 			Model:                agent.Model,
 			Effort:               agent.Effort,
+			SystemPrompt:         agent.SystemPrompt,
 			PermissionMode:       opts.PermissionMode,
 			FastMode:             agent.FastMode,
 			YoloMode:             agent.YoloMode,

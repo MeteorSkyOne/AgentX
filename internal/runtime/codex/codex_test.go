@@ -772,3 +772,18 @@ func ptrValue(value *int64) int64 {
 	}
 	return *value
 }
+
+func TestCodexDeveloperInstructionsPrependAgentSystemPrompt(t *testing.T) {
+	workspace := t.TempDir()
+	instructions := t.TempDir()
+	if err := os.WriteFile(filepath.Join(instructions, "AGENTS.md"), []byte("workspace rule\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := codexDeveloperInstructions(runtime.StartSessionRequest{Workspace: workspace, InstructionWorkspace: instructions, SystemPrompt: " agent rule "})
+	if got != "agent rule\n\nworkspace rule" {
+		t.Fatalf("instructions = %q", got)
+	}
+	if got := codexDeveloperInstructions(runtime.StartSessionRequest{Workspace: workspace, SystemPrompt: "agent rule"}); got != "agent rule" {
+		t.Fatalf("instructions without workspace = %q", got)
+	}
+}
