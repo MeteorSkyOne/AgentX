@@ -276,6 +276,7 @@ func (s *toolUpdateService) overview(active func(string) int) ToolUpdateOverview
 		Tools: []ToolUpdateStatus{
 			s.statusLocked(toolUpdateProviderClaude, active(toolUpdateProviderClaude)),
 			s.statusLocked(toolUpdateProviderCodex, active(toolUpdateProviderCodex)),
+			s.statusLocked(toolUpdateProviderPi, active(toolUpdateProviderPi)),
 		},
 	}
 }

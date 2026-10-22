@@ -346,6 +346,8 @@ func TestCheckToolUpdatesReportsProbeFailurePerTool(t *testing.T) {
 			return "2.1.1 (Claude Code)", nil
 		case "codex --version":
 			return "", errors.New("codex --version failed: executable file not found")
+		case "pi --version":
+			return "1.4.0", nil
 		default:
 			return "2.1.2", nil
 		}
@@ -356,12 +358,18 @@ func TestCheckToolUpdatesReportsProbeFailurePerTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CheckToolUpdates error = %v, want per-tool status", err)
 	}
-	claude, codex := overview.Tools[0], overview.Tools[1]
+	if len(overview.Tools) != 3 || overview.Tools[2].Tool != toolUpdateProviderPi {
+		t.Fatalf("overview tools = %#v, want claude, codex and pi", overview.Tools)
+	}
+	claude, codex, pi := overview.Tools[0], overview.Tools[1], overview.Tools[2]
 	if claude.State != "idle" || claude.CurrentVersion != "2.1.1" {
 		t.Fatalf("claude status = %#v, want checked 2.1.1", claude)
 	}
 	if codex.State != "error" || !strings.Contains(codex.LastError, "not found") {
 		t.Fatalf("codex status = %#v, want probe error", codex)
+	}
+	if pi.State != "idle" || pi.CurrentVersion != "1.4.0" || pi.DisplayName != "Pi" || pi.Command != "pi" {
+		t.Fatalf("pi status = %#v, want checked 1.4.0", pi)
 	}
 }
 
@@ -375,6 +383,7 @@ func newToolUpdateTestAppWithExec(t *testing.T, rt agentruntime.Runtime, exec to
 			Timezone:      "Local",
 			ClaudeEnabled: true,
 			CodexEnabled:  true,
+			PiEnabled:     true,
 		},
 		Runtimes: map[string]agentruntime.Runtime{
 			domain.AgentKindClaudePersistent: rt,
