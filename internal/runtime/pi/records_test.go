@@ -139,7 +139,9 @@ func TestProcessEventsStreamsTextAndPromotesPreToolText(t *testing.T) {
 	rpc.events <- record{"type": "agent_start"}
 	rpc.events <- record{"type": "message_start", "message": assistantMessage("pending", nil)}
 	rpc.events <- record{"type": "message_update", "assistantMessageEvent": record{"type": "text_delta", "delta": "Let me look."}}
-	rpc.events <- record{"type": "message_update", "assistantMessageEvent": record{"type": "thinking_delta", "delta": "hmm"}}
+	rpc.events <- record{"type": "message_update", "assistantMessageEvent": record{"type": "thinking_delta", "delta": "hm"}}
+	rpc.events <- record{"type": "message_update", "assistantMessageEvent": record{"type": "thinking_delta", "delta": "m"}}
+	rpc.events <- record{"type": "message_update", "assistantMessageEvent": record{"type": "thinking_end", "content": "hmm"}}
 	rpc.events <- record{"type": "message_end", "message": assistantMessage("toolUse", record{"input": 10.0, "output": 5.0, "cacheRead": 2.0, "cacheWrite": 1.0, "totalTokens": 18.0, "cost": record{"total": 0.01}})}
 	rpc.events <- record{"type": "tool_execution_start", "toolCallId": "call_1", "toolName": "bash", "args": record{"command": "ls"}}
 	rpc.events <- record{"type": "tool_execution_end", "toolCallId": "call_1", "toolName": "bash", "isError": false,
@@ -425,5 +427,31 @@ func TestUpdatePlanToolCallBecomesPlanSnapshot(t *testing.T) {
 	}
 	if plan.Steps[0].Status != runtime.PlanStepCompleted || plan.Steps[1].Status != runtime.PlanStepInProgress || plan.Steps[2].Status != runtime.PlanStepPending {
 		t.Fatalf("plan steps = %+v", plan.Steps)
+	}
+}
+
+func TestThinkingDeltasAreCoalescedPerBlock(t *testing.T) {
+	rpc := newFakeRPC()
+	s := newTestSession(t, rpc)
+	for _, delta := range []string{"The ", "output ", "is ", "truncated."} {
+		rpc.events <- record{"type": "message_update", "assistantMessageEvent": record{"type": "thinking_delta", "delta": delta}}
+	}
+	rpc.events <- record{"type": "message_update", "assistantMessageEvent": record{"type": "thinking_end", "content": "The output is truncated."}}
+	// A second block without thinking_end is flushed when the message ends.
+	rpc.events <- record{"type": "message_update", "assistantMessageEvent": record{"type": "thinking_delta", "delta": "Let me "}}
+	rpc.events <- record{"type": "message_update", "assistantMessageEvent": record{"type": "thinking_delta", "delta": "read."}}
+	rpc.events <- record{"type": "message_end", "message": assistantMessage("stop", nil)}
+	rpc.events <- record{"type": "agent_settled"}
+
+	go s.processEvents(context.Background())
+	events := collectEvents(t, s)
+	var thinking []string
+	for _, evt := range events {
+		if evt.Thinking != "" {
+			thinking = append(thinking, evt.Thinking)
+		}
+	}
+	if len(thinking) != 2 || thinking[0] != "The output is truncated." || thinking[1] != "Let me read." {
+		t.Fatalf("thinking events = %q, want two whole blocks", thinking)
 	}
 }

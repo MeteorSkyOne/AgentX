@@ -15,7 +15,12 @@ type turnState struct {
 	// text is the assistant text streamed since the last promotion. Text that
 	// precedes a tool call is promoted into a thinking item (and cleared from
 	// the reply), so the reply ends up being the final assistant message only.
-	text      strings.Builder
+	text strings.Builder
+	// thinking collects the deltas of the thinking block being streamed. It is
+	// surfaced as one item at thinking_end: every event that carries only
+	// Thinking becomes its own process item downstream, so per-token events
+	// would show up as one "Thinking" row per word.
+	thinking  strings.Builder
 	usage     usageTotals
 	lastStop  string
 	lastError string
@@ -73,6 +78,7 @@ func (s *persistentSession) handleRecord(ctx context.Context, rec record, state 
 		message := mapVal(rec, "message")
 		switch stringVal(message, "role") {
 		case "assistant":
+			s.flushThinking(state)
 			state.usage.add(message)
 			state.lastStop = stringVal(message, "stopReason")
 			state.lastError = stringVal(message, "errorMessage")
@@ -195,10 +201,27 @@ func (s *persistentSession) handleAssistantUpdate(evt record, state *turnState) 
 		state.text.WriteString(delta)
 		s.emit(runtime.Event{Type: runtime.EventDelta, Text: delta})
 	case "thinking_delta":
-		if delta := stringVal(evt, "delta"); delta != "" {
-			s.emit(runtime.Event{Type: runtime.EventDelta, Thinking: delta})
+		state.thinking.WriteString(stringVal(evt, "delta"))
+	case "thinking_end":
+		content := stringVal(evt, "content")
+		if content == "" {
+			content = state.thinking.String()
+		}
+		state.thinking.Reset()
+		if content != "" {
+			s.emit(runtime.Event{Type: runtime.EventDelta, Thinking: content})
 		}
 	}
+}
+
+// flushThinking surfaces a thinking block that never reported thinking_end.
+func (s *persistentSession) flushThinking(state *turnState) {
+	if state.thinking.Len() == 0 {
+		return
+	}
+	content := state.thinking.String()
+	state.thinking.Reset()
+	s.emit(runtime.Event{Type: runtime.EventDelta, Thinking: content})
 }
 
 // promoteText moves the text streamed so far out of the reply and into the
