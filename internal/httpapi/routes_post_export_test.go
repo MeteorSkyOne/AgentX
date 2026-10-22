@@ -81,4 +81,7 @@ func TestHTTPMCPSetupQuotesDatabasePath(t *testing.T) {
 	if !setup.Available || setup.ClaudeCommand != want {
 		t.Fatalf("setup = %#v, want claude command %q", setup, want)
 	}
+	if wantPi := "pi mcp add --exposure direct agentx -- /opt/agentx/agentx mcp --db '/home/me/Agent X/agentx.db'"; setup.PiCommand != wantPi {
+		t.Fatalf("pi command = %q, want %q", setup.PiCommand, wantPi)
+	}
 }

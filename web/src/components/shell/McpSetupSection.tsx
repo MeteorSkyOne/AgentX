@@ -40,6 +40,7 @@ export function McpSetupSection({ enabled }: { enabled: boolean }) {
           )}
           <SetupCommand label="Claude Code" command={setup.claude_command} />
           <SetupCommand label="Codex" command={setup.codex_command} />
+          <SetupCommand label="Pi" command={setup.pi_command} />
         </>
       )}
     </div>
