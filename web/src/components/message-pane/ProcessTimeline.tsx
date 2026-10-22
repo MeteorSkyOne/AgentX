@@ -943,9 +943,9 @@ interface SubagentInfo {
   active: boolean;
 }
 
-/** Codex spawns subagents via "Agent"; Claude Code via "Task". */
+/** Codex spawns subagents via "Agent"; Claude Code via "Task"; pi (pi-subagents) via "subagent". */
 function isSubagentToolName(toolName?: string): boolean {
-  return toolName === "Agent" || toolName === "Task";
+  return toolName === "Agent" || toolName === "Task" || toolName === "subagent";
 }
 
 /**
@@ -1073,6 +1073,10 @@ function subagentDescription(item: ProcessItem): string {
     (typeof input?.description === "string" ? input.description : null) ??
     (typeof input?.subagent_type === "string" ? input.subagent_type : null) ??
     (typeof input?.prompt === "string" ? input.prompt : null) ??
+    (typeof input?.task === "string"
+      ? typeof input?.agent === "string" ? `${input.agent}: ${input.task}` : input.task
+      : null) ??
+    (typeof input?.agent === "string" ? input.agent : null) ??
     "Subagent"
   );
 }

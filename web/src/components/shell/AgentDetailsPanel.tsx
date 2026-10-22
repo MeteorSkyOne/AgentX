@@ -48,12 +48,14 @@ import { AgentProviderLimitsView } from "./AgentProviderLimits";
 import { formatToolVersion } from "./toolUpdateStatus";
 import type { ShellProps } from "./types";
 import {
-  AGENT_EFFORT_OPTIONS,
   AGENT_RUNTIME_OPTIONS,
+  agentEffortOptions,
   agentKindFromProviderPersistent,
   agentKindLabel,
+  agentKindSupportsFastMode,
   agentPersistentFromKind,
   agentProviderFromKind,
+  agentProviderHasPersistentToggle,
   agentToneColor,
   defaultAgentInstructionPath,
   isProviderLimitAgent,
@@ -195,7 +197,7 @@ export function AgentDetailsPanel({
   ]);
 
   useEffect(() => {
-    if (agentProviderFromKind(kind) !== "fake") {
+    if (agentProviderHasPersistentToggle(agentProviderFromKind(kind))) {
       setPersistentDraft(agentPersistentFromKind(kind));
     }
   }, [kind]);
@@ -408,7 +410,7 @@ export function AgentDetailsPanel({
                   <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="Model" aria-label="Agent model" />
                 </div>
               </div>
-              {selectedProvider !== "fake" && (
+              {agentProviderHasPersistentToggle(selectedProvider) && (
                 <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
                   <Checkbox
                     checked={persistentDraft}
@@ -470,7 +472,7 @@ export function AgentDetailsPanel({
                   autoComplete="off"
                 />
                 <datalist id="agent-effort-suggestions">
-                  {AGENT_EFFORT_OPTIONS.map((option) => (
+                  {agentEffortOptions(kind).map((option) => (
                     <option key={option} value={option} />
                   ))}
                 </datalist>
@@ -482,14 +484,16 @@ export function AgentDetailsPanel({
                 />
                 Enabled
               </label>
-              <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
-                <Checkbox
-                  checked={fastMode}
-                  onChange={(e) => setFastMode(e.target.checked)}
-                  aria-label="Agent fast mode"
-                />
-                Fast mode
-              </label>
+              {agentKindSupportsFastMode(kind) && (
+                <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
+                  <Checkbox
+                    checked={fastMode}
+                    onChange={(e) => setFastMode(e.target.checked)}
+                    aria-label="Agent fast mode"
+                  />
+                  Fast mode
+                </label>
+              )}
               <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
                 <Checkbox
                   checked={yoloMode}

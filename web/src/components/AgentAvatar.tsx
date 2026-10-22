@@ -51,6 +51,7 @@ export function agentKindColor(kind: string): string {
     return "bg-[oklch(0.6_0.2_145)]";
   if (kind === "claude" || kind === "claude-persistent")
     return "bg-[oklch(0.65_0.15_50)]";
+  if (kind === "pi") return "bg-[oklch(0.6_0.16_290)]";
   return "bg-primary";
 }
 

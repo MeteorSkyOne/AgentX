@@ -29,6 +29,7 @@ import (
 	"github.com/meteorsky/agentx/internal/runtime/codex"
 	"github.com/meteorsky/agentx/internal/runtime/codexpersist"
 	"github.com/meteorsky/agentx/internal/runtime/fake"
+	"github.com/meteorsky/agentx/internal/runtime/pi"
 	"github.com/meteorsky/agentx/internal/store"
 	sqlitestore "github.com/meteorsky/agentx/internal/store/sqlite"
 	"github.com/meteorsky/agentx/internal/version"
@@ -119,6 +120,15 @@ func main() {
 			Command:     cfg.CodexCommand,
 			IdleTimeout: time.Duration(cfg.CodexPersistentIdleMinutes) * time.Minute,
 		}),
+		domain.AgentKindPi: pi.New(pi.Options{
+			Command:            cfg.PiCommand,
+			IdleTimeout:        time.Duration(cfg.PiPersistentIdleMinutes) * time.Minute,
+			SessionDir:         cfg.PiSessionDir,
+			AppendSystemPrompt: cfg.PiAppendSystemText,
+			Tools:              cfg.PiTools,
+			ExcludeTools:       cfg.PiExcludeTools,
+			ProjectTrust:       cfg.PiProjectTrust,
+		}),
 	}
 	defer shutdownRuntimes(runtimes)
 
@@ -154,6 +164,7 @@ func main() {
 		ToolUpdates: app.ToolUpdateOptions{
 			CodexCommand:  cfg.CodexCommand,
 			ClaudeCommand: cfg.ClaudeCommand,
+			PiCommand:     cfg.PiCommand,
 		},
 		SelfUpdates: app.SelfUpdateOptions{
 			GitHubRepo: cfg.GitHubRepo,

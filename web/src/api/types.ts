@@ -189,10 +189,11 @@ export interface ToolUpdateSettings {
   timezone: string;
   claude_enabled: boolean;
   codex_enabled: boolean;
+  pi_enabled: boolean;
 }
 
 export interface ToolUpdateStatus {
-  tool: "claude" | "codex";
+  tool: "claude" | "codex" | "pi";
   display_name: string;
   command: string;
   current_version?: string;
@@ -248,7 +249,7 @@ export interface D2RenderResponse {
   cached: boolean;
 }
 
-export type MetricsProvider = "claude" | "codex" | "fake";
+export type MetricsProvider = "claude" | "codex" | "pi" | "fake";
 
 export interface AgentRunMetric {
   run_id: string;

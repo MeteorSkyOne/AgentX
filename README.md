@@ -58,7 +58,7 @@ Think of it as a chat workspace where every teammate is an agent: give each one 
 ### Operations
 
 - **Self-update.** Check for and install new AgentX releases from Settings, on demand or on a daily schedule. Choose the `release` or `dev` channel.
-- **Runtime updates.** Check for and install Claude Code and Codex CLI updates from Settings, optionally on a daily schedule.
+- **Runtime updates.** Check for and install Claude Code, Codex, and Pi CLI updates from Settings, optionally on a daily schedule.
 - **TLS.** Optional HTTPS with certificate and key paths managed from the UI or `config.toml`. A restart button reloads certificates without touching the shell.
 - **Auth.** Username and password login with 30-day hashed API sessions. First-run setup is protected by a one-time setup token.
 
@@ -71,6 +71,7 @@ Think of it as a chat workspace where every teammate is an agent: give each one 
 | `codex` | Ephemeral | `codex exec --json`, one process per turn |
 | `claude-persistent` | Persistent | Long-lived Claude Code process speaking stream-json over stdin/stdout, with a permission-prompt tool for interactive questions |
 | `codex-persistent` | Persistent | Long-lived `codex app-server` process speaking JSON-RPC 2.0 over stdio |
+| `pi` | Persistent | Long-lived [`pi --mode rpc`](https://pi.dev) process speaking JSONL over stdio; sessions are stored under `$AGENTX_DATA_DIR/pi-sessions` |
 
 Persistent processes are managed by a process pool with turn-based coordination, idle reaping (30 minutes by default), and graceful shutdown. The persistent kinds are recommended for day-to-day use.
 
@@ -82,6 +83,7 @@ Persistent processes are managed by a process pool with turn-based coordination,
 - For real agents, the CLI you want to use, installed and authenticated:
   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`)
   - [Codex CLI](https://github.com/openai/codex) (`codex`)
+  - [Pi](https://pi.dev) (`pi`); install [pi-subagents](https://pi.dev/packages/pi-subagents) with `pi install npm:pi-subagents` if you want pi agents to delegate to subagents
 - Optional: the [D2](https://d2lang.com) CLI if you want `d2` code blocks rendered as diagrams.
 
 You can start with the `fake` runtime and add real agents later.
@@ -145,7 +147,7 @@ AgentX is configured through environment variables and a small `config.toml`. En
 | `AGENTX_DATA_DIR` | `~/.agentx` | Directory for the SQLite database and `config.toml` |
 | `AGENTX_SQLITE_PATH` | `$AGENTX_DATA_DIR/agentx.db` | SQLite database file |
 | `AGENTX_ADMIN_TOKEN` | random | One-time setup token used to create the first admin |
-| `AGENTX_DEFAULT_AGENT_KIND` | `fake` | Default runtime for new agents: `fake`, `claude`, `codex`, `claude-persistent`, `codex-persistent` |
+| `AGENTX_DEFAULT_AGENT_KIND` | `fake` | Default runtime for new agents: `fake`, `claude`, `codex`, `claude-persistent`, `codex-persistent`, `pi` |
 | `AGENTX_DEFAULT_AGENT_MODEL` | | Default model for new agents |
 | `AGENTX_GITHUB_REPO` | `MeteorSkyOne/AgentX` | Repository used for self-update checks |
 | `AGENTX_SELF_UPDATE_CHANNEL` | `release` | Self-update channel: `release` or `dev` |
@@ -161,6 +163,13 @@ AgentX is configured through environment variables and a small `config.toml`. En
 | `AGENTX_CODEX_BYPASS_SANDBOX` | `false` | Bypass the Codex sandbox |
 | `AGENTX_CODEX_SKIP_GIT_REPO_CHECK` | `true` | Skip the Codex git repository check |
 | `AGENTX_CODEX_PERSISTENT_IDLE_MINUTES` | `30` | Idle timeout before a persistent Codex process is stopped |
+| `AGENTX_PI_COMMAND` | `pi` | Pi CLI binary |
+| `AGENTX_PI_PERSISTENT_IDLE_MINUTES` | `30` | Idle timeout before a pi process is stopped |
+| `AGENTX_PI_SESSION_DIR` | `$AGENTX_DATA_DIR/pi-sessions` | Where pi stores its session files (`--session-dir`) |
+| `AGENTX_PI_APPEND_SYSTEM_PROMPT` | | Text appended to the system prompt of every pi session |
+| `AGENTX_PI_TOOLS` | | Comma-separated pi tool allowlist (`--tools`) |
+| `AGENTX_PI_EXCLUDE_TOOLS` | | Comma-separated pi tools to disable (`--exclude-tools`) |
+| `AGENTX_PI_PROJECT_TRUST` | `approve` | `approve` trusts project-local pi config and extensions, `no-approve` ignores them, empty leaves it to pi's settings |
 | `AGENTX_TERMINAL_SHELL` | `$SHELL` | Shell used for workspace terminals |
 | `AGENTX_TERMINAL_IDLE_MINUTES` | `30` | Idle timeout for workspace terminals |
 | `AGENTX_TERMINAL_MAX_SESSIONS_PER_WORKSPACE` | `8` | Maximum concurrent terminals per workspace |

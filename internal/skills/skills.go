@@ -121,6 +121,17 @@ func Roots(opts DiscoverOptions) ([]string, error) {
 		for _, root := range pluginSkillRoots {
 			addRoot(root)
 		}
+	case domain.AgentKindPi:
+		// pi reads <dir>/.pi/skills and the Agent Skills locations
+		// (.agents/skills, ~/.agents/skills) plus ~/.pi/agent/skills.
+		addWorkspaceRoots(opts.ConfigWorkspace, ".pi", ".agents")
+		addWorkspaceRoots(opts.RunWorkspace, ".pi", ".agents")
+		piAgentDir := strings.TrimSpace(envValue(opts, "PI_CODING_AGENT_DIR"))
+		if piAgentDir == "" {
+			piAgentDir = filepath.Join(homeDir, ".pi", "agent")
+		}
+		addRoot(filepath.Join(piAgentDir, "skills"))
+		addRoot(filepath.Join(homeDir, ".agents", "skills"))
 	case domain.AgentKindCodex:
 		addWorkspaceRoots(opts.ConfigWorkspace, ".codex", ".claude")
 		addWorkspaceRoots(opts.RunWorkspace, ".codex", ".claude")

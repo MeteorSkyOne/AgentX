@@ -240,7 +240,7 @@ func (a *App) SteerQueuedPrompt(ctx context.Context, conversationType domain.Con
 		}
 	}()
 
-	if item.Target.Agent.Kind != domain.AgentKindCodexPersistent || len(item.Message.Attachments) > 0 {
+	if len(item.Message.Attachments) > 0 {
 		return ErrQueuedPromptNotSteerable
 	}
 	steerer := a.activeSteererForKey(activeRunKeyFromMessageQueueKey(item.Key))
@@ -401,7 +401,7 @@ func (a *App) agentPromptQueuedPayload(item *queuedAgentPrompt) domain.AgentProm
 }
 
 func (a *App) queuedPromptCanSteer(item *queuedAgentPrompt) bool {
-	if item.Target.Agent.Kind != domain.AgentKindCodexPersistent || len(item.Message.Attachments) > 0 {
+	if len(item.Message.Attachments) > 0 {
 		return false
 	}
 	steerer := a.activeSteererForKey(activeRunKeyFromMessageQueueKey(item.Key))

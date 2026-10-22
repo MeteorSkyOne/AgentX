@@ -3,7 +3,14 @@ import { Bot, Trash2 } from "lucide-react";
 import type { Channel, NotificationSettings, Organization, Project, SelfUpdateOverview, SelfUpdateSettings, ServerSettings, ToolUpdateOverview, User, UserPreferences, Workspace } from "@/api/types";
 import { cn } from "@/lib/utils";
 import { AVATAR_COLORS, agentKindColor } from "../AgentAvatar";
-import { agentKindFromProviderPersistent, agentPersistentFromKind, agentProviderFromKind } from "./utils";
+import {
+  agentEffortOptions,
+  agentKindFromProviderPersistent,
+  agentKindSupportsFastMode,
+  agentPersistentFromKind,
+  agentProviderFromKind,
+  agentProviderHasPersistentToggle,
+} from "./utils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -13,7 +20,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { BrowserNotificationPermission } from "@/notifications/browser";
 import { AccountSettingsDialog } from "./AccountSettingsDialog";
-import { AGENT_EFFORT_OPTIONS, AGENT_RUNTIME_OPTIONS, initials } from "./utils";
+import { AGENT_RUNTIME_OPTIONS, initials } from "./utils";
 
 type StringSetter = Dispatch<SetStateAction<string>>;
 type BooleanSetter = Dispatch<SetStateAction<boolean>>;
@@ -106,6 +113,8 @@ export interface ShellDialogsProps {
   setToolClaudeEnabled: BooleanSetter;
   toolCodexEnabled: boolean;
   setToolCodexEnabled: BooleanSetter;
+  toolPiEnabled: boolean;
+  setToolPiEnabled: BooleanSetter;
   toolSettingsPending: boolean;
   toolActionStatus: string | null;
   toolActionError: string | null;
@@ -279,6 +288,8 @@ export function ShellDialogs({
   setToolClaudeEnabled,
   toolCodexEnabled,
   setToolCodexEnabled,
+  toolPiEnabled,
+  setToolPiEnabled,
   toolSettingsPending,
   toolActionStatus,
   toolActionError,
@@ -370,7 +381,7 @@ export function ShellDialogs({
   }, [agentDraftOpen]);
 
   useEffect(() => {
-    if (agentProviderFromKind(newAgentKind) !== "fake") {
+    if (agentProviderHasPersistentToggle(agentProviderFromKind(newAgentKind))) {
       setNewAgentPersistentDraft(agentPersistentFromKind(newAgentKind));
     }
   }, [newAgentKind]);
@@ -464,6 +475,8 @@ export function ShellDialogs({
               setToolClaudeEnabled={setToolClaudeEnabled}
               toolCodexEnabled={toolCodexEnabled}
               setToolCodexEnabled={setToolCodexEnabled}
+              toolPiEnabled={toolPiEnabled}
+              setToolPiEnabled={setToolPiEnabled}
               toolSettingsPending={toolSettingsPending}
               toolActionStatus={toolActionStatus}
               toolActionError={toolActionError}
@@ -878,13 +891,13 @@ export function ShellDialogs({
                         autoComplete="off"
                       />
                       <datalist id="new-agent-effort-suggestions">
-                        {AGENT_EFFORT_OPTIONS.map((option) => (
+                        {agentEffortOptions(newAgentKind).map((option) => (
                           <option key={option} value={option} />
                         ))}
                       </datalist>
                     </div>
                   </div>
-                  {agentProviderFromKind(newAgentKind) !== "fake" && (
+                  {agentProviderHasPersistentToggle(agentProviderFromKind(newAgentKind)) && (
                     <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
                       <Checkbox
                         checked={newAgentPersistentDraft}
@@ -897,14 +910,16 @@ export function ShellDialogs({
                       Persistent process
                     </label>
                   )}
-                  <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
-                    <Checkbox
-                      checked={newAgentFastMode}
-                      onChange={(e) => setNewAgentFastMode(e.target.checked)}
-                      aria-label="New agent fast mode"
-                    />
-                    Fast mode
-                  </label>
+                  {agentKindSupportsFastMode(newAgentKind) && (
+                    <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
+                      <Checkbox
+                        checked={newAgentFastMode}
+                        onChange={(e) => setNewAgentFastMode(e.target.checked)}
+                        aria-label="New agent fast mode"
+                      />
+                      Fast mode
+                    </label>
+                  )}
                   <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm transition-colors hover:bg-accent/60">
                     <Checkbox
                       checked={newAgentYoloMode}

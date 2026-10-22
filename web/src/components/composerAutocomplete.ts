@@ -24,7 +24,7 @@ export interface CommandIndicator {
 export const builtinSlashCommands: SlashCommandDefinition[] = [
   { kind: "command", name: "new", description: "Start fresh context" },
   { kind: "command", name: "skills", description: "List available skills" },
-  { kind: "command", name: "compact", description: "Compact Claude context" },
+  { kind: "command", name: "compact", description: "Compact the agent context" },
   { kind: "command", name: "goal", description: "Set an autonomous goal" },
   { kind: "command", name: "status", description: "Show runtime status" },
   { kind: "command", name: "plan", description: "Ask for an implementation plan" },

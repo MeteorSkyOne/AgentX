@@ -65,6 +65,8 @@ interface AccountSettingsDialogProps {
   setToolClaudeEnabled: BooleanSetter;
   toolCodexEnabled: boolean;
   setToolCodexEnabled: BooleanSetter;
+  toolPiEnabled: boolean;
+  setToolPiEnabled: BooleanSetter;
   toolSettingsPending: boolean;
   toolActionStatus: string | null;
   toolActionError: string | null;
@@ -164,6 +166,8 @@ export function AccountSettingsDialog({
   setToolClaudeEnabled,
   toolCodexEnabled,
   setToolCodexEnabled,
+  toolPiEnabled,
+  setToolPiEnabled,
   toolSettingsPending,
   toolActionStatus,
   toolActionError,
@@ -619,6 +623,15 @@ export function AccountSettingsDialog({
                           aria-label="Update Codex"
                         />
                         Codex
+                      </label>
+                      <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm">
+                        <Checkbox
+                          checked={toolPiEnabled}
+                          onChange={(event) => setToolPiEnabled(event.currentTarget.checked)}
+                          disabled={toolUpdatesLoading || toolSettingsPending}
+                          aria-label="Update Pi"
+                        />
+                        Pi
                       </label>
                     </div>
                     {toolUpdates?.tools.map((tool) => (

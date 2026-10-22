@@ -49,14 +49,17 @@ cmd/agentx/main.go (bootstrap)
 
 **Forum post members**: In a forum channel (`ChannelTypeThread`), mentioning `@agent` in the post body scopes the new post to the mentioned agents — they become its only members (`thread_agents` table), and other channel agents have to be added afterwards from the Members panel (`GET`/`PUT /api/threads/{threadID}/agents`). A post with no mention stores no membership rows and inherits every agent bound to its channel. Scheduled `forum_post` tasks apply the same rule via their `agent_id` or prompt mentions. `App.conversationAgents` enforces membership for every thread conversation, so replies, team runs, and notifications all follow it.
 
-**Agent runtimes**: Five runtime kinds are supported:
+**Agent runtimes**: Six runtime kinds are supported:
 - `fake` — echo agent for testing
 - `claude` — ephemeral Claude Code CLI sessions (`claude --print --output-format stream-json`)
 - `codex` — ephemeral Codex CLI sessions (`codex exec --json`)
 - `claude-persistent` — long-lived Claude Code process with stream-json stdin/stdout protocol and permission-prompt-tool stdio for interactive tool calls
 - `codex-persistent` — long-lived Codex app-server process with JSON-RPC 2.0 protocol (`codex app-server --listen stdio://`)
+- `pi` — long-lived [pi](https://pi.dev) process in RPC mode (`pi --mode rpc --session-dir … --session-id …`), JSONL commands/events over stdio. Always persistent; there is no ephemeral variant.
 
-**Persistent runtimes**: `claudepersist/` and `codexpersist/` keep agent processes alive across conversation turns via `procpool.ProcessPool`. Each pool manages `ManagedProcess` instances with turn-based mutex coordination (`AcquireTurn`/`ReleaseTurn`), idle reaping (default 30 min), and graceful shutdown. Sessions are keyed by `agentID:conversationType:conversationID`.
+**Persistent runtimes**: `claudepersist/`, `codexpersist/` and `pi/` keep agent processes alive across conversation turns via `procpool.ProcessPool`. Each pool manages `ManagedProcess` instances with turn-based mutex coordination (`AcquireTurn`/`ReleaseTurn`), idle reaping (default 30 min), and graceful shutdown. Sessions are keyed by `agentID:conversationType:conversationID`.
+
+**pi runtime** (`internal/runtime/pi/`): the pi session id is the provider session id; `--session-id` creates or resumes it, so there are no stale sessions, and `/new` (empty `PreviousSessionID` on a live process) sends `new_session`. Each turn first reconciles the agent's `model`/`effort` with `get_state` (`set_model`, `set_thinking_level`, effort = pi thinking level `off…max`), then sends `prompt` (images as base64 `ImageContent`) and completes only on `agent_settled` (`agent_end` can be followed by retries/queued work). Assistant text streamed before a tool call is promoted into a `thinking` process item with `ClearText`, like the Claude runtime. `/compact` maps to pi's `compact` command, `/cancel` to `abort`, steering to `steer`; usage sums every assistant `message_end` and `get_session_stats` supplies the context window. pi has no permission prompts, plan mode, goal, fast mode or built-in subagents: `fast_mode`/`yolo_mode` are no-ops and `/goal` is refused. The `subagent` tool from the third-party pi-subagents package is rendered as a subagent (`subagent_started`/`subagent_completed`, child tools from `tool_execution_update` progress); AgentX passes `--exclude-tools subagents_enable` so it is active from the first turn. pi's extension UI requests (`select`/`confirm`/`input`/`editor`) become `EventInputRequest`s answered with `extension_ui_response`; `notify` becomes a process note.
 
 **Interactive tool calls**: When agents invoke AskUserQuestion (Claude) or requestUserInput (Codex), the runtime emits `EventInputRequest`. The app layer registers a pending question, publishes it via WebSocket, and blocks the session goroutine. The frontend renders a QuestionPrompt with option buttons and a text input. The user's answer is routed back through `POST /api/conversations/{type}/{id}/input-response` → `App.RespondToInputRequest` → `Session.RespondToInputRequest` channel → subprocess stdin. For Claude, the response is a `control_response` with `updatedInput` containing the answers. For Codex, it's a JSON-RPC result with the answers structure.
 
@@ -81,7 +84,7 @@ cmd/agentx/main.go (bootstrap)
 | `AGENTX_ADDR` | 127.0.0.1:8080 | Server bind address; overrides `config.toml` |
 | `AGENTX_ADMIN_TOKEN` | random | First-run setup token; `dev-token` in dev mode |
 | `AGENTX_DATA_DIR` | ~/.agentx | SQLite storage and `config.toml` location |
-| `AGENTX_DEFAULT_AGENT_KIND` | fake | `fake`, `claude`, `codex`, `claude-persistent`, `codex-persistent` |
+| `AGENTX_DEFAULT_AGENT_KIND` | fake | `fake`, `claude`, `codex`, `claude-persistent`, `codex-persistent`, `pi` |
 | `AGENTX_DEFAULT_AGENT_MODEL` | | Default model for new agents |
 | `AGENTX_CLAUDE_COMMAND` | claude | Path to Claude CLI |
 | `AGENTX_CLAUDE_PERMISSION_MODE` | acceptEdits | `acceptEdits`, `bypassPermissions`, or `plan` |
@@ -95,6 +98,13 @@ cmd/agentx/main.go (bootstrap)
 | `AGENTX_CODEX_BYPASS_SANDBOX` | false | Bypass Codex sandbox |
 | `AGENTX_CODEX_SKIP_GIT_REPO_CHECK` | true | Skip git repo validation |
 | `AGENTX_CODEX_PERSISTENT_IDLE_MINUTES` | 30 | Idle timeout for persistent Codex processes |
+| `AGENTX_PI_COMMAND` | pi | Path to pi CLI |
+| `AGENTX_PI_PERSISTENT_IDLE_MINUTES` | 30 | Idle timeout for pi processes |
+| `AGENTX_PI_SESSION_DIR` | `$AGENTX_DATA_DIR/pi-sessions` | pi `--session-dir` |
+| `AGENTX_PI_APPEND_SYSTEM_PROMPT` | | System prompt appended to all pi sessions |
+| `AGENTX_PI_TOOLS` | | Comma-separated pi tool allowlist |
+| `AGENTX_PI_EXCLUDE_TOOLS` | | Comma-separated pi tools to disable |
+| `AGENTX_PI_PROJECT_TRUST` | approve | `approve`, `no-approve`, or empty (pi decides) |
 | `AGENTX_D2_COMMAND` | d2 | D2 CLI binary used for Markdown `d2` diagrams |
 | `AGENTX_D2_TIMEOUT_SECONDS` | 10 | Per-render D2 CLI timeout |
 | `AGENTX_D2_CACHE_TTL_MINUTES` | 1440 | D2 SVG cache TTL |

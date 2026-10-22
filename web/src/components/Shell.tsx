@@ -201,6 +201,7 @@ export function Shell({
   const [toolTimezone, setToolTimezone] = useState("Local");
   const [toolClaudeEnabled, setToolClaudeEnabled] = useState(true);
   const [toolCodexEnabled, setToolCodexEnabled] = useState(true);
+  const [toolPiEnabled, setToolPiEnabled] = useState(true);
   const [toolSettingsPending, setToolSettingsPending] = useState(false);
   const [toolActionStatus, setToolActionStatus] = useState<string | null>(null);
   const [toolActionError, setToolActionError] = useState<string | null>(null);
@@ -515,6 +516,7 @@ export function Shell({
     setToolTimezone(settings?.timezone ?? "Local");
     setToolClaudeEnabled(settings?.claude_enabled ?? true);
     setToolCodexEnabled(settings?.codex_enabled ?? true);
+    setToolPiEnabled(settings?.pi_enabled ?? true);
     setToolActionError(null);
     setToolActionStatus(null);
   }
@@ -650,6 +652,7 @@ export function Shell({
         timezone: toolTimezone.trim() || "Local",
         claude_enabled: toolClaudeEnabled,
         codex_enabled: toolCodexEnabled,
+        pi_enabled: toolPiEnabled,
       });
       setToolActionStatus("Saved");
     } catch (err) {
@@ -1182,6 +1185,8 @@ export function Shell({
         setToolClaudeEnabled={setToolClaudeEnabled}
         toolCodexEnabled={toolCodexEnabled}
         setToolCodexEnabled={setToolCodexEnabled}
+        toolPiEnabled={toolPiEnabled}
+        setToolPiEnabled={setToolPiEnabled}
         toolSettingsPending={toolSettingsPending}
         toolActionStatus={toolActionStatus}
         toolActionError={toolActionError}

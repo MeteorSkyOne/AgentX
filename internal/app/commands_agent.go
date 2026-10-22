@@ -10,7 +10,7 @@ import (
 )
 
 func (a *App) handleCompactCommand(ctx context.Context, req SendMessageRequest, target ConversationAgentContext, args string) (domain.Message, error) {
-	if target.Agent.Kind != domain.AgentKindClaude {
+	if !supportsCompactCommand(target.Agent.Kind) {
 		return a.createSystemMessage(ctx, req, fmt.Sprintf("/compact is not supported for @%s. Use /new to start a fresh context.", target.Agent.Handle))
 	}
 	prompt := "/compact"
@@ -24,7 +24,7 @@ func (a *App) handleCompactCommand(ctx context.Context, req SendMessageRequest, 
 }
 
 func (a *App) handleGoalCommand(ctx context.Context, req SendMessageRequest, target ConversationAgentContext, args string) (domain.Message, error) {
-	if target.Agent.Kind == domain.AgentKindFake {
+	if target.Agent.Kind == domain.AgentKindFake || target.Agent.Kind == domain.AgentKindPi {
 		return a.createSystemMessage(ctx, req, fmt.Sprintf("/goal is not supported for @%s.", target.Agent.Handle))
 	}
 	args = strings.TrimSpace(args)
@@ -57,4 +57,11 @@ func (a *App) handleEffortCommand(ctx context.Context, req SendMessageRequest, t
 		return domain.Message{}, err
 	}
 	return a.createSystemMessage(ctx, req, fmt.Sprintf("Updated @%s effort to %s.", updated.Handle, updated.Effort))
+}
+
+// supportsCompactCommand reports whether the runtime behind an agent kind
+// compacts its own context when sent the /compact prompt: the Claude CLI handles
+// it as a slash command and the pi runtime maps it to pi's compact RPC.
+func supportsCompactCommand(kind string) bool {
+	return kind == domain.AgentKindClaude || kind == domain.AgentKindPi
 }

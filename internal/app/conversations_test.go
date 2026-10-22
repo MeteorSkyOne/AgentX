@@ -3190,7 +3190,9 @@ func TestSendMessageQueuesPromptWhileAgentRunActive(t *testing.T) {
 	}
 
 	queued := requirePromptQueuedEvent(t, events)
-	if queued.MessageID == "" || queued.AgentID != bootstrap.Agent.ID || queued.Body != "second" || queued.CanSteer {
+	// Steering is offered whenever the active session implements Steer, which
+	// the manual queue session does regardless of the agent kind.
+	if queued.MessageID == "" || queued.AgentID != bootstrap.Agent.ID || queued.Body != "second" || !queued.CanSteer {
 		t.Fatalf("queued payload = %#v", queued)
 	}
 	replays := app.PromptQueueReplayEvents(bootstrap.Organization.ID, domain.ConversationChannel, bootstrap.Channel.ID)

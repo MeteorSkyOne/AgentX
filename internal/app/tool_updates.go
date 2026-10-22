@@ -22,6 +22,7 @@ import (
 const (
 	toolUpdateProviderClaude = "claude"
 	toolUpdateProviderCodex  = "codex"
+	toolUpdateProviderPi     = "pi"
 	toolUpdateAll            = "all"
 	toolUpdateOutputLimit    = 16 * 1024
 	toolUpdateCheckTimeout   = 2 * time.Minute
@@ -33,6 +34,7 @@ type ToolUpdateOptions struct {
 	Settings      config.ToolUpdateSettings
 	ClaudeCommand string
 	CodexCommand  string
+	PiCommand     string
 	Exec          toolUpdateExecFunc
 	Now           func() time.Time
 }
@@ -73,6 +75,7 @@ type toolUpdateService struct {
 
 	claudeCommand string
 	codexCommand  string
+	piCommand     string
 	exec          toolUpdateExecFunc
 	now           func() time.Time
 	waitInterval  time.Duration
@@ -103,6 +106,10 @@ func newToolUpdateService(_ store.Store, dataDir string, runtimes map[string]age
 	if codexCommand == "" {
 		codexCommand = "codex"
 	}
+	piCommand := strings.TrimSpace(opts.PiCommand)
+	if piCommand == "" {
+		piCommand = "pi"
+	}
 	execFn := opts.Exec
 	if execFn == nil {
 		execFn = defaultToolUpdateExec
@@ -123,12 +130,14 @@ func newToolUpdateService(_ store.Store, dataDir string, runtimes map[string]age
 		settings:      settings,
 		claudeCommand: claudeCommand,
 		codexCommand:  codexCommand,
+		piCommand:     piCommand,
 		exec:          execFn,
 		now:           now,
 		waitInterval:  toolUpdateWaitInterval,
 		states: map[string]*toolUpdateState{
 			toolUpdateProviderClaude: {State: "idle"},
 			toolUpdateProviderCodex:  {State: "idle"},
+			toolUpdateProviderPi:     {State: "idle"},
 		},
 	}
 }
@@ -565,6 +574,8 @@ func (s *toolUpdateService) providerEnabled(provider string) bool {
 		return s.settings.ClaudeEnabled
 	case toolUpdateProviderCodex:
 		return s.settings.CodexEnabled
+	case toolUpdateProviderPi:
+		return s.settings.PiEnabled
 	default:
 		return false
 	}
@@ -576,6 +587,8 @@ func (s *toolUpdateService) commandForProvider(provider string) string {
 		return s.claudeCommand
 	case toolUpdateProviderCodex:
 		return s.codexCommand
+	case toolUpdateProviderPi:
+		return s.piCommand
 	default:
 		return ""
 	}
@@ -629,6 +642,8 @@ func (a *App) resetProviderRuntime(ctx context.Context, provider string) error {
 		kinds = []string{domain.AgentKindClaudePersistent}
 	case toolUpdateProviderCodex:
 		kinds = []string{domain.AgentKindCodexPersistent}
+	case toolUpdateProviderPi:
+		kinds = []string{domain.AgentKindPi}
 	default:
 		return nil
 	}
@@ -685,6 +700,8 @@ func agentProvider(kind string) string {
 		return toolUpdateProviderClaude
 	case domain.AgentKindCodex, domain.AgentKindCodexPersistent:
 		return toolUpdateProviderCodex
+	case domain.AgentKindPi:
+		return toolUpdateProviderPi
 	default:
 		return ""
 	}
@@ -693,28 +710,38 @@ func agentProvider(kind string) string {
 func requestedToolProviders(tool string) []string {
 	switch strings.TrimSpace(tool) {
 	case "", toolUpdateAll:
-		return []string{toolUpdateProviderClaude, toolUpdateProviderCodex}
+		return []string{toolUpdateProviderClaude, toolUpdateProviderCodex, toolUpdateProviderPi}
 	case toolUpdateProviderClaude:
 		return []string{toolUpdateProviderClaude}
 	case toolUpdateProviderCodex:
 		return []string{toolUpdateProviderCodex}
+	case toolUpdateProviderPi:
+		return []string{toolUpdateProviderPi}
 	default:
 		return nil
 	}
 }
 
 func toolUpdatePackage(provider string) string {
-	if provider == toolUpdateProviderClaude {
+	switch provider {
+	case toolUpdateProviderClaude:
 		return "@anthropic-ai/claude-code"
+	case toolUpdateProviderPi:
+		return "@earendil-works/pi-coding-agent"
+	default:
+		return "@openai/codex"
 	}
-	return "@openai/codex"
 }
 
 func toolUpdateDisplayName(provider string) string {
-	if provider == toolUpdateProviderClaude {
+	switch provider {
+	case toolUpdateProviderClaude:
 		return "Claude Code"
+	case toolUpdateProviderPi:
+		return "Pi"
+	default:
+		return "Codex"
 	}
-	return "Codex"
 }
 
 var toolVersionPattern = regexp.MustCompile(`\d+(?:\.\d+)+(?:[-+][A-Za-z0-9.-]+)?`)

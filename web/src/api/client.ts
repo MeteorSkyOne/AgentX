@@ -292,7 +292,7 @@ export function updateToolUpdateSettings(
 
 export function checkToolUpdates(
   orgID: string,
-  tool: "claude" | "codex" | "all"
+  tool: "claude" | "codex" | "pi" | "all"
 ): Promise<ToolUpdateOverview> {
   return request<ToolUpdateOverview>(
     `/api/organizations/${encodeURIComponent(orgID)}/tool-updates/check`,
@@ -305,7 +305,7 @@ export function checkToolUpdates(
 
 export function runToolUpdate(
   orgID: string,
-  tool: "claude" | "codex" | "all"
+  tool: "claude" | "codex" | "pi" | "all"
 ): Promise<ToolUpdateOverview> {
   return request<ToolUpdateOverview>(
     `/api/organizations/${encodeURIComponent(orgID)}/tool-updates/update`,

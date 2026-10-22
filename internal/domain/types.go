@@ -39,6 +39,7 @@ const (
 	AgentKindClaude           = "claude"
 	AgentKindClaudePersistent = "claude-persistent"
 	AgentKindCodexPersistent  = "codex-persistent"
+	AgentKindPi               = "pi"
 )
 
 type ChannelType string

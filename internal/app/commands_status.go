@@ -52,7 +52,7 @@ func (a *App) handleStatusCommand(ctx context.Context, req SendMessageRequest, t
 }
 
 func (a *App) probeStatusContextUsage(ctx context.Context, req SendMessageRequest, target ConversationAgentContext) (*domain.ContextUsage, error) {
-	if !isClaudeAgentKind(target.Agent.Kind) {
+	if !supportsContextProbe(target.Agent.Kind) {
 		return nil, nil
 	}
 	rt, ok := a.runtimeForAgent(target.Agent)
@@ -95,6 +95,10 @@ func (a *App) probeStatusContextUsage(ctx context.Context, req SendMessageReques
 		if err != nil || usage != nil {
 			return contextUsageToDomain(usage), err
 		}
+	}
+	if !isClaudeAgentKind(target.Agent.Kind) {
+		// Only the Claude CLI answers a /context prompt with a parsable report.
+		return nil, nil
 	}
 
 	if err := session.Send(probeCtx, agentruntime.Input{Prompt: "/context"}); err != nil {
@@ -143,6 +147,13 @@ func (a *App) probeStatusContextUsage(ctx context.Context, req SendMessageReques
 
 func isClaudeAgentKind(kind string) bool {
 	return kind == domain.AgentKindClaude || kind == domain.AgentKindClaudePersistent
+}
+
+// supportsContextProbe reports whether /status can ask the runtime for the
+// live context-window usage: Claude via its context report, pi via
+// get_session_stats.
+func supportsContextProbe(kind string) bool {
+	return isClaudeAgentKind(kind) || kind == domain.AgentKindPi
 }
 
 func (a *App) statusContextUsage(ctx context.Context, agentID string, conversationType domain.ConversationType, conversationID string) (*domain.ContextUsage, *time.Time, error) {

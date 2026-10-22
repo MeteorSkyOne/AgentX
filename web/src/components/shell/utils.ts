@@ -4,26 +4,48 @@ import type { SocketConnectionStatus } from "../../ws/useConversationSocket";
 
 export const AGENT_EFFORT_OPTIONS = ["low", "medium", "high", "xhigh"] as const;
 
+/** pi exposes its reasoning levels as thinking levels, from off to max. */
+export const PI_EFFORT_OPTIONS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
 export const AGENT_RUNTIME_OPTIONS = [
   { value: "fake", label: "Fake" },
   { value: "claude", label: "Claude Code" },
   { value: "codex", label: "Codex" },
+  { value: "pi", label: "Pi" },
 ] as const;
 
-export function agentProviderFromKind(kind: string): "fake" | "claude" | "codex" {
+export type AgentProvider = "fake" | "claude" | "codex" | "pi";
+
+export function agentProviderFromKind(kind: string): AgentProvider {
   if (kind === "claude" || kind === "claude-persistent") return "claude";
   if (kind === "codex" || kind === "codex-persistent") return "codex";
+  if (kind === "pi") return "pi";
   return "fake";
 }
 
 export function agentPersistentFromKind(kind: string): boolean {
-  return kind === "claude-persistent" || kind === "codex-persistent";
+  return kind === "claude-persistent" || kind === "codex-persistent" || kind === "pi";
 }
 
 export function agentKindFromProviderPersistent(provider: string, persistent: boolean): string {
   if (provider === "claude") return persistent ? "claude-persistent" : "claude";
   if (provider === "codex") return persistent ? "codex-persistent" : "codex";
+  if (provider === "pi") return "pi";
   return "fake";
+}
+
+/** Whether the provider offers both an ephemeral and a persistent runtime kind. */
+export function agentProviderHasPersistentToggle(provider: string): boolean {
+  return provider === "claude" || provider === "codex";
+}
+
+/** Whether the runtime has a fast-mode switch (pi has none). */
+export function agentKindSupportsFastMode(kind: string): boolean {
+  return agentProviderFromKind(kind) !== "pi";
+}
+
+export function agentEffortOptions(kind: string): readonly string[] {
+  return agentProviderFromKind(kind) === "pi" ? PI_EFFORT_OPTIONS : AGENT_EFFORT_OPTIONS;
 }
 
 export function runWorkspaceOptions(
@@ -177,6 +199,7 @@ export function agentToneColor(kind: string): string {
     return "text-[oklch(0.7_0.2_145)]";
   if (kind === "claude" || kind === "claude-persistent")
     return "text-[oklch(0.75_0.15_50)]";
+  if (kind === "pi") return "text-[oklch(0.72_0.16_290)]";
   return "text-muted-foreground";
 }
 
@@ -186,6 +209,7 @@ export function agentKindLabel(kind: string): string {
     case "codex-persistent": return "Codex (persistent)";
     case "claude": return "Claude Code";
     case "claude-persistent": return "Claude Code (persistent)";
+    case "pi": return "Pi";
     case "fake": return "Fake runtime";
     default: return kind || "Agent";
   }

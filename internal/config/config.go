@@ -49,6 +49,13 @@ type Config struct {
 	ClaudeThinkingDisplay       string
 	ClaudePersistentIdleMinutes int
 	CodexPersistentIdleMinutes  int
+	PiCommand                   string
+	PiPersistentIdleMinutes     int
+	PiSessionDir                string
+	PiAppendSystemText          string
+	PiTools                     []string
+	PiExcludeTools              []string
+	PiProjectTrust              string
 	D2Command                   string
 	D2TimeoutSeconds            int
 	D2CacheTTLMinutes           int
@@ -79,6 +86,7 @@ type ToolUpdateSettings struct {
 	Timezone      string `json:"timezone" toml:"timezone"`
 	ClaudeEnabled bool   `json:"claude_enabled" toml:"claude_enabled"`
 	CodexEnabled  bool   `json:"codex_enabled" toml:"codex_enabled"`
+	PiEnabled     bool   `json:"pi_enabled" toml:"pi_enabled"`
 }
 
 type SelfUpdateSettings struct {
@@ -158,6 +166,13 @@ func FromEnv() Config {
 		ClaudeThinkingDisplay:       getenv("AGENTX_CLAUDE_THINKING_DISPLAY", "summarized"),
 		ClaudePersistentIdleMinutes: getenvInt("AGENTX_CLAUDE_PERSISTENT_IDLE_MINUTES", 30),
 		CodexPersistentIdleMinutes:  getenvInt("AGENTX_CODEX_PERSISTENT_IDLE_MINUTES", 30),
+		PiCommand:                   getenv("AGENTX_PI_COMMAND", "pi"),
+		PiPersistentIdleMinutes:     getenvInt("AGENTX_PI_PERSISTENT_IDLE_MINUTES", 30),
+		PiSessionDir:                getenv("AGENTX_PI_SESSION_DIR", filepath.Join(dataDir, "pi-sessions")),
+		PiAppendSystemText:          getenv("AGENTX_PI_APPEND_SYSTEM_PROMPT", ""),
+		PiTools:                     getenvList("AGENTX_PI_TOOLS"),
+		PiExcludeTools:              getenvList("AGENTX_PI_EXCLUDE_TOOLS"),
+		PiProjectTrust:              getenv("AGENTX_PI_PROJECT_TRUST", "approve"),
 		D2Command:                   getenv("AGENTX_D2_COMMAND", "d2"),
 		D2TimeoutSeconds:            getenvInt("AGENTX_D2_TIMEOUT_SECONDS", 10),
 		D2CacheTTLMinutes:           getenvInt("AGENTX_D2_CACHE_TTL_MINUTES", 1440),
@@ -311,6 +326,7 @@ func DefaultToolUpdateSettings() ToolUpdateSettings {
 		Timezone:      defaultToolUpdateTimezone(),
 		ClaudeEnabled: true,
 		CodexEnabled:  true,
+		PiEnabled:     true,
 	}
 }
 
@@ -337,7 +353,8 @@ func isZeroToolUpdateSettings(settings ToolUpdateSettings) bool {
 		strings.TrimSpace(settings.Timezone) == "" &&
 		!settings.AutoEnabled &&
 		!settings.ClaudeEnabled &&
-		!settings.CodexEnabled
+		!settings.CodexEnabled &&
+		!settings.PiEnabled
 }
 
 func isZeroSelfUpdateSettings(settings SelfUpdateSettings) bool {
@@ -392,7 +409,7 @@ func NormalizeServerSettings(settings ServerSettings, path string) (ServerSettin
 }
 
 func NormalizeToolUpdateSettings(settings ToolUpdateSettings, path string) (ToolUpdateSettings, error) {
-	if strings.TrimSpace(settings.TimeOfDay) == "" && strings.TrimSpace(settings.Timezone) == "" && !settings.AutoEnabled && !settings.ClaudeEnabled && !settings.CodexEnabled {
+	if strings.TrimSpace(settings.TimeOfDay) == "" && strings.TrimSpace(settings.Timezone) == "" && !settings.AutoEnabled && !settings.ClaudeEnabled && !settings.CodexEnabled && !settings.PiEnabled {
 		return DefaultToolUpdateSettings(), nil
 	}
 	if strings.TrimSpace(settings.TimeOfDay) == "" {
@@ -554,13 +571,14 @@ time_of_day = %q
 timezone = %q
 claude_enabled = %t
 codex_enabled = %t
+pi_enabled = %t
 
 [self_update]
 auto_enabled = %t
 time_of_day = %q
 timezone = %q
 channel = %q
-`, settings.ListenIP, settings.ListenPort, settings.TLS.Enabled, settings.TLS.ListenPort, settings.TLS.CertFile, settings.TLS.KeyFile, toolUpdates.AutoEnabled, toolUpdates.TimeOfDay, toolUpdates.Timezone, toolUpdates.ClaudeEnabled, toolUpdates.CodexEnabled, selfUpdates.AutoEnabled, selfUpdates.TimeOfDay, selfUpdates.Timezone, selfUpdates.Channel)
+`, settings.ListenIP, settings.ListenPort, settings.TLS.Enabled, settings.TLS.ListenPort, settings.TLS.CertFile, settings.TLS.KeyFile, toolUpdates.AutoEnabled, toolUpdates.TimeOfDay, toolUpdates.Timezone, toolUpdates.ClaudeEnabled, toolUpdates.CodexEnabled, toolUpdates.PiEnabled, selfUpdates.AutoEnabled, selfUpdates.TimeOfDay, selfUpdates.Timezone, selfUpdates.Channel)
 }
 
 func defaultDataDir() string {
