@@ -148,3 +148,69 @@ func TestRealPiExtension(t *testing.T) {
 		t.Fatalf("final text = %q", final.Text)
 	}
 }
+
+// TestRealPiSubagents delegates to a pi-subagents child through the runtime
+// and checks that it runs in the foreground with lifecycle signals and nested
+// child tool items. Needs `pi install npm:pi-subagents`.
+func TestRealPiSubagents(t *testing.T) {
+	if os.Getenv("AGENTX_PI_E2E") != "1" {
+		t.Skip("set AGENTX_PI_E2E=1 to run against a real pi binary")
+	}
+	rt := New(Options{Command: "pi", SessionDir: t.TempDir(), ExtensionDir: t.TempDir(), ProjectTrust: ProjectTrustApprove, SubagentForeground: true})
+	t.Cleanup(func() { _ = rt.Shutdown(context.Background()) })
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	defer cancel()
+	workspace := t.TempDir()
+	if err := os.WriteFile(workspace+"/NOTES.md", []byte("# Notes\n\nThe secret word is pineapple.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	session, err := rt.StartSession(ctx, runtime.StartSessionRequest{AgentID: "agent", SessionKey: "agent:channel:sub", Workspace: workspace, YoloMode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := "Use the subagent tool to delegate this task to the 'scout' agent: \"Read NOTES.md in the working directory and report the secret word.\" " +
+		"Do not read the file yourself. When the subagent finishes, reply with exactly: secret=<word>."
+	if err := session.Send(ctx, runtime.Input{Prompt: prompt}); err != nil {
+		t.Fatal(err)
+	}
+	var final runtime.Event
+	var started, completed, childItems int
+	var subagentCallID string
+	for evt := range session.Events() {
+		switch evt.Type {
+		case runtime.EventInputRequest:
+			t.Fatalf("unexpected input request: %+v", evt.InputRequest)
+		case runtime.EventDelta:
+			for _, item := range evt.Process {
+				t.Logf("process %s tool=%s status=%s parent=%s", item.Type, item.ToolName, item.Status, item.ParentToolCallID)
+				switch item.Type {
+				case "subagent_started":
+					started++
+					subagentCallID = item.ToolCallID
+				case "subagent_completed":
+					completed++
+					if item.Status != "completed" {
+						t.Errorf("subagent completed with status %q", item.Status)
+					}
+				case "tool_call":
+					if item.ParentToolCallID != "" {
+						childItems++
+					}
+				}
+			}
+		default:
+			final = evt
+		}
+	}
+	t.Logf("final: type=%s text=%q err=%q started=%d completed=%d childItems=%d", final.Type, final.Text, final.Error, started, completed, childItems)
+	if final.Type != runtime.EventCompleted || !strings.Contains(strings.ToLower(final.Text), "pineapple") {
+		t.Fatalf("final = %+v", final)
+	}
+	if started != 1 || completed != 1 || subagentCallID == "" {
+		t.Fatalf("subagent signals: started=%d completed=%d", started, completed)
+	}
+	if childItems == 0 {
+		t.Fatal("no child tool items were attributed to the subagent")
+	}
+}
