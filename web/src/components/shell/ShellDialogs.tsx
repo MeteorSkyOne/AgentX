@@ -847,13 +847,13 @@ export function ShellDialogs({
                     />
                   </div>
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center justify-between gap-3 pb-1">
                       <Label htmlFor="new-agent-system-prompt">System prompt</Label>
                       <Select
                         value={newAgentSystemPromptMode}
                         onChange={(e) => setNewAgentSystemPromptMode(e.target.value as SystemPromptMode)}
                         aria-label="New agent system prompt mode"
-                        className="h-7 w-auto text-xs"
+                        className="h-8 w-auto text-xs"
                       >
                         {SYSTEM_PROMPT_MODE_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
