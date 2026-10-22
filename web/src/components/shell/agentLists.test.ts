@@ -30,6 +30,7 @@ function agent(id: string, name: string): Agent {
     handle: name.toLowerCase(),
     description: "",
     system_prompt: "",
+    system_prompt_mode: "append",
     model: "",
     effort: "",
     config_workspace_id: "wks_config",

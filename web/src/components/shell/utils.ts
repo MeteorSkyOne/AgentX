@@ -44,6 +44,17 @@ export function agentKindSupportsFastMode(kind: string): boolean {
   return agentProviderFromKind(kind) !== "pi";
 }
 
+export const SYSTEM_PROMPT_MODE_OPTIONS = [
+  { value: "append", label: "Append to default" },
+  { value: "replace", label: "Replace default" },
+] as const;
+
+export function systemPromptPlaceholder(mode: string): string {
+  return mode === "replace"
+    ? "Replaces the runtime's built-in system prompt for every session"
+    : "Instructions appended to the runtime's system prompt for every session";
+}
+
 export function agentEffortOptions(kind: string): readonly string[] {
   return agentProviderFromKind(kind) === "pi" ? PI_EFFORT_OPTIONS : AGENT_EFFORT_OPTIONS;
 }

@@ -433,6 +433,9 @@ export interface BotUser {
   created_at: string;
 }
 
+/** How an agent's system prompt combines with the runtime's default prompt. */
+export type SystemPromptMode = "append" | "replace";
+
 export interface Agent {
   id: string;
   organization_id: string;
@@ -442,6 +445,7 @@ export interface Agent {
   handle: string;
   description: string;
   system_prompt: string;
+  system_prompt_mode: SystemPromptMode;
   model: string;
   effort: string;
   config_workspace_id: string;

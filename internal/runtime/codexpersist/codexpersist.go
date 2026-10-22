@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,7 +45,10 @@ func (r *Runtime) StartSession(ctx context.Context, req runtime.StartSessionRequ
 	}
 
 	key := sessionKey(req)
-	proc, isNew, err := r.pool.GetOrCreate(key, r.processStartFunc(req))
+	// A replacement system prompt is an app-server config override, so it only
+	// applies at launch; a changed prompt restarts the idle process and the
+	// thread id keeps the conversation.
+	proc, isNew, err := r.pool.GetOrCreateSigned(key, instructionsFile(req), r.processStartFunc(req))
 	if err != nil {
 		return nil, err
 	}
@@ -77,6 +81,9 @@ func (r *Runtime) ResetProcesses(ctx context.Context) error {
 func (r *Runtime) processStartFunc(req runtime.StartSessionRequest) procpool.StartFunc {
 	return func(ctx context.Context) *exec.Cmd {
 		args := []string{"app-server", "--listen", "stdio://"}
+		if path := instructionsFile(req); path != "" {
+			args = append(args, "-c", "model_instructions_file="+strconv.Quote(path))
+		}
 		args = append(args, r.opts.ExtraArgs...)
 		cmd := exec.CommandContext(ctx, r.opts.Command, args...)
 		workspace := strings.TrimSpace(req.Workspace)
@@ -112,6 +119,20 @@ func initializeParams() map[string]any {
 			"experimentalApi": true,
 		},
 	}
+}
+
+// instructionsFile returns the model_instructions_file path for a replacement
+// system prompt, or "" when the prompt is empty or appended.
+func instructionsFile(req runtime.StartSessionRequest) string {
+	if !req.ReplacesSystemPrompt() {
+		return ""
+	}
+	path, err := runtime.SystemPromptFile(req.SystemPrompt)
+	if err != nil {
+		slog.Warn("codexpersist: could not write system prompt file; appending instead", "error", err)
+		return ""
+	}
+	return path
 }
 
 func sessionKey(req runtime.StartSessionRequest) string {

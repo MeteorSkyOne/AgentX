@@ -303,3 +303,12 @@ func TestBuildArgsAppendsAgentSystemPrompt(t *testing.T) {
 	}
 	t.Fatalf("args = %q, missing --append-system-prompt", args)
 }
+
+func TestBuildArgsReplacesSystemPromptInReplaceMode(t *testing.T) {
+	rt := New(Options{AppendSystemPrompt: "global"})
+	args := rt.buildArgs(runtime.StartSessionRequest{SystemPrompt: "custom", SystemPromptMode: runtime.SystemPromptModeReplace}, "")
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--system-prompt custom") || !strings.Contains(joined, "--append-system-prompt global") || strings.Contains(joined, "global\n\ncustom") {
+		t.Fatalf("args = %q", args)
+	}
+}

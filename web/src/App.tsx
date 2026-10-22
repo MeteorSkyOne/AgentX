@@ -65,6 +65,7 @@ import type {
   SelfUpdateSettings,
   ServerSettings,
   ServerSettingsUpdatePayload,
+  SystemPromptMode,
   Thread,
   ToolUpdateOverview,
   ToolUpdateSettings,
@@ -970,6 +971,7 @@ export default function App() {
     name: string;
     description?: string;
     system_prompt?: string;
+    system_prompt_mode?: SystemPromptMode;
     handle?: string;
     kind?: string;
     model?: string;
@@ -985,7 +987,7 @@ export default function App() {
 
   async function handleUpdateAgent(
     agentID: string,
-    payload: Partial<Pick<Agent, "name" | "description" | "system_prompt" | "handle" | "kind" | "model" | "effort" | "enabled" | "fast_mode" | "yolo_mode">> & {
+    payload: Partial<Pick<Agent, "name" | "description" | "system_prompt" | "system_prompt_mode" | "handle" | "kind" | "model" | "effort" | "enabled" | "fast_mode" | "yolo_mode">> & {
       env?: Record<string, string>;
       env_patch?: AgentEnvPatch;
     }

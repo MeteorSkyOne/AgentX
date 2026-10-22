@@ -253,7 +253,7 @@ func scanAgent(scanner interface {
 	var enabled, fastMode, yoloMode int
 	if err := scanner.Scan(
 		&agent.ID, &agent.OrganizationID, &agent.BotUserID, &agent.Kind, &agent.Name, &agent.Handle,
-		&agent.Description, &agent.SystemPrompt, &agent.Model, &agent.Effort, &agent.DefaultWorkspaceID, &agent.ConfigWorkspaceID, &enabled, &fastMode, &yoloMode, &envJSON, &createdAt, &updatedAt,
+		&agent.Description, &agent.SystemPrompt, &agent.SystemPromptMode, &agent.Model, &agent.Effort, &agent.DefaultWorkspaceID, &agent.ConfigWorkspaceID, &enabled, &fastMode, &yoloMode, &envJSON, &createdAt, &updatedAt,
 	); err != nil {
 		return domain.Agent{}, err
 	}

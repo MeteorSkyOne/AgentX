@@ -52,3 +52,21 @@ func TestBuildArgsAppendsAgentSystemPromptAfterGlobalOne(t *testing.T) {
 		t.Fatalf("args = %q, want agent prompt alone", args)
 	}
 }
+
+func TestBuildArgsReplacesSystemPromptInReplaceMode(t *testing.T) {
+	rt := New(Options{AppendSystemPrompt: "global rule"})
+	defer rt.pool.Shutdown(t.Context())
+
+	args := rt.buildArgs(runtime.StartSessionRequest{SystemPrompt: "you are a poet", SystemPromptMode: runtime.SystemPromptModeReplace})
+	i := slices.Index(args, "--system-prompt")
+	if i < 0 || args[i+1] != "you are a poet" {
+		t.Fatalf("args = %q, want --system-prompt with the agent prompt", args)
+	}
+	j := slices.Index(args, "--append-system-prompt")
+	if j < 0 || args[j+1] != "global rule" {
+		t.Fatalf("args = %q, want only the global prompt appended", args)
+	}
+	if systemPromptSignature(runtime.StartSessionRequest{SystemPrompt: "p"}) == systemPromptSignature(runtime.StartSessionRequest{SystemPrompt: "p", SystemPromptMode: "replace"}) {
+		t.Fatal("mode change must change the launch signature")
+	}
+}

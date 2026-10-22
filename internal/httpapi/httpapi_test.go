@@ -99,7 +99,7 @@ func TestHTTPAgentCreateAndUpdateRoundTripsEffort(t *testing.T) {
 		"effort":        "medium",
 		"fast_mode":     true,
 	}, http.StatusOK, &created)
-	if created.Effort != "medium" || !created.FastMode || created.Description != "Plans implementation work" || created.SystemPrompt != "Always answer in English." {
+	if created.Effort != "medium" || !created.FastMode || created.Description != "Plans implementation work" || created.SystemPrompt != "Always answer in English." || created.SystemPromptMode != "append" {
 		t.Fatalf("created agent = %#v", created)
 	}
 	var memory struct {
@@ -126,14 +126,16 @@ func TestHTTPAgentCreateAndUpdateRoundTripsEffort(t *testing.T) {
 
 	var updated domain.Agent
 	patchJSON(t, ts.URL+"/api/agents/"+created.ID, bootstrap.SessionToken, map[string]any{
-		"description":   "Updated planner",
-		"system_prompt": "Be terse.",
-		"effort":        "high",
-		"fast_mode":     false,
+		"description":        "Updated planner",
+		"system_prompt":      "Be terse.",
+		"system_prompt_mode": "replace",
+		"effort":             "high",
+		"fast_mode":          false,
 	}, http.StatusOK, &updated)
-	if updated.Effort != "high" || updated.Model != "gpt-test" || updated.FastMode || updated.Description != "Updated planner" || updated.SystemPrompt != "Be terse." {
+	if updated.Effort != "high" || updated.Model != "gpt-test" || updated.FastMode || updated.Description != "Updated planner" || updated.SystemPrompt != "Be terse." || updated.SystemPromptMode != "replace" {
 		t.Fatalf("updated agent = %#v", updated)
 	}
+	patchJSON(t, ts.URL+"/api/agents/"+created.ID, bootstrap.SessionToken, map[string]any{"system_prompt_mode": "bogus"}, http.StatusBadRequest, nil)
 	patchJSON(t, ts.URL+"/api/agents/"+created.ID, bootstrap.SessionToken, map[string]any{"effort": "low"}, http.StatusOK, &updated)
 	if updated.SystemPrompt != "Be terse." {
 		t.Fatalf("system prompt was dropped by an unrelated update: %#v", updated)

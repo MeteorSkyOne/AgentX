@@ -42,6 +42,12 @@ const (
 	AgentKindPi               = "pi"
 )
 
+// System prompt modes for Agent.SystemPromptMode.
+const (
+	SystemPromptModeAppend  = "append"
+	SystemPromptModeReplace = "replace"
+)
+
 type ChannelType string
 
 const (
@@ -135,6 +141,7 @@ type Agent struct {
 	Handle             string            `json:"handle"`
 	Description        string            `json:"description"`
 	SystemPrompt       string            `json:"system_prompt"`
+	SystemPromptMode   string            `json:"system_prompt_mode"`
 	Model              string            `json:"model"`
 	Effort             string            `json:"effort"`
 	ConfigWorkspaceID  string            `json:"config_workspace_id"`

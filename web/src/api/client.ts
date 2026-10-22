@@ -14,6 +14,7 @@ import type {
   CreateThreadResponse,
   D2RenderResponse,
   MCPSetup,
+  SystemPromptMode,
   Message,
   MessageProcessItemDetail,
   MetricsProvider,
@@ -726,6 +727,7 @@ export function createAgent(
     name: string;
     description?: string;
     system_prompt?: string;
+    system_prompt_mode?: SystemPromptMode;
     handle?: string;
     kind?: string;
     model?: string;
@@ -743,7 +745,7 @@ export function createAgent(
 
 export function updateAgent(
   agentID: string,
-  payload: Partial<Pick<Agent, "name" | "description" | "system_prompt" | "handle" | "kind" | "model" | "effort" | "enabled" | "fast_mode" | "yolo_mode">> & {
+  payload: Partial<Pick<Agent, "name" | "description" | "system_prompt" | "system_prompt_mode" | "handle" | "kind" | "model" | "effort" | "enabled" | "fast_mode" | "yolo_mode">> & {
     env?: Record<string, string>;
     env_patch?: AgentEnvPatch;
   }

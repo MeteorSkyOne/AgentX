@@ -78,6 +78,7 @@ func (a *App) probeStatusContextUsage(ctx context.Context, req SendMessageReques
 		Model:                target.Agent.Model,
 		Effort:               target.Agent.Effort,
 		SystemPrompt:         target.Agent.SystemPrompt,
+		SystemPromptMode:     target.Agent.SystemPromptMode,
 		FastMode:             target.Agent.FastMode,
 		YoloMode:             target.Agent.YoloMode,
 		Env:                  target.Agent.Env,

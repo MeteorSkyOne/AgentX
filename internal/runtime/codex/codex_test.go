@@ -787,3 +787,29 @@ func TestCodexDeveloperInstructionsPrependAgentSystemPrompt(t *testing.T) {
 		t.Fatalf("instructions without workspace = %q", got)
 	}
 }
+
+func TestBuildArgsReplacesBaseInstructionsInReplaceMode(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	rt := Runtime{opts: Options{FullAuto: true, SkipGitRepoCheck: true}}
+	req := runtime.StartSessionRequest{SystemPrompt: "you are a poet", SystemPromptMode: runtime.SystemPromptModeReplace}
+	args := rt.buildArgs(req, runtime.Input{Prompt: "hi"})
+	var file string
+	for i, arg := range args {
+		if arg == "-c" && strings.HasPrefix(args[i+1], "model_instructions_file=") {
+			file = strings.Trim(strings.TrimPrefix(args[i+1], "model_instructions_file="), `"`)
+		}
+		if arg == "-c" && strings.HasPrefix(args[i+1], "developer_instructions=") {
+			t.Fatalf("replace mode must not also append: %q", args)
+		}
+	}
+	if file == "" {
+		t.Fatalf("args = %q, want model_instructions_file", args)
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(data)) != "you are a poet" {
+		t.Fatalf("instructions file = %q", data)
+	}
+}

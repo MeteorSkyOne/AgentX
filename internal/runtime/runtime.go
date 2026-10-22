@@ -14,7 +14,10 @@ type StartSessionRequest struct {
 	Effort               string
 	// SystemPrompt is the agent's own instructions, appended to the runtime's
 	// system prompt for every session.
-	SystemPrompt      string
+	SystemPrompt string
+	// SystemPromptMode is SystemPromptModeAppend (default) or
+	// SystemPromptModeReplace; see systemprompt.go.
+	SystemPromptMode  string
 	PermissionMode    string
 	FastMode          bool
 	YoloMode          bool

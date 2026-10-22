@@ -31,6 +31,7 @@ import type {
   WorkspaceSearchMode,
   WorkspaceSearchResponse,
   WorkspaceTreeEntry,
+  SystemPromptMode,
 } from "../../api/types";
 import type { ThemeMode } from "../../theme";
 import type { SocketConnectionStatus } from "../../ws/useConversationSocket";
@@ -138,6 +139,7 @@ export interface ShellProps {
     name: string;
     description?: string;
     system_prompt?: string;
+    system_prompt_mode?: SystemPromptMode;
     handle?: string;
     kind?: string;
     model?: string;
@@ -148,7 +150,7 @@ export interface ShellProps {
   }) => Promise<Agent>;
   onUpdateAgent: (
     agentID: string,
-    payload: Partial<Pick<Agent, "name" | "description" | "system_prompt" | "handle" | "kind" | "model" | "effort" | "enabled" | "fast_mode" | "yolo_mode">> & {
+    payload: Partial<Pick<Agent, "name" | "description" | "system_prompt" | "system_prompt_mode" | "handle" | "kind" | "model" | "effort" | "enabled" | "fast_mode" | "yolo_mode">> & {
       env?: Record<string, string>;
       env_patch?: AgentEnvPatch;
     }

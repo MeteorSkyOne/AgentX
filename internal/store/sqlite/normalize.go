@@ -42,6 +42,9 @@ func normalizeAgent(agent domain.Agent) domain.Agent {
 	if agent.Handle == "" {
 		agent.Handle = agent.ID
 	}
+	if agent.SystemPromptMode == "" {
+		agent.SystemPromptMode = domain.SystemPromptModeAppend
+	}
 	if !agent.Enabled && agent.CreatedAt.IsZero() {
 		agent.Enabled = true
 	}

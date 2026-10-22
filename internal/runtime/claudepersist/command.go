@@ -61,7 +61,10 @@ func (r *Runtime) buildArgs(req runtime.StartSessionRequest) []string {
 		args = append(args, "--disallowedTools", tools)
 	}
 
-	if prompt := joinPrompts(r.opts.AppendSystemPrompt, req.SystemPrompt); prompt != "" {
+	if req.ReplacesSystemPrompt() {
+		args = append(args, "--system-prompt", strings.TrimSpace(req.SystemPrompt))
+	}
+	if prompt := joinPrompts(r.opts.AppendSystemPrompt, req.AppendedSystemPrompt()); prompt != "" {
 		args = append(args, "--append-system-prompt", prompt)
 	}
 
@@ -120,4 +123,10 @@ func joinPrompts(prompts ...string) string {
 		}
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// systemPromptSignature identifies the launch-time system prompt arguments so
+// the pool can restart an idle process when they change.
+func systemPromptSignature(req runtime.StartSessionRequest) string {
+	return runtime.NormalizeSystemPromptMode(req.SystemPromptMode) + "\x00" + strings.TrimSpace(req.SystemPrompt)
 }

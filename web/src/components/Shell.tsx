@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { Channel, SelfUpdateSettings, UserPreferences } from "../api/types";
+import type { Channel, SelfUpdateSettings, SystemPromptMode, UserPreferences } from "../api/types";
 import {
   agentKindColor,
   setAgentAvatar,
@@ -158,6 +158,7 @@ export function Shell({
   const [newAgentName, setNewAgentName] = useState("");
   const [newAgentDescription, setNewAgentDescription] = useState("");
   const [newAgentSystemPrompt, setNewAgentSystemPrompt] = useState("");
+  const [newAgentSystemPromptMode, setNewAgentSystemPromptMode] = useState<SystemPromptMode>("append");
   const [newAgentHandle, setNewAgentHandle] = useState("");
   const [newAgentKind, setNewAgentKind] = useState("fake");
   const [newAgentModel, setNewAgentModel] = useState("");
@@ -851,6 +852,7 @@ export function Shell({
         name,
         description: newAgentDescription.trim() || undefined,
         system_prompt: newAgentSystemPrompt.trim() || undefined,
+        system_prompt_mode: newAgentSystemPromptMode,
         handle: newAgentHandle || undefined,
         kind: newAgentKind,
         model: newAgentModel || undefined,
@@ -875,6 +877,7 @@ export function Shell({
       setNewAgentName("");
       setNewAgentDescription("");
       setNewAgentSystemPrompt("");
+      setNewAgentSystemPromptMode("append");
       setNewAgentHandle("");
       setNewAgentKind("fake");
       setNewAgentModel("");
@@ -1300,6 +1303,8 @@ export function Shell({
         setNewAgentDescription={setNewAgentDescription}
         newAgentSystemPrompt={newAgentSystemPrompt}
         setNewAgentSystemPrompt={setNewAgentSystemPrompt}
+        newAgentSystemPromptMode={newAgentSystemPromptMode}
+        setNewAgentSystemPromptMode={setNewAgentSystemPromptMode}
         newAgentHandle={newAgentHandle}
         setNewAgentHandle={setNewAgentHandle}
         newAgentKind={newAgentKind}

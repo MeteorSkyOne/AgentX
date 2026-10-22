@@ -33,7 +33,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import type { Agent, Channel, ConversationAgentContext, ToolUpdateOverview, Workspace } from "../../api/types";
+import type { Agent, Channel, ConversationAgentContext, SystemPromptMode, ToolUpdateOverview, Workspace } from "../../api/types";
 import type { ThemeMode } from "../../theme";
 import {
   AgentAvatar,
@@ -49,6 +49,7 @@ import { formatToolVersion } from "./toolUpdateStatus";
 import type { ShellProps } from "./types";
 import {
   AGENT_RUNTIME_OPTIONS,
+  SYSTEM_PROMPT_MODE_OPTIONS,
   agentEffortOptions,
   agentKindFromProviderPersistent,
   agentKindLabel,
@@ -59,6 +60,7 @@ import {
   agentToneColor,
   defaultAgentInstructionPath,
   isProviderLimitAgent,
+  systemPromptPlaceholder,
 } from "./utils";
 
 export function AgentDetailsPanel({
@@ -114,6 +116,7 @@ export function AgentDetailsPanel({
   const [name, setName] = useState(selectedAgent?.name ?? "");
   const [description, setDescription] = useState(selectedAgent?.description ?? "");
   const [systemPrompt, setSystemPrompt] = useState(selectedAgent?.system_prompt ?? "");
+  const [systemPromptMode, setSystemPromptMode] = useState<SystemPromptMode>(selectedAgent?.system_prompt_mode ?? "append");
   const [handle, setHandle] = useState(selectedAgent?.handle ?? "");
   const [kind, setKind] = useState(selectedAgent?.kind ?? "fake");
   const [persistentDraft, setPersistentDraft] = useState(agentPersistentFromKind(selectedAgent?.kind ?? "fake"));
@@ -173,6 +176,7 @@ export function AgentDetailsPanel({
     setName(selected.name);
     setDescription(selected.description ?? "");
     setSystemPrompt(selected.system_prompt ?? "");
+    setSystemPromptMode(selected.system_prompt_mode ?? "append");
     setHandle(selected.handle);
     setKind(selected.kind);
     setPersistentDraft(agentPersistentFromKind(selected.kind));
@@ -190,6 +194,7 @@ export function AgentDetailsPanel({
     selected?.name,
     selected?.description,
     selected?.system_prompt,
+    selected?.system_prompt_mode,
     selected?.handle,
     selected?.kind,
     selected?.model,
@@ -208,7 +213,7 @@ export function AgentDetailsPanel({
 
   async function saveAgent() {
     if (!selected) return;
-    await onUpdateAgent(selected.id, { name, description, system_prompt: systemPrompt, handle, kind, model, effort, enabled, fast_mode: fastMode, yolo_mode: yoloMode });
+    await onUpdateAgent(selected.id, { name, description, system_prompt: systemPrompt, system_prompt_mode: systemPromptMode, handle, kind, model, effort, enabled, fast_mode: fastMode, yolo_mode: yoloMode });
     await queryClient.invalidateQueries({ queryKey: ["agent-limits", selected.id] });
     setAgentAvatar(selected.id, avatarEmoji ? { emoji: avatarEmoji, color: avatarColor || agentKindColor(kind) } : null);
     setStatus("Saved");
@@ -390,11 +395,25 @@ export function AgentDetailsPanel({
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-xs">System prompt</Label>
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="text-xs">System prompt</Label>
+                  <Select
+                    value={systemPromptMode}
+                    onChange={(e) => setSystemPromptMode(e.target.value as SystemPromptMode)}
+                    aria-label="Agent system prompt mode"
+                    className="h-7 w-auto text-xs"
+                  >
+                    {SYSTEM_PROMPT_MODE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
                 <Textarea
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
-                  placeholder="Instructions appended to the runtime's system prompt for every session"
+                  placeholder={systemPromptPlaceholder(systemPromptMode)}
                   aria-label="Agent system prompt"
                   rows={4}
                 />

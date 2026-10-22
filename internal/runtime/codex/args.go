@@ -38,6 +38,9 @@ func (r Runtime) buildArgsAndStdin(req runtime.StartSessionRequest, input runtim
 	if req.FastMode {
 		args = append(args, "-c", `service_tier="fast"`, "-c", "features.fast_mode=true")
 	}
+	if path := codexInstructionsFile(req); path != "" {
+		args = append(args, "-c", "model_instructions_file="+strconv.Quote(path))
+	}
 	if instructions := codexDeveloperInstructions(req); instructions != "" {
 		args = append(args, "-c", "developer_instructions="+strconv.Quote(instructions))
 	}
@@ -112,13 +115,27 @@ func attachmentDirs(input runtime.Input) []string {
 
 func codexDeveloperInstructions(req runtime.StartSessionRequest) string {
 	var parts []string
-	if prompt := strings.TrimSpace(req.SystemPrompt); prompt != "" {
+	if prompt := req.AppendedSystemPrompt(); prompt != "" {
 		parts = append(parts, prompt)
 	}
 	if text := codexWorkspaceInstructions(req); text != "" {
 		parts = append(parts, text)
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// codexInstructionsFile returns the file that replaces Codex's built-in base
+// instructions (`model_instructions_file`) when the agent prompt is in
+// replace mode, or "" otherwise. A write failure falls back to appending.
+func codexInstructionsFile(req runtime.StartSessionRequest) string {
+	if !req.ReplacesSystemPrompt() {
+		return ""
+	}
+	path, err := runtime.SystemPromptFile(req.SystemPrompt)
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 func codexWorkspaceInstructions(req runtime.StartSessionRequest) string {

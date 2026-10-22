@@ -441,8 +441,11 @@ func (s *persistentSession) addTurnOverrides(turnParams map[string]any) {
 	if effort != "" {
 		settings["reasoning_effort"] = effort
 	}
-	if prompt := strings.TrimSpace(s.req.SystemPrompt); prompt != "" {
+	if prompt := s.req.AppendedSystemPrompt(); prompt != "" {
 		settings["developer_instructions"] = prompt
+	} else if s.req.ReplacesSystemPrompt() && instructionsFile(s.req) == "" {
+		// The replacement could not be written to a file: at least pass the prompt.
+		settings["developer_instructions"] = strings.TrimSpace(s.req.SystemPrompt)
 	}
 
 	turnParams["collaborationMode"] = map[string]any{

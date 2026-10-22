@@ -46,6 +46,9 @@ func (r Runtime) buildArgs(req runtime.StartSessionRequest, input runtime.Input)
 	if tools := strings.Join(r.opts.DisallowedTools, ","); tools != "" {
 		args = append(args, "--disallowedTools", tools)
 	}
+	if req.ReplacesSystemPrompt() {
+		args = append(args, "--system-prompt", strings.TrimSpace(req.SystemPrompt))
+	}
 	if prompt := r.appendSystemPrompt(req); prompt != "" {
 		args = append(args, "--append-system-prompt", prompt)
 	}
@@ -71,7 +74,7 @@ func (r Runtime) appendSystemPrompt(req runtime.StartSessionRequest) string {
 	if prompt := strings.TrimSpace(r.opts.AppendSystemPrompt); prompt != "" {
 		parts = append(parts, prompt)
 	}
-	if prompt := strings.TrimSpace(req.SystemPrompt); prompt != "" {
+	if prompt := req.AppendedSystemPrompt(); prompt != "" {
 		parts = append(parts, prompt)
 	}
 	if instructions := claudeWorkspaceInstructions(req.InstructionWorkspace); instructions != "" {

@@ -398,18 +398,19 @@ func (a *App) Workspace(ctx context.Context, id string) (domain.Workspace, error
 }
 
 type AgentCreateRequest struct {
-	UserID         string
-	OrganizationID string
-	Name           string
-	Description    string
-	SystemPrompt   string
-	Handle         string
-	Kind           string
-	Model          string
-	Effort         string
-	FastMode       bool
-	YoloMode       bool
-	Env            map[string]string
+	UserID           string
+	OrganizationID   string
+	Name             string
+	Description      string
+	SystemPrompt     string
+	SystemPromptMode string
+	Handle           string
+	Kind             string
+	Model            string
+	Effort           string
+	FastMode         bool
+	YoloMode         bool
+	Env              map[string]string
 }
 
 func (a *App) CreateAgent(ctx context.Context, req AgentCreateRequest) (domain.Agent, error) {
@@ -428,6 +429,10 @@ func (a *App) CreateAgent(ctx context.Context, req AgentCreateRequest) (domain.A
 	kind := strings.TrimSpace(req.Kind)
 	if kind == "" {
 		kind = domain.AgentKindFake
+	}
+	systemPromptMode, ok := normalizeSystemPromptMode(req.SystemPromptMode)
+	if !ok {
+		return domain.Agent{}, ErrInvalidInput
 	}
 	now := time.Now().UTC()
 	bot := domain.BotUser{ID: id.New("bot"), OrganizationID: req.OrganizationID, DisplayName: name, CreatedAt: now}
@@ -450,6 +455,7 @@ func (a *App) CreateAgent(ctx context.Context, req AgentCreateRequest) (domain.A
 		Handle:             handle,
 		Description:        description,
 		SystemPrompt:       strings.TrimSpace(req.SystemPrompt),
+		SystemPromptMode:   systemPromptMode,
 		Model:              strings.TrimSpace(req.Model),
 		Effort:             strings.TrimSpace(req.Effort),
 		ConfigWorkspaceID:  workspace.ID,
@@ -485,19 +491,20 @@ func (a *App) CreateAgent(ctx context.Context, req AgentCreateRequest) (domain.A
 }
 
 type AgentUpdateRequest struct {
-	Name         *string
-	Description  *string
-	SystemPrompt *string
-	Handle       *string
-	Kind         *string
-	Model        *string
-	Effort       *string
-	Enabled      *bool
-	FastMode     *bool
-	YoloMode     *bool
-	Env          map[string]string
-	EnvSet       bool
-	EnvPatch     *AgentEnvPatch
+	Name             *string
+	Description      *string
+	SystemPrompt     *string
+	SystemPromptMode *string
+	Handle           *string
+	Kind             *string
+	Model            *string
+	Effort           *string
+	Enabled          *bool
+	FastMode         *bool
+	YoloMode         *bool
+	Env              map[string]string
+	EnvSet           bool
+	EnvPatch         *AgentEnvPatch
 }
 
 // AgentEnvPatch edits individual env entries so callers can change some keys
@@ -526,6 +533,13 @@ func (a *App) UpdateAgent(ctx context.Context, agentID string, req AgentUpdateRe
 	}
 	if req.SystemPrompt != nil {
 		agent.SystemPrompt = strings.TrimSpace(*req.SystemPrompt)
+	}
+	if req.SystemPromptMode != nil {
+		mode, ok := normalizeSystemPromptMode(*req.SystemPromptMode)
+		if !ok {
+			return domain.Agent{}, ErrInvalidInput
+		}
+		agent.SystemPromptMode = mode
 	}
 	if req.Handle != nil {
 		handle := normalizeHandle(*req.Handle)
@@ -821,4 +835,17 @@ func normalizeHandle(value string) string {
 		}
 	}
 	return strings.Trim(b.String(), "_")
+}
+
+// normalizeSystemPromptMode validates an agent system prompt mode; empty means
+// the default (append).
+func normalizeSystemPromptMode(mode string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", domain.SystemPromptModeAppend:
+		return domain.SystemPromptModeAppend, true
+	case domain.SystemPromptModeReplace:
+		return domain.SystemPromptModeReplace, true
+	default:
+		return "", false
+	}
 }

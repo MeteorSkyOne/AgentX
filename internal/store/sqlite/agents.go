@@ -21,9 +21,9 @@ func (r agentRepo) Create(ctx context.Context, agent domain.Agent) error {
 		return err
 	}
 	_, err = r.q.ExecContext(ctx, `
-	INSERT INTO agents (id, org_id, bot_user_id, kind, name, handle, description, system_prompt, model, effort, default_workspace_id, config_workspace_id, enabled, fast_mode, yolo_mode, env_json, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		agent.ID, agent.OrganizationID, agent.BotUserID, agent.Kind, agent.Name, agent.Handle, agent.Description, agent.SystemPrompt, agent.Model, agent.Effort,
+	INSERT INTO agents (id, org_id, bot_user_id, kind, name, handle, description, system_prompt, system_prompt_mode, model, effort, default_workspace_id, config_workspace_id, enabled, fast_mode, yolo_mode, env_json, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		agent.ID, agent.OrganizationID, agent.BotUserID, agent.Kind, agent.Name, agent.Handle, agent.Description, agent.SystemPrompt, agent.SystemPromptMode, agent.Model, agent.Effort,
 		agent.DefaultWorkspaceID, agent.ConfigWorkspaceID, boolToInt(agent.Enabled), boolToInt(agent.FastMode), boolToInt(agent.YoloMode), string(envJSON),
 		formatTime(agent.CreatedAt), formatTime(agent.UpdatedAt),
 	)
@@ -32,14 +32,14 @@ func (r agentRepo) Create(ctx context.Context, agent domain.Agent) error {
 
 func (r agentRepo) ByID(ctx context.Context, id string) (domain.Agent, error) {
 	return scanAgent(r.q.QueryRowContext(ctx, `
-	SELECT id, org_id, bot_user_id, kind, name, handle, description, system_prompt, model, effort, default_workspace_id, config_workspace_id, enabled, fast_mode, yolo_mode, env_json, created_at, updated_at
+	SELECT id, org_id, bot_user_id, kind, name, handle, description, system_prompt, system_prompt_mode, model, effort, default_workspace_id, config_workspace_id, enabled, fast_mode, yolo_mode, env_json, created_at, updated_at
 	FROM agents
 	WHERE id = ?`, id))
 }
 
 func (r agentRepo) DefaultForOrganization(ctx context.Context, orgID string) (domain.Agent, error) {
 	return scanAgent(r.q.QueryRowContext(ctx, `
-	SELECT id, org_id, bot_user_id, kind, name, handle, description, system_prompt, model, effort, default_workspace_id, config_workspace_id, enabled, fast_mode, yolo_mode, env_json, created_at, updated_at
+	SELECT id, org_id, bot_user_id, kind, name, handle, description, system_prompt, system_prompt_mode, model, effort, default_workspace_id, config_workspace_id, enabled, fast_mode, yolo_mode, env_json, created_at, updated_at
 	FROM agents
 	WHERE org_id = ?
 	ORDER BY created_at ASC
@@ -48,7 +48,7 @@ LIMIT 1`, orgID))
 
 func (r agentRepo) ListByOrganization(ctx context.Context, orgID string) ([]domain.Agent, error) {
 	rows, err := r.q.QueryContext(ctx, `
-	SELECT id, org_id, bot_user_id, kind, name, handle, description, system_prompt, model, effort, default_workspace_id, config_workspace_id, enabled, fast_mode, yolo_mode, env_json, created_at, updated_at
+	SELECT id, org_id, bot_user_id, kind, name, handle, description, system_prompt, system_prompt_mode, model, effort, default_workspace_id, config_workspace_id, enabled, fast_mode, yolo_mode, env_json, created_at, updated_at
 	FROM agents
 	WHERE org_id = ?
 	ORDER BY created_at ASC, id ASC`, orgID)
@@ -73,7 +73,7 @@ func (r agentRepo) ListByOrganization(ctx context.Context, orgID string) ([]doma
 
 func (r agentRepo) ByHandle(ctx context.Context, orgID string, handle string) (domain.Agent, error) {
 	return scanAgent(r.q.QueryRowContext(ctx, `
-	SELECT id, org_id, bot_user_id, kind, name, handle, description, system_prompt, model, effort, default_workspace_id, config_workspace_id, enabled, fast_mode, yolo_mode, env_json, created_at, updated_at
+	SELECT id, org_id, bot_user_id, kind, name, handle, description, system_prompt, system_prompt_mode, model, effort, default_workspace_id, config_workspace_id, enabled, fast_mode, yolo_mode, env_json, created_at, updated_at
 	FROM agents
 	WHERE org_id = ? AND handle = ?`, orgID, handle))
 }
@@ -86,9 +86,9 @@ func (r agentRepo) Update(ctx context.Context, agent domain.Agent) error {
 	}
 	_, err = r.q.ExecContext(ctx, `
 UPDATE agents
-	SET kind = ?, name = ?, handle = ?, description = ?, system_prompt = ?, model = ?, effort = ?, default_workspace_id = ?, config_workspace_id = ?, enabled = ?, fast_mode = ?, yolo_mode = ?, env_json = ?, updated_at = ?
+	SET kind = ?, name = ?, handle = ?, description = ?, system_prompt = ?, system_prompt_mode = ?, model = ?, effort = ?, default_workspace_id = ?, config_workspace_id = ?, enabled = ?, fast_mode = ?, yolo_mode = ?, env_json = ?, updated_at = ?
 	WHERE id = ?`,
-		agent.Kind, agent.Name, agent.Handle, agent.Description, agent.SystemPrompt, agent.Model, agent.Effort, agent.DefaultWorkspaceID, agent.ConfigWorkspaceID,
+		agent.Kind, agent.Name, agent.Handle, agent.Description, agent.SystemPrompt, agent.SystemPromptMode, agent.Model, agent.Effort, agent.DefaultWorkspaceID, agent.ConfigWorkspaceID,
 		boolToInt(agent.Enabled), boolToInt(agent.FastMode), boolToInt(agent.YoloMode), string(envJSON), formatTime(agent.UpdatedAt), agent.ID,
 	)
 	return err

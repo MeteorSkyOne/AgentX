@@ -1,6 +1,6 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { Bot, Trash2 } from "lucide-react";
-import type { Channel, NotificationSettings, Organization, Project, SelfUpdateOverview, SelfUpdateSettings, ServerSettings, ToolUpdateOverview, User, UserPreferences, Workspace } from "@/api/types";
+import type { Channel, NotificationSettings, Organization, Project, SelfUpdateOverview, SelfUpdateSettings, ServerSettings, SystemPromptMode, ToolUpdateOverview, User, UserPreferences, Workspace } from "@/api/types";
 import { cn } from "@/lib/utils";
 import { AVATAR_COLORS, agentKindColor } from "../AgentAvatar";
 import {
@@ -20,7 +20,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { BrowserNotificationPermission } from "@/notifications/browser";
 import { AccountSettingsDialog } from "./AccountSettingsDialog";
-import { AGENT_RUNTIME_OPTIONS, initials } from "./utils";
+import { AGENT_RUNTIME_OPTIONS, SYSTEM_PROMPT_MODE_OPTIONS, initials, systemPromptPlaceholder } from "./utils";
 
 type StringSetter = Dispatch<SetStateAction<string>>;
 type BooleanSetter = Dispatch<SetStateAction<boolean>>;
@@ -182,6 +182,8 @@ export interface ShellDialogsProps {
   setNewAgentDescription: StringSetter;
   newAgentSystemPrompt: string;
   setNewAgentSystemPrompt: StringSetter;
+  newAgentSystemPromptMode: SystemPromptMode;
+  setNewAgentSystemPromptMode: (mode: SystemPromptMode) => void;
   newAgentHandle: string;
   setNewAgentHandle: StringSetter;
   newAgentKind: string;
@@ -355,6 +357,8 @@ export function ShellDialogs({
   setNewAgentDescription,
   newAgentSystemPrompt,
   setNewAgentSystemPrompt,
+  newAgentSystemPromptMode,
+  setNewAgentSystemPromptMode,
   newAgentHandle,
   setNewAgentHandle,
   newAgentKind,
@@ -843,12 +847,26 @@ export function ShellDialogs({
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="new-agent-system-prompt">System prompt</Label>
+                    <div className="flex items-center justify-between gap-2">
+                      <Label htmlFor="new-agent-system-prompt">System prompt</Label>
+                      <Select
+                        value={newAgentSystemPromptMode}
+                        onChange={(e) => setNewAgentSystemPromptMode(e.target.value as SystemPromptMode)}
+                        aria-label="New agent system prompt mode"
+                        className="h-7 w-auto text-xs"
+                      >
+                        {SYSTEM_PROMPT_MODE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
                     <Textarea
                       id="new-agent-system-prompt"
                       value={newAgentSystemPrompt}
                       onChange={(e) => setNewAgentSystemPrompt(e.target.value)}
-                      placeholder="Instructions appended to the runtime's system prompt for every session"
+                      placeholder={systemPromptPlaceholder(newAgentSystemPromptMode)}
                       aria-label="New agent system prompt"
                       rows={4}
                     />

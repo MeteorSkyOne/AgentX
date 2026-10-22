@@ -106,7 +106,7 @@ func (r *Runtime) StartSession(ctx context.Context, req runtime.StartSessionRequ
 
 	// The system prompt only applies at process start; a changed prompt
 	// restarts the idle process, and --session-id resumes the conversation.
-	proc, isNew, err := r.pool.GetOrCreateSigned(key, strings.TrimSpace(req.SystemPrompt), r.processStartFunc(req, startSessionID))
+	proc, isNew, err := r.pool.GetOrCreateSigned(key, systemPromptSignature(req), r.processStartFunc(req, startSessionID))
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +178,10 @@ func (r *Runtime) buildArgs(req runtime.StartSessionRequest, sessionID string) [
 	if level := thinkingLevelForEffort(req.Effort, modelThinking); level != "" {
 		args = append(args, "--thinking", level)
 	}
-	if prompt := joinPrompts(r.opts.AppendSystemPrompt, req.SystemPrompt); prompt != "" {
+	if req.ReplacesSystemPrompt() {
+		args = append(args, "--system-prompt", strings.TrimSpace(req.SystemPrompt))
+	}
+	if prompt := joinPrompts(r.opts.AppendSystemPrompt, req.AppendedSystemPrompt()); prompt != "" {
 		args = append(args, "--append-system-prompt", prompt)
 	}
 	if len(r.opts.Tools) > 0 {
@@ -307,6 +310,12 @@ func piAgentDir(layers ...map[string]string) string {
 // AgentX data dir.
 func DefaultExtensionDir(dataDir string) string {
 	return filepath.Join(dataDir, "pi-extension")
+}
+
+// systemPromptSignature identifies the launch-time system prompt arguments so
+// the pool can restart an idle process when they change.
+func systemPromptSignature(req runtime.StartSessionRequest) string {
+	return runtime.NormalizeSystemPromptMode(req.SystemPromptMode) + "\x00" + strings.TrimSpace(req.SystemPrompt)
 }
 
 // joinPrompts concatenates non-empty system prompt fragments.
