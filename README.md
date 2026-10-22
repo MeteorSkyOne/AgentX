@@ -171,6 +171,7 @@ AgentX is configured through environment variables and a small `config.toml`. En
 | `AGENTX_PI_EXCLUDE_TOOLS` | | Comma-separated pi tools to disable (`--exclude-tools`) |
 | `AGENTX_PI_PROJECT_TRUST` | `approve` | `approve` trusts project-local pi config and extensions, `no-approve` ignores them, empty leaves it to pi's settings |
 | `AGENTX_PI_EXTENSION_DIR` | `$AGENTX_DATA_DIR/pi-extension` | Where AgentX writes its bundled pi extension (`ask_user`, `update_plan`, plan mode and YOLO gating); empty disables it |
+| `AGENTX_PI_SUBAGENTS_FOREGROUND` | `true` | Set `asyncByDefault: false` in pi-subagents' `config.json` when unset, so subagent progress streams into the AgentX reply |
 | `AGENTX_TERMINAL_SHELL` | `$SHELL` | Shell used for workspace terminals |
 | `AGENTX_TERMINAL_IDLE_MINUTES` | `30` | Idle timeout for workspace terminals |
 | `AGENTX_TERMINAL_MAX_SESSIONS_PER_WORKSPACE` | `8` | Maximum concurrent terminals per workspace |

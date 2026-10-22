@@ -57,6 +57,7 @@ type Config struct {
 	PiExcludeTools              []string
 	PiProjectTrust              string
 	PiExtensionDir              string
+	PiSubagentForeground        bool
 	D2Command                   string
 	D2TimeoutSeconds            int
 	D2CacheTTLMinutes           int
@@ -175,6 +176,7 @@ func FromEnv() Config {
 		PiExcludeTools:              getenvList("AGENTX_PI_EXCLUDE_TOOLS"),
 		PiProjectTrust:              getenv("AGENTX_PI_PROJECT_TRUST", "approve"),
 		PiExtensionDir:              getenv("AGENTX_PI_EXTENSION_DIR", filepath.Join(dataDir, "pi-extension")),
+		PiSubagentForeground:        getenvBool("AGENTX_PI_SUBAGENTS_FOREGROUND", true),
 		D2Command:                   getenv("AGENTX_D2_COMMAND", "d2"),
 		D2TimeoutSeconds:            getenvInt("AGENTX_D2_TIMEOUT_SECONDS", 10),
 		D2CacheTTLMinutes:           getenvInt("AGENTX_D2_CACHE_TTL_MINUTES", 1440),

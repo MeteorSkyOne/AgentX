@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	_ "embed"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -48,6 +49,11 @@ type Options struct {
 	// is loaded with `-e`. Empty disables the extension (no ask_user /
 	// update_plan tools, no plan or yolo enforcement).
 	ExtensionDir string
+	// SubagentForeground makes pi-subagents run children in the foreground by
+	// default (asyncByDefault=false in its config.json) so their progress and
+	// results stream into the AgentX reply instead of arriving as a background
+	// notification on a later turn. An explicit value in the file is kept.
+	SubagentForeground bool
 }
 
 type Runtime struct {
@@ -57,6 +63,8 @@ type Runtime struct {
 	extOnce sync.Once
 	extPath string
 	extErr  error
+
+	subagentOnce sync.Once
 }
 
 // extensionSource is the AgentX bridge extension loaded into every pi process.
@@ -87,6 +95,7 @@ func (r *Runtime) StartSession(ctx context.Context, req runtime.StartSessionRequ
 	if err := r.ensureExtension(); err != nil {
 		return nil, err
 	}
+	r.ensureSubagentConfig(req.Env)
 
 	key := sessionKey(req)
 	previousSessionID := usablePreviousSessionID(req.PreviousSessionID)
@@ -215,6 +224,81 @@ func (r *Runtime) ensureExtension() error {
 		r.extPath = path
 	})
 	return r.extErr
+}
+
+// subagentConfigPath is the pi-subagents configuration file, relative to pi's
+// agent dir (`~/.pi/agent` unless PI_CODING_AGENT_DIR overrides it).
+const subagentConfigPath = "extensions/subagent/config.json"
+
+// ensureSubagentConfig writes asyncByDefault=false into the pi-subagents
+// config when the key is not set yet. It runs once per AgentX process and
+// never overrides a value the user chose. Failures are logged, not fatal.
+func (r *Runtime) ensureSubagentConfig(reqEnv map[string]string) {
+	if !r.opts.SubagentForeground {
+		return
+	}
+	r.subagentOnce.Do(func() {
+		agentDir := piAgentDir(r.opts.Env, reqEnv)
+		if agentDir == "" {
+			return
+		}
+		path := filepath.Join(agentDir, filepath.FromSlash(subagentConfigPath))
+		if err := mergeSubagentConfig(path); err != nil {
+			logWarn("could not set pi-subagents asyncByDefault=false", "path", path, "error", err)
+		}
+	})
+}
+
+// mergeSubagentConfig adds asyncByDefault=false to the JSON object at path,
+// creating the file when missing and leaving an existing key untouched.
+func mergeSubagentConfig(path string) error {
+	config := map[string]any{}
+	data, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		if len(bytes.TrimSpace(data)) > 0 {
+			if err := json.Unmarshal(data, &config); err != nil {
+				return fmt.Errorf("parse: %w", err)
+			}
+		}
+	case os.IsNotExist(err):
+	default:
+		return err
+	}
+	if _, set := config["asyncByDefault"]; set {
+		return nil
+	}
+	config["asyncByDefault"] = false
+	out, err := json.MarshalIndent(config, "", "\t")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
+		return err
+	}
+	slog.Info("pi: set pi-subagents asyncByDefault=false so subagents run in the foreground", "path", path)
+	return nil
+}
+
+// piAgentDir resolves pi's agent directory from the runtime or agent env
+// (PI_CODING_AGENT_DIR), the process env, or the default ~/.pi/agent.
+func piAgentDir(layers ...map[string]string) string {
+	for i := len(layers) - 1; i >= 0; i-- {
+		if dir := strings.TrimSpace(layers[i]["PI_CODING_AGENT_DIR"]); dir != "" {
+			return dir
+		}
+	}
+	if dir := strings.TrimSpace(os.Getenv("PI_CODING_AGENT_DIR")); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".pi", "agent")
 }
 
 // DefaultExtensionDir returns where the bundled pi extension lives under the

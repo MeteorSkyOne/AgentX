@@ -129,6 +129,7 @@ func main() {
 			ExcludeTools:       cfg.PiExcludeTools,
 			ProjectTrust:       cfg.PiProjectTrust,
 			ExtensionDir:       cfg.PiExtensionDir,
+			SubagentForeground: cfg.PiSubagentForeground,
 		}),
 	}
 	defer shutdownRuntimes(runtimes)

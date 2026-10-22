@@ -224,3 +224,68 @@ func TestEnsureExtensionDisabledWhenDirEmpty(t *testing.T) {
 		t.Fatalf("extPath = %q err = %v", rt.extPath, err)
 	}
 }
+
+func TestMergeSubagentConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "extensions", "subagent", "config.json")
+
+	// Missing file: created with the key.
+	if err := mergeSubagentConfig(path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"asyncByDefault": false`) {
+		t.Fatalf("config = %s", data)
+	}
+
+	// Existing keys survive and an explicit value is never overridden.
+	if err := os.WriteFile(path, []byte(`{"asyncByDefault": true, "toolActivation": "eager"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := mergeSubagentConfig(path); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(path)
+	if !strings.Contains(string(data), `"asyncByDefault": true`) || !strings.Contains(string(data), `"toolActivation": "eager"`) {
+		t.Fatalf("config = %s", data)
+	}
+
+	// Other keys without asyncByDefault get it added.
+	if err := os.WriteFile(path, []byte(`{"toolActivation": "eager"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := mergeSubagentConfig(path); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(path)
+	if !strings.Contains(string(data), `"asyncByDefault": false`) || !strings.Contains(string(data), `"toolActivation": "eager"`) {
+		t.Fatalf("config = %s", data)
+	}
+
+	// Invalid JSON is reported, not clobbered.
+	if err := os.WriteFile(path, []byte(`{nope`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := mergeSubagentConfig(path); err == nil {
+		t.Fatal("expected parse error")
+	}
+	if data, _ = os.ReadFile(path); string(data) != `{nope` {
+		t.Fatalf("invalid config was rewritten: %s", data)
+	}
+}
+
+func TestPiAgentDirPrefersAgentEnv(t *testing.T) {
+	if got := piAgentDir(map[string]string{"PI_CODING_AGENT_DIR": "/rt"}, map[string]string{"PI_CODING_AGENT_DIR": "/agent"}); got != "/agent" {
+		t.Fatalf("dir = %q, want agent env to win", got)
+	}
+	if got := piAgentDir(map[string]string{"PI_CODING_AGENT_DIR": "/rt"}, nil); got != "/rt" {
+		t.Fatalf("dir = %q, want runtime env", got)
+	}
+	t.Setenv("PI_CODING_AGENT_DIR", "/proc-env")
+	if got := piAgentDir(nil, nil); got != "/proc-env" {
+		t.Fatalf("dir = %q, want process env", got)
+	}
+}
