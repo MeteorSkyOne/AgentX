@@ -357,6 +357,10 @@ func (s *persistentSession) prepare(ctx context.Context) error {
 		}
 	}
 
+	if err := s.syncMode(ctx); err != nil {
+		return err
+	}
+
 	level := thinkingLevelForEffort(s.req.Effort, modelThinking)
 	if level != "" && level != stringVal(state, "thinkingLevel") {
 		available, err := s.rpc.CallMap(ctx, record{"type": "get_available_thinking_levels"})
@@ -371,6 +375,41 @@ func (s *persistentSession) prepare(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// syncMode pushes the turn's plan/yolo mode to the bundled extension when it
+// differs from what the process last received. Without the extension the
+// command is not handled; that is logged once per process and otherwise ignored.
+func (s *persistentSession) syncMode(ctx context.Context) error {
+	if s.rt == nil || s.rt.extPath == "" {
+		return nil
+	}
+	want := modeState{
+		Plan: strings.EqualFold(strings.TrimSpace(s.req.PermissionMode), "plan"),
+		Yolo: s.req.YoloMode,
+	}
+	if current, known := processMode(s.process); known && current == want {
+		return nil
+	}
+	resp, err := s.rpc.CallMap(ctx, record{"type": "prompt", "message": modeCommand(want)})
+	if err != nil {
+		return fmt.Errorf("agentx-mode: %w", err)
+	}
+	if stringVal(resp, "disposition") != "handled" {
+		logWarn("agentx extension did not handle /agentx-mode; plan and yolo modes are not enforced", "key", s.key)
+	}
+	setProcessMode(s.process, want)
+	return nil
+}
+
+func modeCommand(mode modeState) string {
+	onOff := func(v bool) string {
+		if v {
+			return "on"
+		}
+		return "off"
+	}
+	return "/agentx-mode plan=" + onOff(mode.Plan) + " yolo=" + onOff(mode.Yolo)
 }
 
 // runCompact handles the /compact slash command with pi's native compaction.

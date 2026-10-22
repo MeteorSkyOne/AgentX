@@ -187,3 +187,40 @@ loop:
 		t.Fatalf("prompt message missing from stdin log:\n%s", log)
 	}
 }
+
+func TestEnsureExtensionWritesFileAndAddsFlag(t *testing.T) {
+	dir := t.TempDir()
+	rt := New(Options{ExtensionDir: dir})
+	if err := rt.ensureExtension(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, extensionFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != extensionSource || !strings.Contains(string(data), "agentx-mode") {
+		t.Fatal("extension file content mismatch")
+	}
+	args := strings.Join(rt.buildArgs(runtime.StartSessionRequest{}, ""), " ")
+	if !strings.Contains(args, "-e "+path) {
+		t.Fatalf("args = %q, want -e %s", args, path)
+	}
+	// A second runtime reuses the identical file without rewriting it.
+	info1, _ := os.Stat(path)
+	rt2 := New(Options{ExtensionDir: dir})
+	if err := rt2.ensureExtension(); err != nil {
+		t.Fatal(err)
+	}
+	info2, _ := os.Stat(path)
+	if !info1.ModTime().Equal(info2.ModTime()) {
+		t.Fatal("unchanged extension was rewritten")
+	}
+}
+
+func TestEnsureExtensionDisabledWhenDirEmpty(t *testing.T) {
+	rt := New(Options{})
+	if err := rt.ensureExtension(); err != nil || rt.extPath != "" {
+		t.Fatalf("extPath = %q err = %v", rt.extPath, err)
+	}
+}

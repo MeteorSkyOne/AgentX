@@ -361,3 +361,69 @@ func TestRunCompactReportsSummary(t *testing.T) {
 		t.Fatalf("compact cmd = %v", cmd)
 	}
 }
+
+func TestSyncModeSendsCommandOnlyWhenChanged(t *testing.T) {
+	rpc := newFakeRPC()
+	rpc.responses["get_state"] = record{"sessionId": "s", "thinkingLevel": "medium"}
+	rpc.responses["prompt"] = record{"disposition": "handled"}
+	s := newTestSession(t, rpc)
+	s.rt.extPath = "/tmp/agentx.ts"
+	s.req.PermissionMode = "plan"
+	s.req.YoloMode = false
+
+	if err := s.prepare(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if cmd := rpc.callOfType("prompt"); cmd == nil || cmd["message"] != "/agentx-mode plan=on yolo=off" {
+		t.Fatalf("mode command = %v", cmd)
+	}
+
+	// Same mode again: no second command.
+	rpc.calls = nil
+	if err := s.prepare(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if cmd := rpc.callOfType("prompt"); cmd != nil {
+		t.Fatalf("unexpected mode command %v", cmd)
+	}
+
+	// Back to a normal yolo turn on the same process: command sent again.
+	s.req.PermissionMode = ""
+	s.req.YoloMode = true
+	if err := s.prepare(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if cmd := rpc.callOfType("prompt"); cmd == nil || cmd["message"] != "/agentx-mode plan=off yolo=on" {
+		t.Fatalf("mode command = %v", cmd)
+	}
+}
+
+func TestUpdatePlanToolCallBecomesPlanSnapshot(t *testing.T) {
+	rpc := newFakeRPC()
+	s := newTestSession(t, rpc)
+	rpc.events <- record{"type": "tool_execution_start", "toolCallId": "c1", "toolName": "update_plan", "args": record{
+		"explanation": "starting",
+		"plan": []any{
+			record{"step": "Read code", "status": "completed"},
+			record{"step": "Write fix", "status": "in_progress"},
+			record{"step": "", "status": "pending"},
+			record{"step": "Test", "status": "weird"},
+		},
+	}}
+	rpc.events <- record{"type": "agent_settled"}
+
+	go s.processEvents(context.Background())
+	events := collectEvents(t, s)
+	var plan *runtime.PlanState
+	for _, evt := range events {
+		if evt.Plan != nil {
+			plan = evt.Plan
+		}
+	}
+	if plan == nil || plan.Explanation != "starting" || len(plan.Steps) != 3 {
+		t.Fatalf("plan = %+v", plan)
+	}
+	if plan.Steps[0].Status != runtime.PlanStepCompleted || plan.Steps[1].Status != runtime.PlanStepInProgress || plan.Steps[2].Status != runtime.PlanStepPending {
+		t.Fatalf("plan steps = %+v", plan.Steps)
+	}
+}

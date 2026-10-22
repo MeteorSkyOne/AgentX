@@ -5,8 +5,10 @@
 package pi
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	_ "embed"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -14,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/meteorsky/agentx/internal/runtime"
@@ -41,12 +44,27 @@ type Options struct {
 	Tools              []string
 	ExcludeTools       []string
 	ProjectTrust       string
+	// ExtensionDir is where the bundled AgentX extension is written before it
+	// is loaded with `-e`. Empty disables the extension (no ask_user /
+	// update_plan tools, no plan or yolo enforcement).
+	ExtensionDir string
 }
 
 type Runtime struct {
 	opts Options
 	pool *procpool.ProcessPool
+
+	extOnce sync.Once
+	extPath string
+	extErr  error
 }
+
+// extensionSource is the AgentX bridge extension loaded into every pi process.
+//
+//go:embed extension/agentx.ts
+var extensionSource string
+
+const extensionFileName = "agentx.ts"
 
 func New(opts Options) *Runtime {
 	if strings.TrimSpace(opts.Command) == "" {
@@ -63,6 +81,10 @@ func New(opts Options) *Runtime {
 
 func (r *Runtime) StartSession(ctx context.Context, req runtime.StartSessionRequest) (runtime.Session, error) {
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	if err := r.ensureExtension(); err != nil {
 		return nil, err
 	}
 
@@ -162,8 +184,43 @@ func (r *Runtime) buildArgs(req runtime.StartSessionRequest, sessionID string) [
 	case ProjectTrustDeny:
 		args = append(args, "--no-approve")
 	}
+	if r.extPath != "" {
+		args = append(args, "-e", r.extPath)
+	}
 	args = append(args, r.opts.ExtraArgs...)
 	return args
+}
+
+// ensureExtension writes the bundled extension to Options.ExtensionDir (once
+// per process, and only when the content changed) so pi can load it.
+func (r *Runtime) ensureExtension() error {
+	r.extOnce.Do(func() {
+		dir := strings.TrimSpace(r.opts.ExtensionDir)
+		if dir == "" {
+			return
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			r.extErr = fmt.Errorf("pi extension dir: %w", err)
+			return
+		}
+		path := filepath.Join(dir, extensionFileName)
+		if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, []byte(extensionSource)) {
+			r.extPath = path
+			return
+		}
+		if err := os.WriteFile(path, []byte(extensionSource), 0o644); err != nil {
+			r.extErr = fmt.Errorf("write pi extension: %w", err)
+			return
+		}
+		r.extPath = path
+	})
+	return r.extErr
+}
+
+// DefaultExtensionDir returns where the bundled pi extension lives under the
+// AgentX data dir.
+func DefaultExtensionDir(dataDir string) string {
+	return filepath.Join(dataDir, "pi-extension")
 }
 
 func sessionKey(req runtime.StartSessionRequest) string {
@@ -227,6 +284,34 @@ func mergeEnv(base []string, layers ...map[string]string) []string {
 }
 
 type rpcClientKey struct{}
+
+// modeState is the plan/yolo mode last pushed to a pi process through the
+// bundled extension's /agentx-mode command.
+type modeState struct {
+	Plan bool
+	Yolo bool
+}
+
+type modeStateKey struct{}
+
+func processMode(proc *procpool.ManagedProcess) (modeState, bool) {
+	proc.Mu.Lock()
+	defer proc.Mu.Unlock()
+	v, ok := proc.UserData[modeStateKey{}]
+	if !ok {
+		return modeState{}, false
+	}
+	return v.(modeState), true
+}
+
+func setProcessMode(proc *procpool.ManagedProcess, mode modeState) {
+	proc.Mu.Lock()
+	defer proc.Mu.Unlock()
+	if proc.UserData == nil {
+		proc.UserData = make(map[any]any)
+	}
+	proc.UserData[modeStateKey{}] = mode
+}
 
 func getRPCClient(proc *procpool.ManagedProcess) *rpcClient {
 	proc.Mu.Lock()

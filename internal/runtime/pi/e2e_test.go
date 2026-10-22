@@ -80,3 +80,71 @@ func deref(v *int64) int64 {
 	}
 	return *v
 }
+
+// TestRealPiExtension exercises the bundled extension against a real pi:
+// ask_user becomes an input request, update_plan becomes a plan snapshot and a
+// dangerous command is gated when yolo is off.
+func TestRealPiExtension(t *testing.T) {
+	if os.Getenv("AGENTX_PI_E2E") != "1" {
+		t.Skip("set AGENTX_PI_E2E=1 to run against a real pi binary")
+	}
+	rt := New(Options{Command: "pi", SessionDir: t.TempDir(), ExtensionDir: t.TempDir(), ProjectTrust: ProjectTrustApprove})
+	t.Cleanup(func() { _ = rt.Shutdown(context.Background()) })
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	workspace := t.TempDir()
+
+	session, err := rt.StartSession(ctx, runtime.StartSessionRequest{AgentID: "agent", SessionKey: "agent:channel:ext", Workspace: workspace, YoloMode: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := "Do these three things in order, using the named tools: " +
+		"1) call update_plan with steps 'ask' (in_progress) and 'run' (pending); " +
+		"2) call ask_user with question 'Pick a color' and options red, blue; " +
+		"3) run `sudo true` with the bash tool. " +
+		"Finally reply with exactly: color=<answer> sudo=<ok|blocked>."
+	if err := session.Send(ctx, runtime.Input{Prompt: prompt}); err != nil {
+		t.Fatal(err)
+	}
+	var final runtime.Event
+	var plan *runtime.PlanState
+	answered := map[string]string{}
+	for evt := range session.Events() {
+		switch evt.Type {
+		case runtime.EventInputRequest:
+			q := evt.InputRequest
+			t.Logf("input request: %q options=%v", q.Question, q.Options)
+			answer := "Block"
+			if strings.Contains(q.Question, "color") {
+				answer = "blue"
+			}
+			answered[q.Question] = answer
+			if err := session.RespondToInputRequest(q.QuestionID, answer); err != nil {
+				t.Fatal(err)
+			}
+		case runtime.EventDelta:
+			if evt.Plan != nil {
+				plan = evt.Plan
+			}
+			for _, item := range evt.Process {
+				t.Logf("process %s %s %s", item.Type, item.ToolName, item.Status)
+			}
+		default:
+			final = evt
+		}
+	}
+	t.Logf("final: type=%s text=%q err=%q answered=%v", final.Type, final.Text, final.Error, answered)
+	if final.Type != runtime.EventCompleted {
+		t.Fatalf("final = %+v", final)
+	}
+	if plan == nil || len(plan.Steps) != 2 {
+		t.Fatalf("plan = %+v", plan)
+	}
+	if len(answered) != 2 {
+		t.Fatalf("expected an ask_user question and a sudo confirmation, got %v", answered)
+	}
+	lower := strings.ToLower(final.Text)
+	if !strings.Contains(lower, "blue") || !strings.Contains(lower, "blocked") {
+		t.Fatalf("final text = %q", final.Text)
+	}
+}

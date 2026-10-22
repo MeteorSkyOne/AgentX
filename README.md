@@ -71,7 +71,7 @@ Think of it as a chat workspace where every teammate is an agent: give each one 
 | `codex` | Ephemeral | `codex exec --json`, one process per turn |
 | `claude-persistent` | Persistent | Long-lived Claude Code process speaking stream-json over stdin/stdout, with a permission-prompt tool for interactive questions |
 | `codex-persistent` | Persistent | Long-lived `codex app-server` process speaking JSON-RPC 2.0 over stdio |
-| `pi` | Persistent | Long-lived [`pi --mode rpc`](https://pi.dev) process speaking JSONL over stdio; sessions are stored under `$AGENTX_DATA_DIR/pi-sessions` |
+| `pi` | Persistent | Long-lived [`pi --mode rpc`](https://pi.dev) process speaking JSONL over stdio; sessions are stored under `$AGENTX_DATA_DIR/pi-sessions`. A bundled extension adds user questions, step progress, plan mode and YOLO-off command confirmation |
 
 Persistent processes are managed by a process pool with turn-based coordination, idle reaping (30 minutes by default), and graceful shutdown. The persistent kinds are recommended for day-to-day use.
 
@@ -170,6 +170,7 @@ AgentX is configured through environment variables and a small `config.toml`. En
 | `AGENTX_PI_TOOLS` | | Comma-separated pi tool allowlist (`--tools`) |
 | `AGENTX_PI_EXCLUDE_TOOLS` | | Comma-separated pi tools to disable (`--exclude-tools`) |
 | `AGENTX_PI_PROJECT_TRUST` | `approve` | `approve` trusts project-local pi config and extensions, `no-approve` ignores them, empty leaves it to pi's settings |
+| `AGENTX_PI_EXTENSION_DIR` | `$AGENTX_DATA_DIR/pi-extension` | Where AgentX writes its bundled pi extension (`ask_user`, `update_plan`, plan mode and YOLO gating); empty disables it |
 | `AGENTX_TERMINAL_SHELL` | `$SHELL` | Shell used for workspace terminals |
 | `AGENTX_TERMINAL_IDLE_MINUTES` | `30` | Idle timeout for workspace terminals |
 | `AGENTX_TERMINAL_MAX_SESSIONS_PER_WORKSPACE` | `8` | Maximum concurrent terminals per workspace |

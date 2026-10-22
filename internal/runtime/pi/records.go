@@ -102,7 +102,11 @@ func (s *persistentSession) handleRecord(ctx context.Context, rec record, state 
 		}
 		items := []runtime.ProcessItem{item}
 		items = append(items, state.subagents.started(rec)...)
-		s.emit(runtime.Event{Type: runtime.EventDelta, Process: items})
+		evt := runtime.Event{Type: runtime.EventDelta, Process: items}
+		if toolName == updatePlanToolName {
+			evt.Plan = planStateFromArgs(mapVal(rec, "args"))
+		}
+		s.emit(evt)
 
 	case "tool_execution_update":
 		if items := state.subagents.updated(rec); len(items) > 0 {
@@ -322,6 +326,29 @@ func extensionUIResponse(requestID string, method string, answer string) record 
 		return record{"type": "extension_ui_response", "id": requestID, "cancelled": true}
 	}
 	return record{"type": "extension_ui_response", "id": requestID, "value": answer}
+}
+
+// updatePlanToolName is the step-list tool registered by the bundled AgentX
+// extension; its arguments are the plan snapshot.
+const updatePlanToolName = "update_plan"
+
+func planStateFromArgs(args record) *runtime.PlanState {
+	if args == nil {
+		return nil
+	}
+	plan := &runtime.PlanState{Explanation: stringVal(args, "explanation")}
+	for _, raw := range sliceVal(args, "plan") {
+		item, _ := raw.(record)
+		step := strings.TrimSpace(stringVal(item, "step"))
+		if step == "" {
+			continue
+		}
+		plan.Steps = append(plan.Steps, runtime.PlanStep{
+			Step:   step,
+			Status: runtime.NormalizePlanStepStatus(stringVal(item, "status")),
+		})
+	}
+	return plan
 }
 
 // contentText flattens a pi content value (a string or a list of text blocks)
