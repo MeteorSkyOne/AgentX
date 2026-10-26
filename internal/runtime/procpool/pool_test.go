@@ -363,3 +363,71 @@ func TestGetOrCreateSignedRestartsIdleProcessOnNewSignature(t *testing.T) {
 	}
 	proc2.ReleaseTurn()
 }
+
+func TestExitedProcessOutputIsReadBeforeDone(t *testing.T) {
+	pool := New(Options{IdleTimeout: time.Hour})
+	defer pool.Shutdown(context.Background())
+
+	proc, _, err := pool.GetOrCreate("exit", func(ctx context.Context) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", `echo last; echo "fatal: bad flag" >&2; exit 3`)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proc.AttachReader()
+	defer proc.DetachReader()
+	<-proc.Done()
+	if got := proc.Stderr(); got != "fatal: bad flag\n" {
+		t.Fatalf("stderr at exit = %q", got)
+	}
+	select {
+	case line := <-proc.StdoutLines():
+		if string(line) != "last" {
+			t.Fatalf("stdout = %q", line)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("last stdout line was lost at exit")
+	}
+}
+
+func TestKillDoesNotWaitForInheritedOutput(t *testing.T) {
+	pool := New(Options{IdleTimeout: time.Hour})
+	defer pool.Shutdown(context.Background())
+
+	proc, _, err := pool.GetOrCreate("kill", func(ctx context.Context) *exec.Cmd {
+		// The background sleep inherits stdout and stderr and outlives sh,
+		// which exits once Kill closes its stdin.
+		return exec.CommandContext(ctx, "sh", "-c", `sleep 3 & echo ready; read -r line`)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proc.AttachReader()
+	<-proc.StdoutLines()
+	start := time.Now()
+	proc.Kill()
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("Kill took %s waiting on a grandchild's output", elapsed)
+	}
+}
+
+func TestExitStopsDrainingInheritedOutput(t *testing.T) {
+	original := outputDrainDelay
+	outputDrainDelay = 200 * time.Millisecond
+	t.Cleanup(func() { outputDrainDelay = original })
+
+	pool := New(Options{IdleTimeout: time.Hour})
+	defer pool.Shutdown(context.Background())
+
+	proc, _, err := pool.GetOrCreate("orphan", func(ctx context.Context) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", `sleep 3 & exit 0`)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-proc.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("process exit waited on a grandchild holding its output")
+	}
+}

@@ -28,6 +28,9 @@ var (
 	// background subagent. It is refreshed by any output, so it only trips when
 	// the process has genuinely gone silent.
 	claudeBackgroundIdleTimeout = 5 * time.Minute
+	// processExitStderrWait bounds the wait for an exiting process's stderr;
+	// it outlasts procpool's own output drain delay.
+	processExitStderrWait = 3 * time.Second
 )
 
 type inputAnswer struct {
@@ -79,6 +82,9 @@ func (s *persistentSession) waitForSystemEvent(ctx context.Context) error {
 
 	timeout := time.NewTimer(claudeStartupInitGrace)
 	defer timeout.Stop()
+	// Once the process has exited, keep reading until its output is drained:
+	// the init line may still be in flight.
+	exited := s.process.Done()
 	for {
 		select {
 		case line, ok := <-s.process.StdoutLines():
@@ -101,8 +107,8 @@ func (s *persistentSession) waitForSystemEvent(ctx context.Context) error {
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-s.process.Done():
-			return s.processExitError("persistent process exited before initialization")
+		case <-exited:
+			exited = nil
 		}
 	}
 }
@@ -980,7 +986,16 @@ func (s *persistentSession) processExitError(fallback string) error {
 	return errors.New(s.processExitText(fallback))
 }
 
+// processExitText explains why the process went away. Callers have seen it
+// exit, but stdout can close before stderr is fully read, so wait for the
+// process to be done — at which point stderr is complete.
 func (s *persistentSession) processExitText(fallback string) string {
+	timer := time.NewTimer(processExitStderrWait)
+	select {
+	case <-s.process.Done():
+	case <-timer.C:
+	}
+	timer.Stop()
 	if stderr := strings.TrimSpace(s.process.Stderr()); stderr != "" {
 		return stderr
 	}

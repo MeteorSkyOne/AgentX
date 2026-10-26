@@ -24,6 +24,10 @@ const deliverRecheckInterval = 250 * time.Millisecond
 // claimed turn to attach.
 const claimRecheckInterval = 20 * time.Millisecond
 
+// outputDrainDelay bounds how long an exited process's stdout and stderr are
+// still read: a grandchild that inherited them can hold them open.
+var outputDrainDelay = 2 * time.Second
+
 type ManagedProcess struct {
 	Key  string
 	cmd  *exec.Cmd
@@ -31,6 +35,12 @@ type ManagedProcess struct {
 
 	stdin   io.WriteCloser
 	stdinMu sync.Mutex
+	// stdout and stderr are read by this type rather than through
+	// StdoutPipe/StderrPipe, which Wait closes as soon as the process exits —
+	// losing the last lines of output, or the stderr explaining the exit.
+	stdout     *os.File
+	stderr     *os.File
+	outputDone chan struct{}
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -72,19 +82,28 @@ func startProcess(pool *ProcessPool, key string, cmd *exec.Cmd) (*ManagedProcess
 		cancel()
 		return nil, err
 	}
-	stdout, err := cmd.StdoutPipe()
+	stdoutReader, stdoutWriter, err := os.Pipe()
 	if err != nil {
 		cancel()
 		return nil, err
 	}
-	stderr, err := cmd.StderrPipe()
+	stderrReader, stderrWriter, err := os.Pipe()
 	if err != nil {
 		cancel()
+		_ = stdoutReader.Close()
+		_ = stdoutWriter.Close()
 		return nil, err
 	}
-
-	if err := cmd.Start(); err != nil {
+	cmd.Stdout = stdoutWriter
+	cmd.Stderr = stderrWriter
+	err = cmd.Start()
+	// The child has its own copies of the write ends now.
+	_ = stdoutWriter.Close()
+	_ = stderrWriter.Close()
+	if err != nil {
 		cancel()
+		_ = stdoutReader.Close()
+		_ = stderrReader.Close()
 		return nil, err
 	}
 
@@ -93,6 +112,9 @@ func startProcess(pool *ProcessPool, key string, cmd *exec.Cmd) (*ManagedProcess
 		cmd:         cmd,
 		pool:        pool,
 		stdin:       stdin,
+		stdout:      stdoutReader,
+		stderr:      stderrReader,
+		outputDone:  make(chan struct{}),
 		ctx:         ctx,
 		cancel:      cancel,
 		rawLines:    make(chan []byte, 64),
@@ -104,9 +126,21 @@ func startProcess(pool *ProcessPool, key string, cmd *exec.Cmd) (*ManagedProcess
 	mp.lastUsedAt.Store(time.Now())
 	mp.turnMu <- struct{}{}
 
+	var output sync.WaitGroup
+	output.Add(2)
+	go func() {
+		defer output.Done()
+		mp.readStdout()
+	}()
+	go func() {
+		defer output.Done()
+		_, _ = io.Copy(&mp.stderrBuf, stderrReader)
+	}()
+	go func() {
+		output.Wait()
+		close(mp.outputDone)
+	}()
 	go mp.dispatch()
-	go mp.readStdout(stdout)
-	go mp.readStderr(stderr)
 	go mp.waitForExit()
 
 	return mp, nil
@@ -369,9 +403,9 @@ func (mp *ManagedProcess) LastUsedAt() time.Time {
 	return time.Time{}
 }
 
-func (mp *ManagedProcess) readStdout(r io.Reader) {
+func (mp *ManagedProcess) readStdout() {
 	defer close(mp.rawLines)
-	scanner := bufio.NewScanner(r)
+	scanner := bufio.NewScanner(mp.stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
@@ -386,17 +420,25 @@ func (mp *ManagedProcess) readStdout(r io.Reader) {
 			return
 		}
 	}
-	if err := scanner.Err(); err != nil && mp.ctx.Err() == nil {
+	if err := scanner.Err(); err != nil && mp.ctx.Err() == nil && !errors.Is(err, os.ErrClosed) {
 		slog.Warn("procpool: stdout scan error", "key", mp.Key, "error", err)
 	}
 }
 
-func (mp *ManagedProcess) readStderr(r io.Reader) {
-	_, _ = io.Copy(&mp.stderrBuf, r)
-}
-
 func (mp *ManagedProcess) waitForExit() {
 	_ = mp.cmd.Wait()
+	// Read what the process wrote before exiting, unless it was killed and
+	// nobody wants it any more.
+	if mp.ctx.Err() == nil {
+		timer := time.NewTimer(outputDrainDelay)
+		select {
+		case <-mp.outputDone:
+		case <-timer.C:
+		}
+		timer.Stop()
+	}
+	_ = mp.stdout.Close()
+	_ = mp.stderr.Close()
 	mp.alive.Store(false)
 	close(mp.done)
 	mp.pool.remove(mp)
