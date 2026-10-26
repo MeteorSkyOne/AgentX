@@ -45,10 +45,10 @@ func (r *Runtime) StartSession(ctx context.Context, req runtime.StartSessionRequ
 	}
 
 	key := sessionKey(req)
-	// A replacement system prompt is an app-server config override, so it only
-	// applies at launch; a changed prompt restarts the idle process and the
+	// A replacement system prompt is an app-server config override and env is
+	// fixed at launch; a change to either restarts the idle process and the
 	// thread id keeps the conversation.
-	proc, isNew, err := r.pool.GetOrCreateSigned(key, instructionsFile(req), r.processStartFunc(req))
+	proc, isNew, err := r.pool.GetOrCreateSigned(key, instructionsFile(req)+"\x00"+req.EnvSignature(), r.processStartFunc(req))
 	if err != nil {
 		return nil, err
 	}

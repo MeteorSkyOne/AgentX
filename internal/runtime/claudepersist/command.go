@@ -125,8 +125,8 @@ func joinPrompts(prompts ...string) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// systemPromptSignature identifies the launch-time system prompt arguments so
-// the pool can restart an idle process when they change.
-func systemPromptSignature(req runtime.StartSessionRequest) string {
-	return runtime.NormalizeSystemPromptMode(req.SystemPromptMode) + "\x00" + strings.TrimSpace(req.SystemPrompt)
+// launchSignature identifies the launch-time system prompt arguments and
+// environment so the pool can restart an idle process when they change.
+func launchSignature(req runtime.StartSessionRequest) string {
+	return runtime.NormalizeSystemPromptMode(req.SystemPromptMode) + "\x00" + strings.TrimSpace(req.SystemPrompt) + "\x00" + req.EnvSignature()
 }

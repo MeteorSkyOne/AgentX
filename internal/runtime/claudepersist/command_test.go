@@ -66,7 +66,11 @@ func TestBuildArgsReplacesSystemPromptInReplaceMode(t *testing.T) {
 	if j < 0 || args[j+1] != "global rule" {
 		t.Fatalf("args = %q, want only the global prompt appended", args)
 	}
-	if systemPromptSignature(runtime.StartSessionRequest{SystemPrompt: "p"}) == systemPromptSignature(runtime.StartSessionRequest{SystemPrompt: "p", SystemPromptMode: "replace"}) {
+	if launchSignature(runtime.StartSessionRequest{SystemPrompt: "p"}) == launchSignature(runtime.StartSessionRequest{SystemPrompt: "p", SystemPromptMode: "replace"}) {
 		t.Fatal("mode change must change the launch signature")
+	}
+	withEnv := runtime.StartSessionRequest{SystemPrompt: "p", Env: map[string]string{"HTTPS_PROXY": "http://a"}}
+	if launchSignature(runtime.StartSessionRequest{SystemPrompt: "p"}) == launchSignature(withEnv) {
+		t.Fatal("env change must change the launch signature")
 	}
 }

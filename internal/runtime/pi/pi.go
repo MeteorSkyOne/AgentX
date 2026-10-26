@@ -104,9 +104,9 @@ func (r *Runtime) StartSession(ctx context.Context, req runtime.StartSessionRequ
 		startSessionID = newSessionID()
 	}
 
-	// The system prompt only applies at process start; a changed prompt
-	// restarts the idle process, and --session-id resumes the conversation.
-	proc, isNew, err := r.pool.GetOrCreateSigned(key, systemPromptSignature(req), r.processStartFunc(req, startSessionID))
+	// The system prompt and env only apply at process start; a change restarts
+	// the idle process, and --session-id resumes the conversation.
+	proc, isNew, err := r.pool.GetOrCreateSigned(key, launchSignature(req), r.processStartFunc(req, startSessionID))
 	if err != nil {
 		return nil, err
 	}
@@ -312,10 +312,10 @@ func DefaultExtensionDir(dataDir string) string {
 	return filepath.Join(dataDir, "pi-extension")
 }
 
-// systemPromptSignature identifies the launch-time system prompt arguments so
-// the pool can restart an idle process when they change.
-func systemPromptSignature(req runtime.StartSessionRequest) string {
-	return runtime.NormalizeSystemPromptMode(req.SystemPromptMode) + "\x00" + strings.TrimSpace(req.SystemPrompt)
+// launchSignature identifies the launch-time system prompt arguments and
+// environment so the pool can restart an idle process when they change.
+func launchSignature(req runtime.StartSessionRequest) string {
+	return runtime.NormalizeSystemPromptMode(req.SystemPromptMode) + "\x00" + strings.TrimSpace(req.SystemPrompt) + "\x00" + req.EnvSignature()
 }
 
 // joinPrompts concatenates non-empty system prompt fragments.
