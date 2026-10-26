@@ -151,6 +151,35 @@ func (s *persistentSession) Send(ctx context.Context, input runtime.Input) error
 	return nil
 }
 
+// AdoptBackgroundTurn reads a turn the agent started on its own, claimed by the
+// process's background fallback, in place of Send.
+func (s *persistentSession) AdoptBackgroundTurn(ctx context.Context) error {
+	s.mu.Lock()
+	if !s.alive {
+		s.mu.Unlock()
+		return procpool.ErrProcessDead
+	}
+	if s.started {
+		s.mu.Unlock()
+		return errors.New("session already started")
+	}
+	s.started = true
+	s.mu.Unlock()
+
+	s.process.AttachReader()
+	if !s.process.AdoptClaim() {
+		s.process.DetachReader()
+		return errNoBackgroundTurn
+	}
+	s.mu.Lock()
+	s.turnHeld = true
+	s.mu.Unlock()
+	go s.readEvents(ctx)
+	return nil
+}
+
+var errNoBackgroundTurn = errors.New("no background turn to adopt")
+
 func (s *persistentSession) Events() <-chan runtime.Event {
 	return s.events
 }

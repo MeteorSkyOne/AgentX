@@ -226,3 +226,18 @@ type SubagentStopper interface {
 type ProcessResetter interface {
 	ResetProcesses(ctx context.Context) error
 }
+
+// BackgroundTurnNotifier is implemented by runtimes whose agent can start a
+// turn on its own, with no prompt — Claude Code waking up to report on a
+// background command that finished after its reply was over. The handler gets
+// the session key of the conversation and reports whether it will adopt the
+// turn through BackgroundTurnAdopter. It must not block.
+type BackgroundTurnNotifier interface {
+	SetBackgroundTurnHandler(handler func(sessionKey string) bool)
+}
+
+// BackgroundTurnAdopter is implemented by sessions that can read a turn the
+// agent started on its own in place of Send.
+type BackgroundTurnAdopter interface {
+	AdoptBackgroundTurn(ctx context.Context) error
+}

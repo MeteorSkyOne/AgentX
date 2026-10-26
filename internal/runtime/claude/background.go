@@ -10,6 +10,11 @@ import "github.com/meteorsky/agentx/internal/runtime"
 // subagent running, and then wakes the main agent to report once it finishes —
 // producing a second result. A turn is only over when no background task is
 // outstanding and the main agent has had its final say.
+//
+// Background shell commands are the exception: they are silent for as long as
+// they run (their output goes to a file, not the stream) and can run for an
+// hour, so they do not hold the turn open. The agent's report once one finishes
+// arrives as a turn of its own, outside any reply.
 type BackgroundTracker struct {
 	// tasks holds each outstanding task, keyed by task id.
 	tasks               map[string]*backgroundTask
@@ -29,6 +34,9 @@ type backgroundTask struct {
 	// by background_tasks_changed, so only they may be finished by dropping
 	// out of it; a foreground task ends with its own task_notification.
 	background bool
+	// detached marks a task that does not hold the turn open; see
+	// BackgroundTracker.
+	detached bool
 }
 
 // TaskSignal describes one subagent task changing state, attributed to the
@@ -61,7 +69,7 @@ func (t *BackgroundTracker) TrackSystemMessage(payload map[string]any) TrackOutc
 	switch StringValue(payload, "subtype") {
 	case "task_started":
 		background, _ := payload["is_backgrounded"].(bool)
-		if signal, ok := t.add(StringValue(payload, "task_id"), StringValue(payload, "tool_use_id"), background); ok {
+		if signal, ok := t.add(StringValue(payload, "task_id"), StringValue(payload, "tool_use_id"), StringValue(payload, "task_type"), background); ok {
 			outcome.Started = append(outcome.Started, signal)
 		}
 	case "background_tasks_changed":
@@ -79,7 +87,7 @@ func (t *BackgroundTracker) TrackSystemMessage(payload map[string]any) TrackOutc
 				continue
 			}
 			live[taskID] = struct{}{}
-			if signal, ok := t.add(taskID, StringValue(task, "tool_use_id"), true); ok {
+			if signal, ok := t.add(taskID, StringValue(task, "tool_use_id"), StringValue(task, "task_type"), true); ok {
 				outcome.Started = append(outcome.Started, signal)
 			}
 		}
@@ -124,7 +132,7 @@ func (t *BackgroundTracker) TrackSystemMessage(payload map[string]any) TrackOutc
 // add tracks a task and reports a started signal the first time the task's
 // spawning tool call is known — which may be on a later message than the one
 // that first mentioned the task.
-func (t *BackgroundTracker) add(taskID string, toolUseID string, background bool) (TaskSignal, bool) {
+func (t *BackgroundTracker) add(taskID string, toolUseID string, taskType string, background bool) (TaskSignal, bool) {
 	if taskID == "" {
 		return TaskSignal{}, false
 	}
@@ -134,13 +142,18 @@ func (t *BackgroundTracker) add(taskID string, toolUseID string, background bool
 		task = &backgroundTask{}
 		t.tasks[taskID] = task
 	}
+	if taskType == "local_bash" {
+		task.detached = true
+	}
 	if background {
 		task.background = true
 	}
 	if task.toolUseID == "" {
 		task.toolUseID = toolUseID
 	}
-	if task.toolUseID == "" || task.announced {
+	// A detached task's tool call is not a subagent: it returns at once, and
+	// the task ends after the reply that made it is over.
+	if task.toolUseID == "" || task.announced || task.detached {
 		return TaskSignal{}, false
 	}
 	task.announced = true
@@ -155,25 +168,39 @@ func (t *BackgroundTracker) Seen() bool {
 	return t.seen
 }
 
-// finish closes a tracked task, reporting whether it was the last one.
-// toolUseID fills in the spawning call when the task never reported it.
+// finish closes a tracked task, reporting whether it was the last one holding
+// the turn open. toolUseID fills in the spawning call when the task never
+// reported it.
 func (t *BackgroundTracker) finish(taskID string, status string, toolUseID string) (TaskSignal, bool) {
-	if task := t.tasks[taskID]; task != nil && task.toolUseID != "" {
+	if task := t.tasks[taskID]; task != nil && task.detached {
+		toolUseID = ""
+	} else if task != nil && task.toolUseID != "" {
 		toolUseID = task.toolUseID
 	}
 	delete(t.tasks, taskID)
 	signal := TaskSignal{TaskID: taskID, ToolUseID: toolUseID, Status: status}
-	if len(t.tasks) > 0 {
+	if t.holding() > 0 {
 		return signal, false
 	}
 	t.awaitingFinalResult = true
 	return signal, true
 }
 
+// holding counts the outstanding tasks that keep the turn open.
+func (t *BackgroundTracker) holding() int {
+	n := 0
+	for _, task := range t.tasks {
+		if !task.detached {
+			n++
+		}
+	}
+	return n
+}
+
 // Waiting reports whether the turn must stay open regardless of any result
 // message already received.
 func (t *BackgroundTracker) Waiting() bool {
-	return len(t.tasks) > 0 || t.awaitingFinalResult
+	return t.holding() > 0 || t.awaitingFinalResult
 }
 
 // NoteResult records that a result arrived, satisfying the wait for the main
@@ -183,7 +210,7 @@ func (t *BackgroundTracker) NoteResult() {
 }
 
 func (t *BackgroundTracker) PendingCount() int {
-	return len(t.tasks)
+	return t.holding()
 }
 
 // SubagentSignalItems converts an outcome's task transitions into process

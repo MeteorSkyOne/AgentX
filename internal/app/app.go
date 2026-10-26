@@ -184,6 +184,7 @@ func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
 		backgroundCtx:    backgroundCtx,
 		backgroundCancel: backgroundCancel,
 	}
+	a.registerBackgroundTurnHandlers()
 	if onUpdated := opts.SelfUpdates.OnUpdated; onUpdated != nil {
 		// Self-update and runtime updates share a default schedule; restarting while
 		// npm is mid-install leaves the runtime CLI broken.

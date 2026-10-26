@@ -167,3 +167,123 @@ func TestDetachReaderDoesNotGoNegative(t *testing.T) {
 		t.Fatalf("expected reader count 1 after attach, got %d", n)
 	}
 }
+
+func TestClaimedTurnLinesGoToTheAdoptingReader(t *testing.T) {
+	pool := New(Options{IdleTimeout: 1 * time.Hour})
+	defer pool.Shutdown(context.Background())
+
+	proc, _, err := pool.GetOrCreate("claim", echoStartFunc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	claimed := make(chan struct{}, 1)
+	fellBack := make(chan string, 4)
+	proc.SetFallbackHandler(func(line []byte) {
+		if string(line) == "wake" && proc.ClaimTurn(5*time.Second) {
+			claimed <- struct{}{}
+			return
+		}
+		fellBack <- string(line)
+	})
+
+	if err := proc.WriteBytes([]byte("wake\nnext\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-claimed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("fallback never claimed the turn")
+	}
+	if proc.ClaimTurn(time.Second) {
+		t.Fatal("a second claim must fail while the first holds the turn")
+	}
+
+	proc.AttachReader()
+	defer proc.DetachReader()
+	if !proc.AdoptClaim() {
+		t.Fatal("pending claim was not adoptable")
+	}
+	for _, want := range []string{"wake", "next"} {
+		select {
+		case line := <-proc.StdoutLines():
+			if string(line) != want {
+				t.Fatalf("expected %q, got %q", want, line)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("adopting reader never received %q", want)
+		}
+	}
+	select {
+	case line := <-fellBack:
+		t.Fatalf("claimed line %q leaked to the fallback", line)
+	default:
+	}
+	if !proc.InUse() {
+		t.Fatal("adopted claim must keep holding the turn")
+	}
+	proc.ReleaseTurn()
+}
+
+func TestUnadoptedClaimIsAbandoned(t *testing.T) {
+	pool := New(Options{IdleTimeout: 1 * time.Hour})
+	defer pool.Shutdown(context.Background())
+
+	proc, _, err := pool.GetOrCreate("abandon", echoStartFunc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fellBack := make(chan string, 4)
+	proc.SetFallbackHandler(func(line []byte) {
+		if string(line) == "wake" && proc.ClaimTurn(100*time.Millisecond) {
+			return
+		}
+		fellBack <- string(line)
+	})
+
+	if err := proc.WriteBytes([]byte("wake\nlater\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case line := <-fellBack:
+		if line != "later" {
+			t.Fatalf("expected %q after the claim expired, got %q", "later", line)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("lines never returned to the fallback after the claim expired")
+	}
+	if proc.AdoptClaim() {
+		t.Fatal("an abandoned claim must not be adoptable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := proc.AcquireTurn(ctx); err != nil {
+		t.Fatalf("abandoned claim did not release the turn: %v", err)
+	}
+	proc.ReleaseTurn()
+}
+
+func TestClaimTurnFailsWhileATurnIsHeld(t *testing.T) {
+	pool := New(Options{IdleTimeout: 1 * time.Hour})
+	defer pool.Shutdown(context.Background())
+
+	proc, _, err := pool.GetOrCreate("busy", echoStartFunc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := proc.AcquireTurn(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if proc.ClaimTurn(time.Second) {
+		t.Fatal("claim must not steal a held turn")
+	}
+	proc.ReleaseTurn()
+	if !proc.ClaimTurn(time.Second) {
+		t.Fatal("claim should succeed on an idle process")
+	}
+	proc.AbandonClaim()
+	if proc.InUse() {
+		t.Fatal("AbandonClaim must release the turn")
+	}
+}

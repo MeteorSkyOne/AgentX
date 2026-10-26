@@ -25,6 +25,9 @@ type agentRunOptions struct {
 	Result            chan<- agentRunResult
 	Team              *domain.TeamMetadata
 	TeamForCompletion func(body string) *domain.TeamMetadata
+	// BackgroundTurn runs a turn the agent started on its own: the session
+	// adopts it instead of being sent a prompt. See background_turns.go.
+	BackgroundTurn bool
 }
 
 type agentRunResult struct {
@@ -212,32 +215,35 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 		return
 	}
 
-	runtimeContext, err := a.runtimeContextForMessage(ctx, agent.ID, userMessage)
-	if err != nil {
-		failRun(ctx, "", err)
-		return
-	}
-	runtimeContext = joinRuntimeContext(runtimeContext, opts.Context)
-	if len(userMessage.Attachments) == 0 {
-		attachments, err := a.store.MessageAttachments().ListByMessage(ctx, userMessage.ID)
+	var runtimeContext, prompt string
+	if !opts.BackgroundTurn {
+		runtimeContext, err = a.runtimeContextForMessage(ctx, agent.ID, userMessage)
 		if err != nil {
 			failRun(ctx, "", err)
 			return
 		}
-		userMessage.Attachments = attachments
+		runtimeContext = joinRuntimeContext(runtimeContext, opts.Context)
+		if len(userMessage.Attachments) == 0 {
+			attachments, err := a.store.MessageAttachments().ListByMessage(ctx, userMessage.ID)
+			if err != nil {
+				failRun(ctx, "", err)
+				return
+			}
+			userMessage.Attachments = attachments
+		}
+
+		prompt = opts.Prompt
+		if prompt == "" {
+			prompt = userMessage.Body
+		}
+		prompt, err = a.promptWithReplyReference(ctx, userMessage, prompt)
+		if err != nil {
+			failRun(ctx, "", err)
+			return
+		}
 	}
 
-	prompt := opts.Prompt
-	if prompt == "" {
-		prompt = userMessage.Body
-	}
-	prompt, err = a.promptWithReplyReference(ctx, userMessage, prompt)
-	if err != nil {
-		failRun(ctx, "", err)
-		return
-	}
-
-	sessionKey := agent.ID + ":" + string(userMessage.ConversationType) + ":" + userMessage.ConversationID
+	sessionKey := agentSessionKey(agent.ID, userMessage.ConversationType, userMessage.ConversationID)
 	startedPublished := false
 	for {
 		session, err := rt.StartSession(ctx, agentruntime.StartSessionRequest{
@@ -261,6 +267,15 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 			return
 		}
 		a.setActiveAgentRunSession(ctx, activeKey, runID, session)
+		if opts.BackgroundTurn {
+			if err := adoptBackgroundTurn(ctx, session); err != nil {
+				// The claim lapsed before we got here; nothing was produced.
+				slog.Warn("agent background turn was not adopted", append(runAttrs, "error", err)...)
+				terminalStatus = "canceled"
+				activeRun.closeSession(context.WithoutCancel(ctx), session)
+				return
+			}
+		}
 
 		providerSessionID := session.CurrentSessionID()
 		if err := a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, providerSessionID, "running"); err != nil {
@@ -279,15 +294,17 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 			})
 		}
 
-		if err := session.Send(ctx, agentruntime.Input{
-			Prompt:      prompt,
-			Context:     runtimeContext,
-			Attachments: runtimeAttachmentsFromMessage(userMessage),
-		}); err != nil {
-			slog.Error("agent runtime send failed", append(runAttrs, "provider_session_id", session.CurrentSessionID(), "error", err)...)
-			failRun(ctx, session.CurrentSessionID(), err)
-			activeRun.closeSession(context.WithoutCancel(ctx), session)
-			return
+		if !opts.BackgroundTurn {
+			if err := session.Send(ctx, agentruntime.Input{
+				Prompt:      prompt,
+				Context:     runtimeContext,
+				Attachments: runtimeAttachmentsFromMessage(userMessage),
+			}); err != nil {
+				slog.Error("agent runtime send failed", append(runAttrs, "provider_session_id", session.CurrentSessionID(), "error", err)...)
+				failRun(ctx, session.CurrentSessionID(), err)
+				activeRun.closeSession(context.WithoutCancel(ctx), session)
+				return
+			}
 		}
 
 		var thinkingBuf strings.Builder
@@ -436,7 +453,7 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 					terminalStatus = "failed"
 					a.removePendingQuestions(userMessage.ConversationType, userMessage.ConversationID)
 					err := runtimeEventError(evt)
-					if evt.StaleSession && previousSessionID != "" {
+					if evt.StaleSession && previousSessionID != "" && !opts.BackgroundTurn {
 						slog.Warn("agent runtime stale provider session; retrying without resume", append(runAttrs, "provider_session_id", previousSessionID, "error", err)...)
 						if err := a.store.Sessions().SetAgentSession(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, "", "stale"); err != nil {
 							failRun(ctx, session.CurrentSessionID(), err)
@@ -469,4 +486,12 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 			return
 		}
 	}
+}
+
+func adoptBackgroundTurn(ctx context.Context, session agentruntime.Session) error {
+	adopter, ok := session.(agentruntime.BackgroundTurnAdopter)
+	if !ok {
+		return errors.New("runtime session cannot adopt a background turn")
+	}
+	return adopter.AdoptBackgroundTurn(ctx)
 }

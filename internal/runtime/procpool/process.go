@@ -20,6 +20,10 @@ import (
 // reader is still attached before routing a line to the fallback handler.
 const deliverRecheckInterval = 250 * time.Millisecond
 
+// claimRecheckInterval is how often dispatch checks for the reader of a
+// claimed turn to attach.
+const claimRecheckInterval = 20 * time.Millisecond
+
 type ManagedProcess struct {
 	Key  string
 	cmd  *exec.Cmd
@@ -43,6 +47,11 @@ type ManagedProcess struct {
 	turnMu chan struct{}
 
 	stderrBuf lockedBuffer
+
+	// claimDeadline is set while a turn the process started on its own has been
+	// claimed but no reader has adopted it yet; see ClaimTurn.
+	claimMu       sync.Mutex
+	claimDeadline time.Time
 
 	Mu       sync.Mutex
 	UserData map[any]any
@@ -153,6 +162,55 @@ func (mp *ManagedProcess) AcquireTurn(ctx context.Context) error {
 	}
 }
 
+// ClaimTurn takes the turn for output the process produced on its own — a turn
+// nobody sent a prompt for, such as an agent waking up when its background task
+// finishes. It never blocks: it fails when another turn holds the process.
+//
+// While the claim is pending, dispatch holds lines for the reader that adopts
+// it (AttachReader, then AdoptClaim) instead of handing them to the fallback
+// handler. A claim nobody adopts within timeout is abandoned.
+func (mp *ManagedProcess) ClaimTurn(timeout time.Duration) bool {
+	if !mp.Alive() {
+		return false
+	}
+	select {
+	case <-mp.turnMu:
+	default:
+		return false
+	}
+	mp.turnHeld.Store(true)
+	mp.lastUsedAt.Store(time.Now())
+	mp.claimMu.Lock()
+	mp.claimDeadline = time.Now().Add(timeout)
+	mp.claimMu.Unlock()
+	return true
+}
+
+// AdoptClaim hands a pending claim to the caller, who now holds the turn and
+// must release it with ReleaseTurn. Attach the reader first so no held line is
+// routed to the fallback in between. It reports false when there is no pending
+// claim, e.g. because it was abandoned.
+func (mp *ManagedProcess) AdoptClaim() bool {
+	mp.claimMu.Lock()
+	defer mp.claimMu.Unlock()
+	if mp.claimDeadline.IsZero() {
+		return false
+	}
+	mp.claimDeadline = time.Time{}
+	return true
+}
+
+// AbandonClaim drops a pending claim and releases its turn.
+func (mp *ManagedProcess) AbandonClaim() {
+	mp.claimMu.Lock()
+	pending := !mp.claimDeadline.IsZero()
+	mp.claimDeadline = time.Time{}
+	mp.claimMu.Unlock()
+	if pending {
+		mp.ReleaseTurn()
+	}
+}
+
 func (mp *ManagedProcess) ReleaseTurn() {
 	mp.turnHeld.Store(false)
 	mp.lastUsedAt.Store(time.Now())
@@ -203,8 +261,45 @@ func (mp *ManagedProcess) dispatch() {
 		if mp.deliver(line, h == nil) {
 			continue
 		}
+		if mp.deliverToClaim(line) {
+			continue
+		}
 		mp.lastUsedAt.Store(time.Now())
 		h(line)
+		// The handler may have claimed the turn this line starts.
+		mp.deliverToClaim(line)
+	}
+}
+
+// deliverToClaim holds a line for the reader that is about to adopt a pending
+// claim, reporting whether it landed. A claim whose reader never shows up is
+// abandoned at its deadline and the line goes back to the fallback path.
+func (mp *ManagedProcess) deliverToClaim(line []byte) bool {
+	for {
+		mp.claimMu.Lock()
+		deadline := mp.claimDeadline
+		readers := mp.readers.Load()
+		if !deadline.IsZero() && readers <= 0 && !time.Now().Before(deadline) {
+			mp.claimDeadline = time.Time{}
+			mp.claimMu.Unlock()
+			slog.Warn("procpool: claimed turn was never adopted; releasing it", "key", mp.Key)
+			mp.ReleaseTurn()
+			return false
+		}
+		mp.claimMu.Unlock()
+		if readers > 0 {
+			return mp.deliver(line, false)
+		}
+		if deadline.IsZero() {
+			return false
+		}
+		timer := time.NewTimer(claimRecheckInterval)
+		select {
+		case <-timer.C:
+		case <-mp.ctx.Done():
+			timer.Stop()
+			return true
+		}
 	}
 }
 

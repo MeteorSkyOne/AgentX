@@ -328,3 +328,58 @@ func TestStoppedAndKilledTasksFinish(t *testing.T) {
 		t.Fatalf("finished = %v", finished)
 	}
 }
+
+// A background shell command is silent while it runs, so it does not hold the
+// turn open and its tool call is not rendered as a subagent.
+func TestBackgroundShellDoesNotHoldTheTurn(t *testing.T) {
+	tracker := NewBackgroundTracker()
+	started := tracker.TrackSystemMessage(map[string]any{
+		"subtype": "background_tasks_changed",
+		"tasks":   []any{map[string]any{"task_id": "b1", "task_type": "local_bash"}},
+	})
+	started.Started = append(started.Started, tracker.TrackSystemMessage(map[string]any{
+		"subtype": "task_started", "task_id": "b1", "task_type": "local_bash",
+		"tool_use_id": "toolu_bash", "is_backgrounded": true,
+	}).Started...)
+	if len(started.Started) != 0 {
+		t.Fatalf("background shell must not announce a subagent, got %#v", started.Started)
+	}
+	if tracker.Waiting() {
+		t.Fatal("background shell must not hold the turn open")
+	}
+	if !tracker.Seen() {
+		t.Fatal("background shell still counts as a task for the ephemeral runtime")
+	}
+	finished := tracker.TrackSystemMessage(map[string]any{
+		"subtype": "task_notification", "task_id": "b1", "status": "completed", "tool_use_id": "toolu_bash",
+	})
+	if items := SubagentSignalItems(finished); len(items) != 0 {
+		t.Fatalf("background shell must not emit subagent items, got %#v", items)
+	}
+}
+
+// A subagent finishing while a background shell is still running is the last
+// task holding the turn, so the agent's report on it is still awaited.
+func TestSubagentDrainsWhileBackgroundShellRuns(t *testing.T) {
+	tracker := NewBackgroundTracker()
+	tracker.TrackSystemMessage(map[string]any{
+		"subtype": "task_started", "task_id": "a1", "task_type": "local_agent", "tool_use_id": "toolu_agent", "is_backgrounded": true,
+	})
+	tracker.TrackSystemMessage(map[string]any{
+		"subtype": "task_started", "task_id": "b1", "task_type": "local_bash", "tool_use_id": "toolu_bash", "is_backgrounded": true,
+	})
+	tracker.NoteResult()
+	if !tracker.Waiting() || tracker.PendingCount() != 1 {
+		t.Fatalf("subagent must hold the turn: waiting=%v pending=%d", tracker.Waiting(), tracker.PendingCount())
+	}
+	outcome := tracker.TrackSystemMessage(map[string]any{
+		"subtype": "task_notification", "task_id": "a1", "status": "completed",
+	})
+	if !outcome.Drained {
+		t.Fatal("finishing the subagent must drain the turn despite the running shell")
+	}
+	tracker.NoteResult()
+	if tracker.Waiting() {
+		t.Fatal("turn must be over once the agent reported on the subagent")
+	}
+}

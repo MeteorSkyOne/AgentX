@@ -70,7 +70,7 @@ func (a *App) probeStatusContextUsage(ctx context.Context, req SendMessageReques
 	probeCtx, cancel := context.WithTimeout(ctx, statusContextProbeTimeout)
 	defer cancel()
 
-	sessionKey := target.Agent.ID + ":" + string(req.ConversationType) + ":" + req.ConversationID
+	sessionKey := agentSessionKey(target.Agent.ID, req.ConversationType, req.ConversationID)
 	session, err := rt.StartSession(probeCtx, agentruntime.StartSessionRequest{
 		AgentID:              target.Agent.ID,
 		Workspace:            target.RunWorkspace.Path,

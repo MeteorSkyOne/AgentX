@@ -3,13 +3,23 @@ package claudepersist
 import (
 	"encoding/json"
 	"log/slog"
+	"time"
 
 	"github.com/meteorsky/agentx/internal/runtime/claude"
 	"github.com/meteorsky/agentx/internal/runtime/procpool"
 )
 
-// newBackgroundFallback answers control requests that arrive while no turn is
-// reading the process.
+// backgroundTurnClaimTimeout bounds how long a turn Claude Code started on its
+// own waits for the app to adopt it before its output is discarded.
+const backgroundTurnClaimTimeout = 30 * time.Second
+
+// newBackgroundFallback handles lines that arrive while no turn is reading the
+// process.
+//
+// When the agent starts a turn on its own — Claude Code wakes the main agent to
+// report on a background command that finished after its reply was over — the
+// turn is claimed and offered to startTurn, so the app can read it as a reply
+// of its own. Without a taker the output is discarded.
 //
 // Claude Code runs Agent/Task subagents in the background: the main turn emits
 // its result as soon as the subagent is launched, so the subagent keeps working
@@ -17,17 +27,23 @@ import (
 // long after the turn's reader has gone away. Nobody would answer those
 // requests, and the subagent would block until the idle reaper killed the whole
 // process.
-func newBackgroundFallback(proc *procpool.ManagedProcess, key string) func([]byte) {
+func newBackgroundFallback(proc *procpool.ManagedProcess, key string, startTurn func(sessionKey string) bool) func([]byte) {
 	return func(line []byte) {
 		var payload map[string]any
 		if err := json.Unmarshal(line, &payload); err != nil {
 			return
 		}
 		payloadType := claude.StringValue(payload, "type")
+		if startsBackgroundTurn(payload) && startTurn != nil && proc.ClaimTurn(backgroundTurnClaimTimeout) {
+			if startTurn(key) {
+				slog.Info("claudepersist: agent started a turn on its own", "key", key, "type", payloadType)
+				return
+			}
+			proc.AbandonClaim()
+		}
 		if payloadType != "control_request" {
-			// Anything the agent says outside a turn is lost — typically the
-			// follow-up report of a subagent whose turn already timed out. That
-			// is real output disappearing, so make it visible in the logs.
+			// Agent output nobody adopted as a turn is lost. That is real
+			// output disappearing, so make it visible in the logs.
 			switch payloadType {
 			case "assistant", "user", "result":
 				slog.Warn("claudepersist: discarding agent output that arrived outside any turn",
@@ -73,4 +89,17 @@ func newBackgroundFallback(proc *procpool.ManagedProcess, key string) func([]byt
 		slog.Debug("claudepersist: answered background control request",
 			"key", key, "tool", toolName, "behavior", inner["behavior"])
 	}
+}
+
+// startsBackgroundTurn reports whether an unread line means the agent is
+// running a turn: the session init that opens each turn, or agent output.
+// Task lifecycle messages and stray control traffic do not.
+func startsBackgroundTurn(payload map[string]any) bool {
+	switch claude.StringValue(payload, "type") {
+	case "assistant", "user", "result", "stream_event":
+		return true
+	case "system":
+		return claude.StringValue(payload, "subtype") == "init"
+	}
+	return false
 }
