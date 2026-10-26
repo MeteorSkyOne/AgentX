@@ -83,7 +83,7 @@ func (t *BackgroundTracker) TrackSystemMessage(payload map[string]any) TrackOutc
 		for _, item := range tasks {
 			task, _ := item.(map[string]any)
 			taskID := StringValue(task, "task_id")
-			if taskID == "" || isTerminalTaskStatus(StringValue(task, "status")) {
+			if taskID == "" || IsTerminalTaskStatus(StringValue(task, "status")) {
 				continue
 			}
 			live[taskID] = struct{}{}
@@ -102,7 +102,7 @@ func (t *BackgroundTracker) TrackSystemMessage(payload map[string]any) TrackOutc
 			}
 		}
 	case "task_notification":
-		if status := StringValue(payload, "status"); isTerminalTaskStatus(status) {
+		if status := StringValue(payload, "status"); IsTerminalTaskStatus(status) {
 			taskID := StringValue(payload, "task_id")
 			if _, tracked := t.tasks[taskID]; tracked {
 				signal, drained := t.finish(taskID, status, StringValue(payload, "tool_use_id"))
@@ -118,7 +118,7 @@ func (t *BackgroundTracker) TrackSystemMessage(payload map[string]any) TrackOutc
 				task.background = true
 			}
 		}
-		if status := StringValue(patch, "status"); isTerminalTaskStatus(status) {
+		if status := StringValue(patch, "status"); IsTerminalTaskStatus(status) {
 			if _, tracked := t.tasks[taskID]; tracked {
 				signal, drained := t.finish(taskID, status, "")
 				outcome.Finished = append(outcome.Finished, signal)
@@ -235,7 +235,9 @@ func SubagentSignalItems(outcome TrackOutcome) []runtime.ProcessItem {
 	return items
 }
 
-func isTerminalTaskStatus(status string) bool {
+// IsTerminalTaskStatus reports whether a Claude Code task status means the
+// task has ended.
+func IsTerminalTaskStatus(status string) bool {
 	switch status {
 	case "completed", "failed", "stopped", "killed", "cancelled", "canceled", "error", "timeout":
 		return true

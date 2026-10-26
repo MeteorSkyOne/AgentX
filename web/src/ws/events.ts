@@ -1,4 +1,4 @@
-import type { AgentGoal, AgentPlan, ConversationType, Message, ProcessItem, TeamMetadata } from "../api/types";
+import type { AgentGoal, AgentPlan, BackgroundTask, ConversationType, Message, ProcessItem, TeamMetadata } from "../api/types";
 
 interface BaseEvent {
   id: string;
@@ -149,6 +149,15 @@ export interface AgentPromptQueueRemovedEvent extends BaseEvent {
   };
 }
 
+/** Carries an agent's full background task list whenever it changes. */
+export interface AgentBackgroundTasksUpdatedEvent extends BaseEvent {
+  type: "AgentBackgroundTasksUpdated";
+  payload: {
+    agent_id: string;
+    tasks: BackgroundTask[];
+  };
+}
+
 export interface SubscribedEvent {
   type: "subscribed";
 }
@@ -168,7 +177,8 @@ export type AgentXEvent =
   | AgentInputRequestEvent
   | AgentRunProgressEvent
   | AgentPromptQueuedEvent
-  | AgentPromptQueueRemovedEvent;
+  | AgentPromptQueueRemovedEvent
+  | AgentBackgroundTasksUpdatedEvent;
 
 export type SocketEvent = AgentXEvent | SubscribedEvent | { type?: unknown };
 
@@ -188,6 +198,7 @@ export function isAgentXEvent(event: SocketEvent): event is AgentXEvent {
     event.type === "AgentInputRequest" ||
     event.type === "AgentRunProgress" ||
     event.type === "AgentPromptQueued" ||
-    event.type === "AgentPromptQueueRemoved"
+    event.type === "AgentPromptQueueRemoved" ||
+    event.type === "AgentBackgroundTasksUpdated"
   );
 }

@@ -18,6 +18,7 @@ import {
   type SlashCommandDefinition
 } from "./composerAutocomplete";
 import { AttachmentPreviews } from "./attachments/AttachmentPreviews";
+import { BackgroundTasks } from "./BackgroundTasks";
 import { UploadProgressBar } from "./attachments/UploadProgressBar";
 import { revokeAttachmentPreviews } from "./attachments/draft";
 import { useDraftAttachments } from "./attachments/useDraftAttachments";
@@ -330,6 +331,9 @@ export function Composer({
       className="shrink-0 border-t-2 border-border bg-background/95 px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-4"
       {...dragHandlers}
     >
+      <div className="px-1 text-xs text-muted-foreground empty:hidden [&:not(:empty)]:pb-2">
+        <BackgroundTasks conversation={conversation} agents={mentionAgents} />
+      </div>
       {(typingLabel || queuedPrompts.length > 0) && (
         <div className="space-y-1 px-1 pb-2 text-xs text-muted-foreground">
           {typingLabel && (

@@ -34,6 +34,7 @@ func newBackgroundFallback(proc *procpool.ManagedProcess, key string, startTurn 
 			return
 		}
 		payloadType := claude.StringValue(payload, "type")
+		registryOf(proc).observe(payload)
 		if startsBackgroundTurn(payload) && startTurn != nil && proc.ClaimTurn(backgroundTurnClaimTimeout) {
 			if startTurn(key) {
 				slog.Info("claudepersist: agent started a turn on its own", "key", key, "type", payloadType)

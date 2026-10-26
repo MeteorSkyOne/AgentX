@@ -132,14 +132,18 @@ type App struct {
 	messageQueueByID   map[string]*queuedAgentPrompt
 	scheduledRunsMu    sync.Mutex
 	scheduledRuns      map[string]struct{}
-	backgroundMu       sync.Mutex
-	backgroundCtx      context.Context
-	backgroundCancel   context.CancelFunc
-	backgroundWG       sync.WaitGroup
-	shuttingDown       bool
-	restartMu          sync.Mutex
-	restartRequested   bool
-	restartExecPath    string
+	// backgroundTasks holds each agent session's latest background task list,
+	// keyed by agentSessionKey.
+	backgroundTasksMu sync.Mutex
+	backgroundTasks   map[string][]agentruntime.BackgroundTask
+	backgroundMu      sync.Mutex
+	backgroundCtx     context.Context
+	backgroundCancel  context.CancelFunc
+	backgroundWG      sync.WaitGroup
+	shuttingDown      bool
+	restartMu         sync.Mutex
+	restartRequested  bool
+	restartExecPath   string
 }
 
 func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
@@ -181,10 +185,12 @@ func New(st store.Store, bus *eventbus.Bus, opts Options) *App {
 		messageQueue:     make(map[messageQueueKey][]*queuedAgentPrompt),
 		messageQueueByID: make(map[string]*queuedAgentPrompt),
 		scheduledRuns:    make(map[string]struct{}),
+		backgroundTasks:  make(map[string][]agentruntime.BackgroundTask),
 		backgroundCtx:    backgroundCtx,
 		backgroundCancel: backgroundCancel,
 	}
 	a.registerBackgroundTurnHandlers()
+	a.registerBackgroundTaskHandlers()
 	if onUpdated := opts.SelfUpdates.OnUpdated; onUpdated != nil {
 		// Self-update and runtime updates share a default schedule; restarting while
 		// npm is mid-install leaves the runtime CLI broken.

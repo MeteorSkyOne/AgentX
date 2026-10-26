@@ -742,3 +742,25 @@ export interface WorkspaceFile {
   body: string;
   content: string;
 }
+
+export type BackgroundTaskKind = "shell" | "monitor" | "agent";
+
+/** Work an agent left running outside its reply. `status` is "running" until it ends. */
+export interface BackgroundTask {
+  id: string;
+  agent_id: string;
+  kind: BackgroundTaskKind | string;
+  description?: string;
+  tool_call_id?: string;
+  status: string;
+  summary?: string;
+  has_output: boolean;
+  started_at: string;
+  ended_at?: string;
+}
+
+export interface BackgroundTaskOutput {
+  output: string;
+  /** Earlier output was left out. */
+  truncated: boolean;
+}

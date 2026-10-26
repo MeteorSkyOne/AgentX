@@ -780,3 +780,69 @@ func parseLimit(r *http.Request) (int, error) {
 	}
 	return limit, nil
 }
+
+// authorizedConversation resolves the conversation in the URL for the signed-in
+// user, writing the error response and reporting false when it cannot.
+func (s *Server) authorizedConversation(w http.ResponseWriter, r *http.Request) (domain.ConversationType, string, bool) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return "", "", false
+	}
+	conversationType, ok := parseConversationType(chi.URLParam(r, "type"))
+	if !ok {
+		writeError(w, http.StatusBadRequest, "unknown conversation type")
+		return "", "", false
+	}
+	conversationID := chi.URLParam(r, "id")
+	if _, ok, err := s.authorizedConversationOrganizationID(r, userID, conversationType, conversationID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return "", "", false
+	} else if !ok {
+		writeError(w, http.StatusNotFound, "conversation not found")
+		return "", "", false
+	}
+	return conversationType, conversationID, true
+}
+
+func (s *Server) handleListBackgroundTasks(w http.ResponseWriter, r *http.Request) {
+	conversationType, conversationID, ok := s.authorizedConversation(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tasks": s.app.ListBackgroundTasks(conversationType, conversationID)})
+}
+
+func (s *Server) handleBackgroundTaskOutput(w http.ResponseWriter, r *http.Request) {
+	conversationType, conversationID, ok := s.authorizedConversation(w, r)
+	if !ok {
+		return
+	}
+	output, err := s.app.ReadBackgroundTaskOutput(conversationType, conversationID, chi.URLParam(r, "agentID"), chi.URLParam(r, "taskID"))
+	if errors.Is(err, app.ErrBackgroundTaskNotFound) {
+		writeError(w, http.StatusNotFound, "background task not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read task output")
+		return
+	}
+	writeJSON(w, http.StatusOK, output)
+}
+
+func (s *Server) handleStopBackgroundTask(w http.ResponseWriter, r *http.Request) {
+	conversationType, conversationID, ok := s.authorizedConversation(w, r)
+	if !ok {
+		return
+	}
+	err := s.app.StopBackgroundTask(r.Context(), conversationType, conversationID, chi.URLParam(r, "agentID"), chi.URLParam(r, "taskID"))
+	if errors.Is(err, app.ErrBackgroundTaskNotFound) {
+		writeError(w, http.StatusNotFound, "no running background task")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

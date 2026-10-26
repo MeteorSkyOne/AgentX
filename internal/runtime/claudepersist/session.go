@@ -247,19 +247,24 @@ func (s *persistentSession) StopSubagent(_ context.Context, toolCallID string) e
 	if !ok {
 		return errors.New("no running subagent for this tool call")
 	}
-	msg := map[string]any{
+	if err := writeStopTask(s.process, taskID); err != nil {
+		return err
+	}
+	slog.Info("claudepersist: requested subagent stop", "key", s.key, "task_id", taskID, "tool_call_id", toolCallID)
+	return nil
+}
+
+// writeStopTask asks Claude Code to stop a task. The CLI acknowledges with the
+// task's terminal lifecycle messages.
+func writeStopTask(proc *procpool.ManagedProcess, taskID string) error {
+	return proc.WriteJSON(map[string]any{
 		"type":       "control_request",
 		"request_id": id.New("ctrl"),
 		"request": map[string]any{
 			"subtype": "stop_task",
 			"task_id": taskID,
 		},
-	}
-	if err := s.process.WriteJSON(msg); err != nil {
-		return err
-	}
-	slog.Info("claudepersist: requested subagent stop", "key", s.key, "task_id", taskID, "tool_call_id", toolCallID)
-	return nil
+	})
 }
 
 func (s *persistentSession) ContextUsage(ctx context.Context) (*runtime.ContextUsage, error) {
@@ -568,6 +573,7 @@ func (s *persistentSession) handleLine(line []byte, state *claudeTurnState) (boo
 	for _, evt := range state.progress.Track(payload) {
 		s.emit(evt)
 	}
+	registryOf(s.process).observe(payload)
 
 	switch claude.StringValue(payload, "type") {
 	case "system":

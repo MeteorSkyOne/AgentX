@@ -6,6 +6,8 @@ import type {
   AgentEnvPatch,
   AgentChannelContext,
   AgentProviderLimits,
+  BackgroundTask,
+  BackgroundTaskOutput,
   Channel,
   ConversationAgentContext,
   ConversationAgentSkills,
@@ -1045,6 +1047,34 @@ export function conversationSkills(
   return request<ConversationAgentSkills[]>(
     `/api/conversations/${encodeURIComponent(type)}/${encodeURIComponent(id)}/skills`
   );
+}
+
+export function listBackgroundTasks(type: ConversationType, id: string): Promise<BackgroundTask[]> {
+  return request<{ tasks: BackgroundTask[] }>(
+    `/api/conversations/${encodeURIComponent(type)}/${encodeURIComponent(id)}/background-tasks`
+  ).then((response) => response.tasks);
+}
+
+function backgroundTaskPath(type: ConversationType, id: string, agentID: string, taskID: string): string {
+  return `/api/conversations/${encodeURIComponent(type)}/${encodeURIComponent(id)}/background-tasks/${encodeURIComponent(agentID)}/${encodeURIComponent(taskID)}`;
+}
+
+export function fetchBackgroundTaskOutput(
+  type: ConversationType,
+  id: string,
+  agentID: string,
+  taskID: string
+): Promise<BackgroundTaskOutput> {
+  return request<BackgroundTaskOutput>(`${backgroundTaskPath(type, id, agentID, taskID)}/output`);
+}
+
+export function stopBackgroundTask(
+  type: ConversationType,
+  id: string,
+  agentID: string,
+  taskID: string
+): Promise<void> {
+  return request<void>(`${backgroundTaskPath(type, id, agentID, taskID)}/stop`, { method: "POST" });
 }
 
 export function conversationMetrics(

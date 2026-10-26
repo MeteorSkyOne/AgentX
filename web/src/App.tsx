@@ -56,6 +56,7 @@ import type {
   Agent,
   AgentEnvPatch,
   AuthResponse,
+  BackgroundTask,
   Channel,
   CreateThreadResponse,
   Message,
@@ -74,6 +75,7 @@ import type {
 } from "./api/types";
 import { LoginView } from "./components/LoginView";
 import { Shell } from "./components/Shell";
+import { backgroundTasksQueryKey, mergeAgentBackgroundTasks } from "./components/BackgroundTasks";
 import {
   eventMatchesActiveConversation,
   mergeMessages,
@@ -510,6 +512,12 @@ export default function App() {
             })
           );
           break;
+        case "AgentBackgroundTasksUpdated":
+          queryClient.setQueryData<BackgroundTask[]>(
+            backgroundTasksQueryKey(activeConversation.type, activeConversation.id),
+            (current) => mergeAgentBackgroundTasks(current, event.payload.agent_id, event.payload.tasks)
+          );
+          break;
         case "AgentPromptQueueRemoved":
           setQueuedPrompts((current) =>
             current.filter((item) => item.queueID !== event.payload.queue_id)
@@ -645,7 +653,8 @@ export default function App() {
       conversationContextQuery.data,
       channelAgentsQuery.data,
       agentsQuery.data,
-      invalidateAgentConfigQueries
+      invalidateAgentConfigQueries,
+      queryClient
     ]
   );
 

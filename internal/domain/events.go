@@ -21,6 +21,9 @@ const (
 	EventAgentRunProgress           EventType = "AgentRunProgress"
 	EventAgentPromptQueued          EventType = "AgentPromptQueued"
 	EventAgentPromptQueueRemoved    EventType = "AgentPromptQueueRemoved"
+	// EventAgentBackgroundTasksUpdated carries an agent's full background task
+	// list in a conversation whenever it changes.
+	EventAgentBackgroundTasksUpdated EventType = "AgentBackgroundTasksUpdated"
 )
 
 type Event struct {
@@ -76,6 +79,27 @@ type AgentRunProgressPayload struct {
 	Goal    *AgentGoal    `json:"goal,omitempty"`
 	Plan    *AgentPlan    `json:"plan,omitempty"`
 	Team    *TeamMetadata `json:"team,omitempty"`
+}
+
+// BackgroundTask is work an agent left running outside its reply: a shell
+// command, a monitor, or a subagent. Kind is "shell", "monitor" or "agent";
+// Status is "running" until the task ends.
+type BackgroundTask struct {
+	ID          string     `json:"id"`
+	AgentID     string     `json:"agent_id"`
+	Kind        string     `json:"kind"`
+	Description string     `json:"description,omitempty"`
+	ToolCallID  string     `json:"tool_call_id,omitempty"`
+	Status      string     `json:"status"`
+	Summary     string     `json:"summary,omitempty"`
+	HasOutput   bool       `json:"has_output"`
+	StartedAt   time.Time  `json:"started_at"`
+	EndedAt     *time.Time `json:"ended_at,omitempty"`
+}
+
+type AgentBackgroundTasksPayload struct {
+	AgentID string           `json:"agent_id"`
+	Tasks   []BackgroundTask `json:"tasks"`
 }
 
 type AgentRunPayload struct {

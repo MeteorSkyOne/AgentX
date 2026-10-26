@@ -2,6 +2,8 @@ package claudepersist
 
 import (
 	"context"
+	"errors"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -31,6 +33,9 @@ type Runtime struct {
 	// backgroundTurn is the handler for turns Claude Code starts on its own;
 	// see runtime.BackgroundTurnNotifier.
 	backgroundTurn atomic.Pointer[func(sessionKey string) bool]
+	// backgroundTasks receives each session's task list when it changes; see
+	// runtime.BackgroundTaskReporter.
+	backgroundTasks atomic.Pointer[func(sessionKey string, tasks []runtime.BackgroundTask)]
 }
 
 func New(opts Options) *Runtime {
@@ -68,6 +73,12 @@ func (r *Runtime) StartSession(ctx context.Context, req runtime.StartSessionRequ
 		sess.baseMode = r.basePermissionMode(req)
 	}
 	if isNew {
+		registry := newTaskRegistry(key, req.Workspace, mergeEnv(os.Environ(), r.opts.Env, req.Env), r.reportBackgroundTasks)
+		attachRegistry(proc, registry)
+		go func() {
+			<-proc.Done()
+			registry.processExited()
+		}()
 		if err := sess.waitForSystemEvent(ctx); err != nil {
 			r.pool.Detach(proc)
 			proc.Kill()
@@ -91,6 +102,45 @@ func (r *Runtime) SetBackgroundTurnHandler(handler func(sessionKey string) bool)
 func (r *Runtime) startBackgroundTurn(sessionKey string) bool {
 	handler := r.backgroundTurn.Load()
 	return handler != nil && (*handler)(sessionKey)
+}
+
+func (r *Runtime) SetBackgroundTaskHandler(handler func(sessionKey string, tasks []runtime.BackgroundTask)) {
+	if handler == nil {
+		r.backgroundTasks.Store(nil)
+		return
+	}
+	r.backgroundTasks.Store(&handler)
+}
+
+func (r *Runtime) reportBackgroundTasks(sessionKey string, tasks []runtime.BackgroundTask) {
+	if handler := r.backgroundTasks.Load(); handler != nil {
+		(*handler)(sessionKey, tasks)
+	}
+}
+
+var errNoSuchBackgroundTask = errors.New("no such running background task")
+
+// StopBackgroundTask stops a running background task of the session's process,
+// whether or not a turn is in progress.
+func (r *Runtime) StopBackgroundTask(_ context.Context, sessionKey string, taskID string) error {
+	proc, ok := r.pool.Get(sessionKey)
+	if !ok {
+		return errNoSuchBackgroundTask
+	}
+	registry := registryOf(proc)
+	if registry == nil {
+		return errNoSuchBackgroundTask
+	}
+	running := false
+	for _, task := range registry.snapshot() {
+		if task.ID == taskID && task.Status == runtime.BackgroundTaskRunning {
+			running = true
+		}
+	}
+	if !running {
+		return errNoSuchBackgroundTask
+	}
+	return writeStopTask(proc, taskID)
 }
 
 func (r *Runtime) Shutdown(ctx context.Context) error {

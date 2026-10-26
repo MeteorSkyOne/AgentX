@@ -10,6 +10,7 @@ import { Composer, selectDraftAttachmentFiles } from "./Composer";
 
 vi.mock("../api/client", () => ({
   conversationSkills: vi.fn(),
+  listBackgroundTasks: vi.fn(async () => []),
   sendMessage: vi.fn()
 }));
 
