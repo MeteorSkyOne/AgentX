@@ -2,7 +2,6 @@ package config
 
 import (
 	"crypto/rand"
-	"crypto/x509"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -97,7 +96,7 @@ type ToolUpdateSettings struct {
 }
 
 type SelfUpdateSettings struct {
-	ProxyCA     string `json:"proxy_ca" toml:"proxy_ca"`
+	ProxyCAFile string `json:"proxy_ca_file" toml:"proxy_ca_file"`
 	ProxyURL    string `json:"proxy_url" toml:"proxy_url"`
 	AutoEnabled bool   `json:"auto_enabled" toml:"auto_enabled"`
 	TimeOfDay   string `json:"time_of_day" toml:"time_of_day"`
@@ -378,7 +377,7 @@ func isZeroToolUpdateSettings(settings ToolUpdateSettings) bool {
 }
 
 func isZeroSelfUpdateSettings(settings SelfUpdateSettings) bool {
-	return strings.TrimSpace(settings.ProxyCA) == "" && strings.TrimSpace(settings.ProxyURL) == "" && strings.TrimSpace(settings.TimeOfDay) == "" &&
+	return strings.TrimSpace(settings.ProxyCAFile) == "" && strings.TrimSpace(settings.ProxyURL) == "" && strings.TrimSpace(settings.TimeOfDay) == "" &&
 		strings.TrimSpace(settings.Timezone) == "" &&
 		strings.TrimSpace(settings.Channel) == "" &&
 		!settings.AutoEnabled
@@ -494,10 +493,7 @@ func NormalizeSelfUpdateSettings(settings SelfUpdateSettings, path string) (Self
 	if _, err := time.LoadLocation(settings.Timezone); err != nil {
 		return SelfUpdateSettings{}, fmt.Errorf("config file %s: self_update.timezone is invalid: %w", path, err)
 	}
-	settings.ProxyCA = strings.TrimSpace(settings.ProxyCA)
-	if settings.ProxyCA != "" && !x509.NewCertPool().AppendCertsFromPEM([]byte(settings.ProxyCA)) {
-		return SelfUpdateSettings{}, fmt.Errorf("config file %s: self_update.proxy_ca must contain a PEM certificate", path)
-	}
+	settings.ProxyCAFile = strings.TrimSpace(settings.ProxyCAFile)
 	settings.ProxyURL = strings.TrimSpace(settings.ProxyURL)
 	if settings.ProxyURL != "" {
 		u, err := url.Parse(settings.ProxyURL)
@@ -616,8 +612,8 @@ time_of_day = %q
 timezone = %q
 channel = %q
 proxy_url = %q
-proxy_ca = %q
-`, settings.ListenIP, settings.ListenPort, settings.ClaudeCommand, settings.CodexCommand, settings.PiCommand, settings.TLS.Enabled, settings.TLS.ListenPort, settings.TLS.CertFile, settings.TLS.KeyFile, toolUpdates.AutoEnabled, toolUpdates.TimeOfDay, toolUpdates.Timezone, toolUpdates.ClaudeEnabled, toolUpdates.CodexEnabled, toolUpdates.PiEnabled, selfUpdates.AutoEnabled, selfUpdates.TimeOfDay, selfUpdates.Timezone, selfUpdates.Channel, selfUpdates.ProxyURL, selfUpdates.ProxyCA)
+proxy_ca_file = %q
+`, settings.ListenIP, settings.ListenPort, settings.ClaudeCommand, settings.CodexCommand, settings.PiCommand, settings.TLS.Enabled, settings.TLS.ListenPort, settings.TLS.CertFile, settings.TLS.KeyFile, toolUpdates.AutoEnabled, toolUpdates.TimeOfDay, toolUpdates.Timezone, toolUpdates.ClaudeEnabled, toolUpdates.CodexEnabled, toolUpdates.PiEnabled, selfUpdates.AutoEnabled, selfUpdates.TimeOfDay, selfUpdates.Timezone, selfUpdates.Channel, selfUpdates.ProxyURL, selfUpdates.ProxyCAFile)
 }
 
 func defaultDataDir() string {

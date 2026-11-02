@@ -464,7 +464,11 @@ func (s *selfUpdateService) fetchReleases(ctx context.Context) ([]githubRelease,
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", selfUpdateUserAgent)
-	resp, err := s.requestClient().Do(req)
+	client, err := s.requestClient()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -489,7 +493,11 @@ func (s *selfUpdateService) downloadFile(ctx context.Context, url string, path s
 		return err
 	}
 	req.Header.Set("User-Agent", selfUpdateUserAgent)
-	resp, err := s.requestClient().Do(req)
+	client, err := s.requestClient()
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -771,10 +779,10 @@ func executableName() string {
 }
 
 // requestClient adds the configured CA to the system trust roots.
-func (s *selfUpdateService) requestClient() *http.Client {
+func (s *selfUpdateService) requestClient() (*http.Client, error) {
 	settings := s.snapshotSettings()
-	if settings.ProxyURL == "" && settings.ProxyCA == "" {
-		return s.client
+	if settings.ProxyURL == "" && settings.ProxyCAFile == "" {
+		return s.client, nil
 	}
 	client := *s.client
 	transport := http.DefaultTransport.(*http.Transport).Clone()
@@ -785,12 +793,18 @@ func (s *selfUpdateService) requestClient() *http.Client {
 		u, _ := url.Parse(settings.ProxyURL)
 		transport.Proxy = http.ProxyURL(u)
 	}
-	if settings.ProxyCA != "" {
+	if settings.ProxyCAFile != "" {
 		roots, err := x509.SystemCertPool()
 		if err != nil || roots == nil {
 			roots = x509.NewCertPool()
 		}
-		roots.AppendCertsFromPEM([]byte(settings.ProxyCA))
+		pemData, err := os.ReadFile(settings.ProxyCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read self-update CA file: %w", err)
+		}
+		if !roots.AppendCertsFromPEM(pemData) {
+			return nil, fmt.Errorf("self-update CA file %q contains no valid PEM certificates", settings.ProxyCAFile)
+		}
 		if transport.TLSClientConfig == nil {
 			transport.TLSClientConfig = &tls.Config{}
 		} else {
@@ -799,5 +813,5 @@ func (s *selfUpdateService) requestClient() *http.Client {
 		transport.TLSClientConfig.RootCAs = roots
 	}
 	client.Transport = transport
-	return &client
+	return &client, nil
 }

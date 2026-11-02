@@ -368,13 +368,35 @@ func TestSelfUpdateAdditionalCA(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
 	defer server.Close()
 	ca := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}))
-	service := newSelfUpdateService(t.TempDir(), SelfUpdateOptions{Settings: config.SelfUpdateSettings{ProxyCA: ca}})
-	resp, err := service.requestClient().Get(server.URL)
+	caPath := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(caPath, []byte(ca), 0600); err != nil {
+		t.Fatal(err)
+	}
+	service := newSelfUpdateService(t.TempDir(), SelfUpdateOptions{Settings: config.SelfUpdateSettings{ProxyCAFile: caPath}})
+	client, err := service.requestClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.Get(server.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatal(resp.Status)
+	}
+}
+
+func TestSelfUpdateCAFileErrors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ca.pem")
+	service := newSelfUpdateService(t.TempDir(), SelfUpdateOptions{Settings: config.SelfUpdateSettings{ProxyCAFile: path}})
+	if _, err := service.requestClient(); err == nil {
+		t.Fatal("expected missing CA file error")
+	}
+	if err := os.WriteFile(path, []byte("invalid"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.requestClient(); err == nil {
+		t.Fatal("expected invalid CA file error")
 	}
 }

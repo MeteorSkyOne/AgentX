@@ -221,7 +221,7 @@ export interface ToolUpdateOverview {
 
 export interface SelfUpdateSettings {
   proxy_url?: string;
-  proxy_ca?: string;
+  proxy_ca_file?: string;
   auto_enabled: boolean;
   time_of_day: string;
   timezone: string;

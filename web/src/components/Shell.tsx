@@ -211,7 +211,7 @@ export function Shell({
   const [selfAutoEnabled, setSelfAutoEnabled] = useState(false);
   const [selfTimeOfDay, setSelfTimeOfDay] = useState("04:00");
   const [selfTimezone, setSelfTimezone] = useState("Local");
-  const [selfProxyCA, setSelfProxyCA] = useState("");
+  const [selfProxyCAFile, setSelfProxyCAFile] = useState("");
   const [selfProxyURL, setSelfProxyURL] = useState("");
   const [selfChannel, setSelfChannel] = useState<SelfUpdateSettings["channel"]>("release");
   const [selfSettingsPending, setSelfSettingsPending] = useState(false);
@@ -395,7 +395,7 @@ export function Shell({
     selfUpdate?.settings.timezone,
     selfUpdate?.settings.channel,
     selfUpdate?.settings.proxy_url,
-    selfUpdate?.settings.proxy_ca,
+    selfUpdate?.settings.proxy_ca_file,
     preferences.show_ttft,
     preferences.show_tps,
     preferences.hide_avatars
@@ -534,7 +534,7 @@ export function Shell({
     setSelfAutoEnabled(settings?.auto_enabled ?? false);
     setSelfTimeOfDay(settings?.time_of_day ?? "04:00");
     setSelfTimezone(settings?.timezone ?? "Local");
-    setSelfProxyCA(settings?.proxy_ca ?? "");
+    setSelfProxyCAFile(settings?.proxy_ca_file ?? "");
     setSelfProxyURL(settings?.proxy_url ?? "");
     setSelfChannel(settings?.channel ?? "release");
     setSelfActionError(null);
@@ -707,7 +707,7 @@ export function Shell({
         timezone: selfTimezone.trim() || "Local",
         channel: selfChannel,
       proxy_url: selfProxyURL.trim(),
-      proxy_ca: selfProxyCA.trim(),
+      proxy_ca_file: selfProxyCAFile.trim(),
       });
       setSelfActionStatus("Saved");
     } catch (err) {
@@ -724,7 +724,7 @@ export function Shell({
       timezone: selfTimezone.trim() || "Local",
       channel: selfChannel,
       proxy_url: selfProxyURL.trim(),
-      proxy_ca: selfProxyCA.trim(),
+      proxy_ca_file: selfProxyCAFile.trim(),
     });
   }
 
@@ -1186,8 +1186,8 @@ export function Shell({
         setSelfTimeOfDay={setSelfTimeOfDay}
         selfTimezone={selfTimezone}
         setSelfTimezone={setSelfTimezone}
-        selfProxyCA={selfProxyCA}
-        setSelfProxyCA={setSelfProxyCA}
+        selfProxyCAFile={selfProxyCAFile}
+        setSelfProxyCAFile={setSelfProxyCAFile}
         selfProxyURL={selfProxyURL}
         setSelfProxyURL={setSelfProxyURL}
         selfChannel={selfChannel}

@@ -129,8 +129,8 @@ export interface ShellDialogsProps {
   setSelfTimeOfDay: StringSetter;
   selfTimezone: string;
   setSelfTimezone: StringSetter;
-  selfProxyCA: string;
-  setSelfProxyCA: StringSetter;
+  selfProxyCAFile: string;
+  setSelfProxyCAFile: StringSetter;
   selfProxyURL: string;
   setSelfProxyURL: StringSetter;
   selfChannel: SelfUpdateSettings["channel"];
@@ -314,8 +314,8 @@ export function ShellDialogs({
   setSelfTimeOfDay,
   selfTimezone,
   setSelfTimezone,
-  selfProxyCA,
-  setSelfProxyCA,
+  selfProxyCAFile,
+  setSelfProxyCAFile,
   selfProxyURL,
   setSelfProxyURL,
   selfChannel,
@@ -477,8 +477,8 @@ export function ShellDialogs({
               setSelfTimeOfDay={setSelfTimeOfDay}
               selfTimezone={selfTimezone}
               setSelfTimezone={setSelfTimezone}
-              selfProxyCA={selfProxyCA}
-              setSelfProxyCA={setSelfProxyCA}
+              selfProxyCAFile={selfProxyCAFile}
+              setSelfProxyCAFile={setSelfProxyCAFile}
               selfProxyURL={selfProxyURL}
               setSelfProxyURL={setSelfProxyURL}
               selfChannel={selfChannel}
