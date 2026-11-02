@@ -6,6 +6,8 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -768,14 +770,10 @@ func executableName() string {
 	return "agentx"
 }
 
-// requestClient applies the current proxy setting to both metadata and asset requests.
+// requestClient adds the configured CA to the system trust roots.
 func (s *selfUpdateService) requestClient() *http.Client {
-	proxy := s.snapshotSettings().ProxyURL
-	if proxy == "" {
-		return s.client
-	}
-	u, err := url.Parse(proxy)
-	if err != nil {
+	settings := s.snapshotSettings()
+	if settings.ProxyURL == "" && settings.ProxyCA == "" {
 		return s.client
 	}
 	client := *s.client
@@ -783,7 +781,23 @@ func (s *selfUpdateService) requestClient() *http.Client {
 	if existing, ok := s.client.Transport.(*http.Transport); ok {
 		transport = existing.Clone()
 	}
-	transport.Proxy = http.ProxyURL(u)
+	if settings.ProxyURL != "" {
+		u, _ := url.Parse(settings.ProxyURL)
+		transport.Proxy = http.ProxyURL(u)
+	}
+	if settings.ProxyCA != "" {
+		roots, err := x509.SystemCertPool()
+		if err != nil || roots == nil {
+			roots = x509.NewCertPool()
+		}
+		roots.AppendCertsFromPEM([]byte(settings.ProxyCA))
+		if transport.TLSClientConfig == nil {
+			transport.TLSClientConfig = &tls.Config{}
+		} else {
+			transport.TLSClientConfig = transport.TLSClientConfig.Clone()
+		}
+		transport.TLSClientConfig.RootCAs = roots
+	}
 	client.Transport = transport
 	return &client
 }

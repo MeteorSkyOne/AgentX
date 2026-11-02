@@ -79,6 +79,8 @@ interface AccountSettingsDialogProps {
   setSelfTimeOfDay: StringSetter;
   selfTimezone: string;
   setSelfTimezone: StringSetter;
+  selfProxyCA: string;
+  setSelfProxyCA: StringSetter;
   selfProxyURL: string;
   setSelfProxyURL: StringSetter;
   selfChannel: SelfUpdateSettings["channel"];
@@ -184,6 +186,8 @@ export function AccountSettingsDialog({
   setSelfTimeOfDay,
   selfTimezone,
   setSelfTimezone,
+  selfProxyCA,
+  setSelfProxyCA,
   selfProxyURL,
   setSelfProxyURL,
   selfChannel,
@@ -739,6 +743,10 @@ export function AccountSettingsDialog({
                     <div className="space-y-2">
                       <Label htmlFor="self-update-proxy">Proxy URL</Label>
                       <Input id="self-update-proxy" value={selfProxyURL} onChange={(event) => setSelfProxyURL(event.target.value)} disabled={selfUpdateLoading || selfSettingsPending} placeholder="http://127.0.0.1:7890" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="self-update-ca">Additional CA certificates (PEM)</Label>
+                      <textarea id="self-update-ca" className="w-full rounded-md border border-input bg-background p-2 font-mono text-xs" rows={4} value={selfProxyCA} onChange={(event) => setSelfProxyCA(event.target.value)} disabled={selfUpdateLoading || selfSettingsPending} placeholder="-----BEGIN CERTIFICATE-----" />
                     </div>
                     <div className="grid gap-1 rounded-md bg-muted px-3 py-2 text-xs">
                       <div className="flex items-center justify-between gap-3">

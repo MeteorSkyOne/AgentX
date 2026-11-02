@@ -5,7 +5,11 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"crypto/sha256"
+	"encoding/pem"
 	"fmt"
+	"github.com/meteorsky/agentx/internal/config"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -357,5 +361,20 @@ func assertFileBody(t *testing.T, path string, want string) {
 	}
 	if string(body) != want {
 		t.Fatalf("%s body = %q, want %q", path, string(body), want)
+	}
+}
+
+func TestSelfUpdateAdditionalCA(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer server.Close()
+	ca := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}))
+	service := newSelfUpdateService(t.TempDir(), SelfUpdateOptions{Settings: config.SelfUpdateSettings{ProxyCA: ca}})
+	resp, err := service.requestClient().Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatal(resp.Status)
 	}
 }
