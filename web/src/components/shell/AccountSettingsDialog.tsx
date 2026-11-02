@@ -87,6 +87,8 @@ interface AccountSettingsDialogProps {
   saveSelfUpdateSettings: () => void | Promise<void>;
   checkSelfUpdateNow: () => void | Promise<void>;
   runSelfUpdateNow: () => void | Promise<void>;
+  runtimeCommands: { claude: string; codex: string; pi: string };
+  setRuntimeCommands: React.Dispatch<React.SetStateAction<{ claude: string; codex: string; pi: string }>>;
   serverListenIP: string;
   setServerListenIP: StringSetter;
   serverListenPort: string;
@@ -188,6 +190,8 @@ export function AccountSettingsDialog({
   saveSelfUpdateSettings,
   checkSelfUpdateNow,
   runSelfUpdateNow,
+  runtimeCommands,
+  setRuntimeCommands,
   serverListenIP,
   setServerListenIP,
   serverListenPort,
@@ -535,6 +539,15 @@ export function AccountSettingsDialog({
                         HTTPS requires a certificate and private key path or pasted PEM content.
                       </p>
                     )}
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      {(["claude", "codex", "pi"] as const).map((kind) => (
+                        <div className="space-y-2" key={kind}>
+                          <Label htmlFor={`runtime-${kind}`}>{kind} executable</Label>
+                          <Input id={`runtime-${kind}`} value={runtimeCommands[kind]} placeholder={kind} disabled={serverSettingsLoading || serverSettingsPending} onChange={(event) => setRuntimeCommands((previous) => ({ ...previous, [kind]: event.target.value }))} />
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">Executable name or path; restart to apply. Environment variables override these settings.</p>
                     {(serverSettingsActionError || serverSettingsActionStatus) && (
                       <p className={cn("text-sm", serverSettingsActionError ? "text-destructive" : "text-muted-foreground")}>
                         {serverSettingsActionError ?? serverSettingsActionStatus}

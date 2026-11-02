@@ -475,3 +475,25 @@ func TestNormalizeToolUpdateSettingsDoesNotPersistLocalTimezone(t *testing.T) {
 		t.Fatalf("timezone = %q, want UTC fallback", settings.Timezone)
 	}
 }
+
+func TestRuntimeCommandsFromServerSettings(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AGENTX_DATA_DIR", dir)
+	t.Setenv("AGENTX_CLAUDE_COMMAND", "")
+	t.Setenv("AGENTX_CODEX_COMMAND", "override-codex")
+	t.Setenv("AGENTX_PI_COMMAND", "")
+	settings := DefaultServerSettings()
+	settings.ClaudeCommand = "/opt/bin/custom-claude"
+	settings.CodexCommand = "custom-codex"
+	settings.PiCommand = "custom-pi"
+	if _, err := SaveServerSettings(dir, settings); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ClaudeCommand != settings.ClaudeCommand || cfg.CodexCommand != "override-codex" || cfg.PiCommand != settings.PiCommand {
+		t.Fatalf("unexpected commands: claude=%q codex=%q pi=%q", cfg.ClaudeCommand, cfg.CodexCommand, cfg.PiCommand)
+	}
+}

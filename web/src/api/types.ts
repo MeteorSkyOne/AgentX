@@ -155,6 +155,9 @@ export interface NotificationSettings {
 }
 
 export interface ServerSettings {
+  claude_command?: string;
+  codex_command?: string;
+  pi_command?: string;
   organization_id: string;
   listen_ip: string;
   listen_port: number;
@@ -175,6 +178,9 @@ export interface ServerTLSSettings {
 }
 
 export interface ServerSettingsUpdatePayload {
+  claude_command?: string;
+  codex_command?: string;
+  pi_command?: string;
   listen_ip: string;
   listen_port: number;
   tls: ServerTLSSettings & {

@@ -74,6 +74,8 @@ export interface ShellDialogsProps {
   notificationSavePending: boolean;
   sendTestWebhook: () => void | Promise<void>;
   saveNotificationSettings: () => void | Promise<void>;
+  runtimeCommands: { claude: string; codex: string; pi: string };
+  setRuntimeCommands: React.Dispatch<React.SetStateAction<{ claude: string; codex: string; pi: string }>>;
   serverListenIP: string;
   setServerListenIP: StringSetter;
   serverListenPort: string;
@@ -253,6 +255,8 @@ export function ShellDialogs({
   notificationSavePending,
   sendTestWebhook,
   saveNotificationSettings,
+  runtimeCommands,
+  setRuntimeCommands,
   serverListenIP,
   setServerListenIP,
   serverListenPort,
@@ -491,6 +495,8 @@ export function ShellDialogs({
               saveToolUpdateSettings={saveToolUpdateSettings}
               checkAllToolUpdates={checkAllToolUpdates}
               runAllToolUpdates={runAllToolUpdates}
+              runtimeCommands={runtimeCommands}
+              setRuntimeCommands={setRuntimeCommands}
               serverListenIP={serverListenIP}
               setServerListenIP={setServerListenIP}
               serverListenPort={serverListenPort}

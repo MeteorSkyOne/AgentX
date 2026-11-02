@@ -70,9 +70,12 @@ type Config struct {
 }
 
 type ServerSettings struct {
-	ListenIP   string            `json:"listen_ip" toml:"listen_ip"`
-	ListenPort int               `json:"listen_port" toml:"listen_port"`
-	TLS        ServerTLSSettings `json:"tls" toml:"tls"`
+	ClaudeCommand string            `json:"claude_command" toml:"claude_command"`
+	CodexCommand  string            `json:"codex_command" toml:"codex_command"`
+	PiCommand     string            `json:"pi_command" toml:"pi_command"`
+	ListenIP      string            `json:"listen_ip" toml:"listen_ip"`
+	ListenPort    int               `json:"listen_port" toml:"listen_port"`
+	TLS           ServerTLSSettings `json:"tls" toml:"tls"`
 }
 
 type ServerTLSSettings struct {
@@ -113,6 +116,15 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.Server = settings
+	if os.Getenv("AGENTX_CLAUDE_COMMAND") == "" && settings.ClaudeCommand != "" {
+		cfg.ClaudeCommand = settings.ClaudeCommand
+	}
+	if os.Getenv("AGENTX_CODEX_COMMAND") == "" && settings.CodexCommand != "" {
+		cfg.CodexCommand = settings.CodexCommand
+	}
+	if os.Getenv("AGENTX_PI_COMMAND") == "" && settings.PiCommand != "" {
+		cfg.PiCommand = settings.PiCommand
+	}
 	toolUpdates, err := LoadToolUpdateSettings(cfg.DataDir)
 	if err != nil {
 		return Config{}, err
@@ -379,6 +391,9 @@ func defaultToolUpdateTimezone() string {
 }
 
 func NormalizeServerSettings(settings ServerSettings, path string) (ServerSettings, error) {
+	settings.ClaudeCommand = strings.TrimSpace(settings.ClaudeCommand)
+	settings.CodexCommand = strings.TrimSpace(settings.CodexCommand)
+	settings.PiCommand = strings.TrimSpace(settings.PiCommand)
 	settings.ListenIP = strings.TrimSpace(settings.ListenIP)
 	if settings.ListenIP == "" {
 		settings.ListenIP = defaultListenIP
@@ -494,7 +509,7 @@ func ServerTLSAddr(settings ServerSettings) string {
 }
 
 func ServerSettingsEqual(a ServerSettings, b ServerSettings) bool {
-	return a.ListenIP == b.ListenIP &&
+	return a.ClaudeCommand == b.ClaudeCommand && a.CodexCommand == b.CodexCommand && a.PiCommand == b.PiCommand && a.ListenIP == b.ListenIP &&
 		a.ListenPort == b.ListenPort &&
 		a.TLS.Enabled == b.TLS.Enabled &&
 		a.TLS.ListenPort == b.TLS.ListenPort &&
@@ -562,6 +577,9 @@ func configFile(cfg fileConfig) string {
 [server]
 listen_ip = %q
 listen_port = %d
+claude_command = %q
+codex_command = %q
+pi_command = %q
 
 [server.tls]
 enabled = %t
@@ -582,7 +600,7 @@ auto_enabled = %t
 time_of_day = %q
 timezone = %q
 channel = %q
-`, settings.ListenIP, settings.ListenPort, settings.TLS.Enabled, settings.TLS.ListenPort, settings.TLS.CertFile, settings.TLS.KeyFile, toolUpdates.AutoEnabled, toolUpdates.TimeOfDay, toolUpdates.Timezone, toolUpdates.ClaudeEnabled, toolUpdates.CodexEnabled, toolUpdates.PiEnabled, selfUpdates.AutoEnabled, selfUpdates.TimeOfDay, selfUpdates.Timezone, selfUpdates.Channel)
+`, settings.ListenIP, settings.ListenPort, settings.ClaudeCommand, settings.CodexCommand, settings.PiCommand, settings.TLS.Enabled, settings.TLS.ListenPort, settings.TLS.CertFile, settings.TLS.KeyFile, toolUpdates.AutoEnabled, toolUpdates.TimeOfDay, toolUpdates.Timezone, toolUpdates.ClaudeEnabled, toolUpdates.CodexEnabled, toolUpdates.PiEnabled, selfUpdates.AutoEnabled, selfUpdates.TimeOfDay, selfUpdates.Timezone, selfUpdates.Channel)
 }
 
 func defaultDataDir() string {

@@ -186,6 +186,7 @@ export function Shell({
   const [notificationActionStatus, setNotificationActionStatus] = useState<string | null>(null);
   const [notificationSavePending, setNotificationSavePending] = useState(false);
   const [notificationTestPending, setNotificationTestPending] = useState(false);
+  const [runtimeCommands, setRuntimeCommands] = useState({ claude: "", codex: "", pi: "" });
   const [serverListenIP, setServerListenIP] = useState("127.0.0.1");
   const [serverListenPort, setServerListenPort] = useState("8080");
   const [serverTLSEnabled, setServerTLSEnabled] = useState(false);
@@ -499,6 +500,7 @@ export function Shell({
   }
 
   function syncServerSettingsDraft() {
+    setRuntimeCommands({ claude: serverSettings?.claude_command ?? "", codex: serverSettings?.codex_command ?? "", pi: serverSettings?.pi_command ?? "" });
     setServerListenIP(serverSettings?.listen_ip ?? "127.0.0.1");
     setServerListenPort(String(serverSettings?.listen_port ?? 8080));
     setServerTLSEnabled(serverSettings?.tls.enabled ?? false);
@@ -746,6 +748,7 @@ export function Shell({
     const certPEM = serverTLSCertPEM.trim();
     const keyPEM = serverTLSKeyPEM.trim();
     return {
+      claude_command: runtimeCommands.claude, codex_command: runtimeCommands.codex, pi_command: runtimeCommands.pi,
       listen_ip: serverListenIP.trim(),
       listen_port: Number(serverListenPort),
       tls: {
@@ -1231,6 +1234,8 @@ export function Shell({
         notificationSavePending={notificationSavePending}
         sendTestWebhook={sendTestWebhook}
         saveNotificationSettings={saveNotificationSettings}
+        runtimeCommands={runtimeCommands}
+        setRuntimeCommands={setRuntimeCommands}
         serverListenIP={serverListenIP}
         setServerListenIP={setServerListenIP}
         serverListenPort={serverListenPort}

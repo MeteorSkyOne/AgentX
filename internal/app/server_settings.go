@@ -10,6 +10,9 @@ import (
 )
 
 type ServerSettings struct {
+	ClaudeCommand      string            `json:"claude_command"`
+	CodexCommand       string            `json:"codex_command"`
+	PiCommand          string            `json:"pi_command"`
 	OrganizationID     string            `json:"organization_id"`
 	ListenIP           string            `json:"listen_ip"`
 	ListenPort         int               `json:"listen_port"`
@@ -30,9 +33,12 @@ type ServerTLSSettings struct {
 }
 
 type ServerSettingsUpdateRequest struct {
-	ListenIP   string                         `json:"listen_ip"`
-	ListenPort int                            `json:"listen_port"`
-	TLS        ServerTLSSettingsUpdateRequest `json:"tls"`
+	ClaudeCommand *string                        `json:"claude_command"`
+	CodexCommand  *string                        `json:"codex_command"`
+	PiCommand     *string                        `json:"pi_command"`
+	ListenIP      string                         `json:"listen_ip"`
+	ListenPort    int                            `json:"listen_port"`
+	TLS           ServerTLSSettingsUpdateRequest `json:"tls"`
 }
 
 type ServerTLSSettingsUpdateRequest struct {
@@ -53,9 +59,23 @@ func (a *App) ServerSettings(ctx context.Context, orgID string) (ServerSettings,
 }
 
 func (a *App) UpdateServerSettings(ctx context.Context, orgID string, req ServerSettingsUpdateRequest) (ServerSettings, error) {
+	existing, err := config.LoadServerSettings(a.opts.DataDir)
+	if err != nil {
+		return ServerSettings{}, err
+	}
+	if req.ClaudeCommand != nil {
+		existing.ClaudeCommand = *req.ClaudeCommand
+	}
+	if req.CodexCommand != nil {
+		existing.CodexCommand = *req.CodexCommand
+	}
+	if req.PiCommand != nil {
+		existing.PiCommand = *req.PiCommand
+	}
 	certPEM := strings.TrimSpace(valueOrEmpty(req.TLS.CertPEM))
 	keyPEM := strings.TrimSpace(valueOrEmpty(req.TLS.KeyPEM))
 	settings := config.ServerSettings{
+		ClaudeCommand: existing.ClaudeCommand, CodexCommand: existing.CodexCommand, PiCommand: existing.PiCommand,
 		ListenIP:   req.ListenIP,
 		ListenPort: req.ListenPort,
 		TLS: config.ServerTLSSettings{
@@ -170,7 +190,8 @@ func (a *App) serverSettingsResponse(orgID string, settings config.ServerSetting
 	}
 
 	return ServerSettings{
-		OrganizationID:     orgID,
+		OrganizationID: orgID,
+		ClaudeCommand:  settings.ClaudeCommand, CodexCommand: settings.CodexCommand, PiCommand: settings.PiCommand,
 		ListenIP:           settings.ListenIP,
 		ListenPort:         settings.ListenPort,
 		AddrOverrideActive: a.opts.AddrOverride,
