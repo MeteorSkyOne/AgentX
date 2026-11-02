@@ -211,6 +211,7 @@ export function Shell({
   const [selfAutoEnabled, setSelfAutoEnabled] = useState(false);
   const [selfTimeOfDay, setSelfTimeOfDay] = useState("04:00");
   const [selfTimezone, setSelfTimezone] = useState("Local");
+  const [selfProxyURL, setSelfProxyURL] = useState("");
   const [selfChannel, setSelfChannel] = useState<SelfUpdateSettings["channel"]>("release");
   const [selfSettingsPending, setSelfSettingsPending] = useState(false);
   const [selfActionStatus, setSelfActionStatus] = useState<string | null>(null);
@@ -392,6 +393,7 @@ export function Shell({
     selfUpdate?.settings.time_of_day,
     selfUpdate?.settings.timezone,
     selfUpdate?.settings.channel,
+    selfUpdate?.settings.proxy_url,
     preferences.show_ttft,
     preferences.show_tps,
     preferences.hide_avatars
@@ -530,6 +532,7 @@ export function Shell({
     setSelfAutoEnabled(settings?.auto_enabled ?? false);
     setSelfTimeOfDay(settings?.time_of_day ?? "04:00");
     setSelfTimezone(settings?.timezone ?? "Local");
+    setSelfProxyURL(settings?.proxy_url ?? "");
     setSelfChannel(settings?.channel ?? "release");
     setSelfActionError(null);
     setSelfActionStatus(null);
@@ -700,6 +703,7 @@ export function Shell({
         time_of_day: selfTimeOfDay,
         timezone: selfTimezone.trim() || "Local",
         channel: selfChannel,
+      proxy_url: selfProxyURL.trim(),
       });
       setSelfActionStatus("Saved");
     } catch (err) {
@@ -715,6 +719,7 @@ export function Shell({
       time_of_day: selfTimeOfDay,
       timezone: selfTimezone.trim() || "Local",
       channel: selfChannel,
+      proxy_url: selfProxyURL.trim(),
     });
   }
 
@@ -1176,6 +1181,8 @@ export function Shell({
         setSelfTimeOfDay={setSelfTimeOfDay}
         selfTimezone={selfTimezone}
         setSelfTimezone={setSelfTimezone}
+        selfProxyURL={selfProxyURL}
+        setSelfProxyURL={setSelfProxyURL}
         selfChannel={selfChannel}
         setSelfChannel={setSelfChannel}
         selfSettingsPending={selfSettingsPending}

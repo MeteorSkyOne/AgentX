@@ -79,6 +79,8 @@ interface AccountSettingsDialogProps {
   setSelfTimeOfDay: StringSetter;
   selfTimezone: string;
   setSelfTimezone: StringSetter;
+  selfProxyURL: string;
+  setSelfProxyURL: StringSetter;
   selfChannel: SelfUpdateSettings["channel"];
   setSelfChannel: Dispatch<SetStateAction<SelfUpdateSettings["channel"]>>;
   selfSettingsPending: boolean;
@@ -182,6 +184,8 @@ export function AccountSettingsDialog({
   setSelfTimeOfDay,
   selfTimezone,
   setSelfTimezone,
+  selfProxyURL,
+  setSelfProxyURL,
   selfChannel,
   setSelfChannel,
   selfSettingsPending,
@@ -731,6 +735,10 @@ export function AccountSettingsDialog({
                           <option value="dev">Dev</option>
                         </Select>
                       </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="self-update-proxy">Proxy URL</Label>
+                      <Input id="self-update-proxy" value={selfProxyURL} onChange={(event) => setSelfProxyURL(event.target.value)} disabled={selfUpdateLoading || selfSettingsPending} placeholder="http://127.0.0.1:7890" />
                     </div>
                     <div className="grid gap-1 rounded-md bg-muted px-3 py-2 text-xs">
                       <div className="flex items-center justify-between gap-3">

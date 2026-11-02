@@ -129,6 +129,8 @@ export interface ShellDialogsProps {
   setSelfTimeOfDay: StringSetter;
   selfTimezone: string;
   setSelfTimezone: StringSetter;
+  selfProxyURL: string;
+  setSelfProxyURL: StringSetter;
   selfChannel: SelfUpdateSettings["channel"];
   setSelfChannel: Dispatch<SetStateAction<SelfUpdateSettings["channel"]>>;
   selfSettingsPending: boolean;
@@ -310,6 +312,8 @@ export function ShellDialogs({
   setSelfTimeOfDay,
   selfTimezone,
   setSelfTimezone,
+  selfProxyURL,
+  setSelfProxyURL,
   selfChannel,
   setSelfChannel,
   selfSettingsPending,
@@ -469,6 +473,8 @@ export function ShellDialogs({
               setSelfTimeOfDay={setSelfTimeOfDay}
               selfTimezone={selfTimezone}
               setSelfTimezone={setSelfTimezone}
+              selfProxyURL={selfProxyURL}
+              setSelfProxyURL={setSelfProxyURL}
               selfChannel={selfChannel}
               setSelfChannel={setSelfChannel}
               selfSettingsPending={selfSettingsPending}

@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -461,7 +462,7 @@ func (s *selfUpdateService) fetchReleases(ctx context.Context) ([]githubRelease,
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", selfUpdateUserAgent)
-	resp, err := s.client.Do(req)
+	resp, err := s.requestClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -486,7 +487,7 @@ func (s *selfUpdateService) downloadFile(ctx context.Context, url string, path s
 		return err
 	}
 	req.Header.Set("User-Agent", selfUpdateUserAgent)
-	resp, err := s.client.Do(req)
+	resp, err := s.requestClient().Do(req)
 	if err != nil {
 		return err
 	}
@@ -765,4 +766,24 @@ func executableName() string {
 		return "agentx.exe"
 	}
 	return "agentx"
+}
+
+// requestClient applies the current proxy setting to both metadata and asset requests.
+func (s *selfUpdateService) requestClient() *http.Client {
+	proxy := s.snapshotSettings().ProxyURL
+	if proxy == "" {
+		return s.client
+	}
+	u, err := url.Parse(proxy)
+	if err != nil {
+		return s.client
+	}
+	client := *s.client
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if existing, ok := s.client.Transport.(*http.Transport); ok {
+		transport = existing.Clone()
+	}
+	transport.Proxy = http.ProxyURL(u)
+	client.Transport = transport
+	return &client
 }

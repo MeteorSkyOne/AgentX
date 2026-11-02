@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -95,6 +96,7 @@ type ToolUpdateSettings struct {
 }
 
 type SelfUpdateSettings struct {
+	ProxyURL    string `json:"proxy_url" toml:"proxy_url"`
 	AutoEnabled bool   `json:"auto_enabled" toml:"auto_enabled"`
 	TimeOfDay   string `json:"time_of_day" toml:"time_of_day"`
 	Timezone    string `json:"timezone" toml:"timezone"`
@@ -374,7 +376,7 @@ func isZeroToolUpdateSettings(settings ToolUpdateSettings) bool {
 }
 
 func isZeroSelfUpdateSettings(settings SelfUpdateSettings) bool {
-	return strings.TrimSpace(settings.TimeOfDay) == "" &&
+	return strings.TrimSpace(settings.ProxyURL) == "" && strings.TrimSpace(settings.TimeOfDay) == "" &&
 		strings.TrimSpace(settings.Timezone) == "" &&
 		strings.TrimSpace(settings.Channel) == "" &&
 		!settings.AutoEnabled
@@ -490,6 +492,13 @@ func NormalizeSelfUpdateSettings(settings SelfUpdateSettings, path string) (Self
 	if _, err := time.LoadLocation(settings.Timezone); err != nil {
 		return SelfUpdateSettings{}, fmt.Errorf("config file %s: self_update.timezone is invalid: %w", path, err)
 	}
+	settings.ProxyURL = strings.TrimSpace(settings.ProxyURL)
+	if settings.ProxyURL != "" {
+		u, err := url.Parse(settings.ProxyURL)
+		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "socks5") || u.User != nil {
+			return SelfUpdateSettings{}, fmt.Errorf("config file %s: self_update.proxy_url must be an HTTP, HTTPS or SOCKS5 URL without credentials", path)
+		}
+	}
 	settings.Channel = strings.ToLower(strings.TrimSpace(settings.Channel))
 	if settings.Channel == "" {
 		settings.Channel = "release"
@@ -600,7 +609,8 @@ auto_enabled = %t
 time_of_day = %q
 timezone = %q
 channel = %q
-`, settings.ListenIP, settings.ListenPort, settings.ClaudeCommand, settings.CodexCommand, settings.PiCommand, settings.TLS.Enabled, settings.TLS.ListenPort, settings.TLS.CertFile, settings.TLS.KeyFile, toolUpdates.AutoEnabled, toolUpdates.TimeOfDay, toolUpdates.Timezone, toolUpdates.ClaudeEnabled, toolUpdates.CodexEnabled, toolUpdates.PiEnabled, selfUpdates.AutoEnabled, selfUpdates.TimeOfDay, selfUpdates.Timezone, selfUpdates.Channel)
+proxy_url = %q
+`, settings.ListenIP, settings.ListenPort, settings.ClaudeCommand, settings.CodexCommand, settings.PiCommand, settings.TLS.Enabled, settings.TLS.ListenPort, settings.TLS.CertFile, settings.TLS.KeyFile, toolUpdates.AutoEnabled, toolUpdates.TimeOfDay, toolUpdates.Timezone, toolUpdates.ClaudeEnabled, toolUpdates.CodexEnabled, toolUpdates.PiEnabled, selfUpdates.AutoEnabled, selfUpdates.TimeOfDay, selfUpdates.Timezone, selfUpdates.Channel, selfUpdates.ProxyURL)
 }
 
 func defaultDataDir() string {
