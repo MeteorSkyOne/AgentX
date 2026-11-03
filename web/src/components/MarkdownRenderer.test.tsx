@@ -23,6 +23,92 @@ afterEach(() => {
 });
 
 describe("MarkdownRenderer", () => {
+  function mathMarkup(text: string) {
+    const container = document.createElement("div");
+    container.innerHTML = renderToStaticMarkup(<MarkdownRenderer text={text} />);
+    return container;
+  }
+
+  it("renders LaTeX delimiters from agent replies without parsing formula content as Markdown", () => {
+    const container = mathMarkup(String.raw`MLP 输出：
+
+\[
+y=Wa=\sum_j W_{:,j}a_j
+\]
+
+- \(a_j\)：第 \(j\) 个神经元。
+
+\[
+s_j=
+\underbrace{\left(\bar a_j^{重复}-\bar a_j^{正常}\right)}_{\text{重复时激活增加多少}}
+\cdot
+\underbrace{\left(u^\top W_{:,j}\right)}_{\text{输出有多少沿着重复方向}}
+\]`);
+    expect(container.querySelectorAll(".katex")).toHaveLength(4);
+    expect(container.querySelectorAll(".katex-display")).toHaveLength(2);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector("em")).toBeNull();
+    expect(container.querySelector("annotation")?.textContent?.trim()).toBe(String.raw`y=Wa=\sum_j W_{:,j}a_j`);
+  });
+
+  it("supports LaTeX math in quotes and lists alongside dollar math", () => {
+    const container = mathMarkup(String.raw`> \[
+> x_1 + x_2
+> \]
+
+- \(a_b\), $c_d$, and \[e_f\].
+
+$$
+g_h
+$$`);
+    expect(container.querySelectorAll(".katex")).toHaveLength(5);
+    expect(container.querySelectorAll(".katex-display")).toHaveLength(3);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector("blockquote annotation")?.textContent?.trim()).toBe("x_1 + x_2");
+  });
+
+  it("leaves LaTeX delimiters inside code and escaped delimiters as literal text", () => {
+    const container = mathMarkup([
+      "`" + String.raw`\(a_b\) \[c_d\]` + "`",
+      "",
+      "```text",
+      String.raw`\[x_y\]`,
+      "```",
+      "",
+      "    " + String.raw`\(z_w\)`,
+      "",
+      String.raw`\\(literal\\) and \\[literal\\]`,
+    ].join("\n"));
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(container.textContent).toContain(String.raw`\(a_b\) \[c_d\]`);
+    expect(container.textContent).toContain(String.raw`\[x_y\]`);
+    expect(container.textContent).toContain(String.raw`\(z_w\)`);
+  });
+
+  it("keeps unclosed LaTeX math as text until the closing delimiter arrives", () => {
+    const partial = String.raw`Formula: \(a_b`;
+    expect(mathMarkup(partial).querySelector(".katex")).toBeNull();
+    expect(mathMarkup(partial + String.raw`\)`).querySelector(".katex")).not.toBeNull();
+    expect(mathMarkup(String.raw`\[x_y\)`).querySelector(".katex")).toBeNull();
+  });
+
+  it("preserves TeX line breaks and dollar signs inside LaTeX delimiters", () => {
+    const formula = String.raw`\begin{aligned}a &= b \\ c &= \text{cost: \$5}\end{aligned}`;
+    const container = mathMarkup("\\[\r\n" + formula + "\r\n\\]");
+    expect(container.querySelectorAll(".katex-display")).toHaveLength(1);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector("annotation")?.textContent?.trim()).toBe(formula);
+  });
+
+  it("does not reinterpret delimiters within dollar math or raw HTML", () => {
+    const container = mathMarkup(String.raw`$\text{\(literal\)}$
+
+<pre>\[literal\]</pre>`);
+    expect(container.querySelectorAll(".katex")).toHaveLength(1);
+    expect(container.querySelector("annotation")?.textContent).toBe(String.raw`\text{\(literal\)}`);
+    expect(container.textContent).toContain(String.raw`\[literal\]`);
+  });
+
   it("renders inline and block math with KaTeX markup", () => {
     const html = renderToStaticMarkup(
       <MarkdownRenderer text={"Inline $E = mc^2$.\n\n$$\na^2 + b^2 = c^2\n$$"} />

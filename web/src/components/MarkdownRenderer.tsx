@@ -13,6 +13,7 @@ import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
+import { remarkLatexMath } from "@/lib/remarkLatexMath";
 import {
   parseWorkspacePathTarget,
   splitWorkspacePathTargets,
@@ -423,7 +424,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
   return (
     <Markdown
-      remarkPlugins={[remarkGfm, remarkMath]}
+      remarkPlugins={[remarkGfm, remarkMath, remarkLatexMath]}
       rehypePlugins={[rehypeKatex, rehypeRaw]}
       components={components}
       urlTransform={markdownUrlTransform}
