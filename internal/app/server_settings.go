@@ -13,6 +13,7 @@ type ServerSettings struct {
 	ClaudeCommand      string            `json:"claude_command"`
 	CodexCommand       string            `json:"codex_command"`
 	PiCommand          string            `json:"pi_command"`
+	AgyCommand         string            `json:"agy_command"`
 	OrganizationID     string            `json:"organization_id"`
 	ListenIP           string            `json:"listen_ip"`
 	ListenPort         int               `json:"listen_port"`
@@ -36,6 +37,7 @@ type ServerSettingsUpdateRequest struct {
 	ClaudeCommand *string                        `json:"claude_command"`
 	CodexCommand  *string                        `json:"codex_command"`
 	PiCommand     *string                        `json:"pi_command"`
+	AgyCommand    *string                        `json:"agy_command"`
 	ListenIP      string                         `json:"listen_ip"`
 	ListenPort    int                            `json:"listen_port"`
 	TLS           ServerTLSSettingsUpdateRequest `json:"tls"`
@@ -72,10 +74,13 @@ func (a *App) UpdateServerSettings(ctx context.Context, orgID string, req Server
 	if req.PiCommand != nil {
 		existing.PiCommand = *req.PiCommand
 	}
+	if req.AgyCommand != nil {
+		existing.AgyCommand = *req.AgyCommand
+	}
 	certPEM := strings.TrimSpace(valueOrEmpty(req.TLS.CertPEM))
 	keyPEM := strings.TrimSpace(valueOrEmpty(req.TLS.KeyPEM))
 	settings := config.ServerSettings{
-		ClaudeCommand: existing.ClaudeCommand, CodexCommand: existing.CodexCommand, PiCommand: existing.PiCommand,
+		ClaudeCommand: existing.ClaudeCommand, CodexCommand: existing.CodexCommand, PiCommand: existing.PiCommand, AgyCommand: existing.AgyCommand,
 		ListenIP:   req.ListenIP,
 		ListenPort: req.ListenPort,
 		TLS: config.ServerTLSSettings{
@@ -191,7 +196,7 @@ func (a *App) serverSettingsResponse(orgID string, settings config.ServerSetting
 
 	return ServerSettings{
 		OrganizationID: orgID,
-		ClaudeCommand:  settings.ClaudeCommand, CodexCommand: settings.CodexCommand, PiCommand: settings.PiCommand,
+		ClaudeCommand:  settings.ClaudeCommand, CodexCommand: settings.CodexCommand, PiCommand: settings.PiCommand, AgyCommand: settings.AgyCommand,
 		ListenIP:           settings.ListenIP,
 		ListenPort:         settings.ListenPort,
 		AddrOverrideActive: a.opts.AddrOverride,

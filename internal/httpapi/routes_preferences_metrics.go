@@ -168,7 +168,7 @@ func parseMetricsFilter(w http.ResponseWriter, r *http.Request) (store.MetricsFi
 	}
 	provider := r.URL.Query().Get("provider")
 	switch provider {
-	case "", domain.AgentKindClaude, domain.AgentKindCodex, domain.AgentKindFake, domain.AgentKindClaudePersistent, domain.AgentKindCodexPersistent, domain.AgentKindPi:
+	case "", domain.AgentKindClaude, domain.AgentKindCodex, domain.AgentKindFake, domain.AgentKindClaudePersistent, domain.AgentKindCodexPersistent, domain.AgentKindPi, domain.AgentKindAgy:
 	default:
 		writeError(w, http.StatusBadRequest, "invalid provider")
 		return store.MetricsFilter{}, false

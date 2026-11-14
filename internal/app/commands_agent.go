@@ -60,8 +60,9 @@ func (a *App) handleEffortCommand(ctx context.Context, req SendMessageRequest, t
 }
 
 // supportsCompactCommand reports whether the runtime behind an agent kind
-// compacts its own context when sent the /compact prompt: the Claude CLI handles
-// it as a slash command and the pi runtime maps it to pi's compact RPC.
+// compacts its own context when sent the /compact prompt: the Claude and
+// Antigravity CLIs handle it as a slash command and the pi runtime maps it to
+// pi's compact RPC.
 func supportsCompactCommand(kind string) bool {
-	return kind == domain.AgentKindClaude || kind == domain.AgentKindPi
+	return kind == domain.AgentKindClaude || kind == domain.AgentKindClaudePersistent || kind == domain.AgentKindPi || kind == domain.AgentKindAgy
 }

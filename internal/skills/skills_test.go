@@ -275,6 +275,31 @@ func TestClaudeRootsUseWorkspaceHomeAndPluginSkills(t *testing.T) {
 	}
 }
 
+func TestDiscoverAgySkills(t *testing.T) {
+	home := t.TempDir()
+	configWorkspace := t.TempDir()
+	runWorkspace := t.TempDir()
+
+	writeSkill(t, filepath.Join(configWorkspace, ".agent", "skills", "cfg-skill", "SKILL.md"), "---\nname: cfg-skill\ndescription: From config .agent\n---\nConfig instructions")
+	writeSkill(t, filepath.Join(runWorkspace, ".agents", "skills", "run-skill", "SKILL.md"), "---\nname: run-skill\ndescription: From run .agents\n---\nRun instructions")
+	writeSkill(t, filepath.Join(home, ".gemini", "config", "skills", "global-skill", "SKILL.md"), "---\nname: global-skill\ndescription: From ~/.gemini/config/skills\n---\nGlobal instructions")
+
+	result, err := Discover(DiscoverOptions{
+		AgentKind:       domain.AgentKindAgy,
+		ConfigWorkspace: configWorkspace,
+		RunWorkspace:    runWorkspace,
+		HomeDir:         home,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"cfg-skill", "run-skill", "global-skill"} {
+		if _, ok := Match(result, name); !ok {
+			t.Fatalf("agy skill %q missing from %#v", name, result)
+		}
+	}
+}
+
 func writeSkill(t *testing.T, path string, body string) {
 	t.Helper()
 	writeFile(t, path, body)

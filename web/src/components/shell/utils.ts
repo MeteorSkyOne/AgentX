@@ -12,25 +12,28 @@ export const AGENT_RUNTIME_OPTIONS = [
   { value: "claude", label: "Claude Code" },
   { value: "codex", label: "Codex" },
   { value: "pi", label: "Pi" },
+  { value: "agy", label: "Antigravity" },
 ] as const;
 
-export type AgentProvider = "fake" | "claude" | "codex" | "pi";
+export type AgentProvider = "fake" | "claude" | "codex" | "pi" | "agy";
 
 export function agentProviderFromKind(kind: string): AgentProvider {
   if (kind === "claude" || kind === "claude-persistent") return "claude";
   if (kind === "codex" || kind === "codex-persistent") return "codex";
   if (kind === "pi") return "pi";
+  if (kind === "agy") return "agy";
   return "fake";
 }
 
 export function agentPersistentFromKind(kind: string): boolean {
-  return kind === "claude-persistent" || kind === "codex-persistent" || kind === "pi";
+  return kind === "claude-persistent" || kind === "codex-persistent" || kind === "pi" || kind === "agy";
 }
 
 export function agentKindFromProviderPersistent(provider: string, persistent: boolean): string {
   if (provider === "claude") return persistent ? "claude-persistent" : "claude";
   if (provider === "codex") return persistent ? "codex-persistent" : "codex";
   if (provider === "pi") return "pi";
+  if (provider === "agy") return "agy";
   return "fake";
 }
 
@@ -39,9 +42,10 @@ export function agentProviderHasPersistentToggle(provider: string): boolean {
   return provider === "claude" || provider === "codex";
 }
 
-/** Whether the runtime has a fast-mode switch (pi has none). */
+/** Whether the runtime has a fast-mode switch (pi and agy have none). */
 export function agentKindSupportsFastMode(kind: string): boolean {
-  return agentProviderFromKind(kind) !== "pi";
+  const provider = agentProviderFromKind(kind);
+  return provider !== "pi" && provider !== "agy";
 }
 
 export const SYSTEM_PROMPT_MODE_OPTIONS = [
@@ -99,9 +103,9 @@ export function runWorkspaceOptions(
 }
 
 export function defaultAgentInstructionPath(kind?: string): string {
-  return kind === "claude" || kind === "claude-persistent"
-    ? "CLAUDE.md"
-    : "AGENTS.md";
+  if (kind === "claude" || kind === "claude-persistent") return "CLAUDE.md";
+  if (kind === "agy") return "GEMINI.md";
+  return "AGENTS.md";
 }
 
 export function isProviderLimitAgent(kind?: string): boolean {
@@ -211,6 +215,7 @@ export function agentToneColor(kind: string): string {
   if (kind === "claude" || kind === "claude-persistent")
     return "text-[oklch(0.75_0.15_50)]";
   if (kind === "pi") return "text-[oklch(0.72_0.16_290)]";
+  if (kind === "agy") return "text-[oklch(0.72_0.16_245)]";
   return "text-muted-foreground";
 }
 
@@ -221,6 +226,7 @@ export function agentKindLabel(kind: string): string {
     case "claude": return "Claude Code";
     case "claude-persistent": return "Claude Code (persistent)";
     case "pi": return "Pi";
+    case "agy": return "Antigravity";
     case "fake": return "Fake runtime";
     default: return kind || "Agent";
   }

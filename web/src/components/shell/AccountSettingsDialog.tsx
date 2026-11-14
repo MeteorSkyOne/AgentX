@@ -67,6 +67,8 @@ interface AccountSettingsDialogProps {
   setToolCodexEnabled: BooleanSetter;
   toolPiEnabled: boolean;
   setToolPiEnabled: BooleanSetter;
+  toolAgyEnabled: boolean;
+  setToolAgyEnabled: BooleanSetter;
   toolSettingsPending: boolean;
   toolActionStatus: string | null;
   toolActionError: string | null;
@@ -91,8 +93,8 @@ interface AccountSettingsDialogProps {
   saveSelfUpdateSettings: () => void | Promise<void>;
   checkSelfUpdateNow: () => void | Promise<void>;
   runSelfUpdateNow: () => void | Promise<void>;
-  runtimeCommands: { claude: string; codex: string; pi: string };
-  setRuntimeCommands: React.Dispatch<React.SetStateAction<{ claude: string; codex: string; pi: string }>>;
+  runtimeCommands: { claude: string; codex: string; pi: string; agy: string };
+  setRuntimeCommands: React.Dispatch<React.SetStateAction<{ claude: string; codex: string; pi: string; agy: string }>>;
   serverListenIP: string;
   setServerListenIP: StringSetter;
   serverListenPort: string;
@@ -174,6 +176,8 @@ export function AccountSettingsDialog({
   setToolCodexEnabled,
   toolPiEnabled,
   setToolPiEnabled,
+  toolAgyEnabled,
+  setToolAgyEnabled,
   toolSettingsPending,
   toolActionStatus,
   toolActionError,
@@ -547,8 +551,8 @@ export function AccountSettingsDialog({
                         HTTPS requires a certificate and private key path or pasted PEM content.
                       </p>
                     )}
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      {(["claude", "codex", "pi"] as const).map((kind) => (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {(["claude", "codex", "pi", "agy"] as const).map((kind) => (
                         <div className="space-y-2" key={kind}>
                           <Label htmlFor={`runtime-${kind}`}>{kind} executable</Label>
                           <Input id={`runtime-${kind}`} value={runtimeCommands[kind]} placeholder={kind} disabled={serverSettingsLoading || serverSettingsPending} onChange={(event) => setRuntimeCommands((previous) => ({ ...previous, [kind]: event.target.value }))} />
@@ -653,6 +657,15 @@ export function AccountSettingsDialog({
                           aria-label="Update Pi"
                         />
                         Pi
+                      </label>
+                      <label className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm">
+                        <Checkbox
+                          checked={toolAgyEnabled}
+                          onChange={(event) => setToolAgyEnabled(event.currentTarget.checked)}
+                          disabled={toolUpdatesLoading || toolSettingsPending}
+                          aria-label="Update Antigravity"
+                        />
+                        Antigravity
                       </label>
                     </div>
                     {toolUpdates?.tools.map((tool) => (

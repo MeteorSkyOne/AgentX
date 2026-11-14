@@ -20,6 +20,7 @@ type MCPSetup struct {
 	ClaudeCommand string   `json:"claude_command"`
 	CodexCommand  string   `json:"codex_command"`
 	PiCommand     string   `json:"pi_command"`
+	AgyCommand    string   `json:"agy_command"`
 	Available     bool     `json:"available"`
 }
 
@@ -42,6 +43,7 @@ func (a *App) MCPSetup() MCPSetup {
 		ClaudeCommand: "claude mcp add --scope user agentx -- " + launch,
 		CodexCommand:  "codex mcp add agentx -- " + launch,
 		PiCommand:     "pi mcp add --exposure direct agentx -- " + launch,
+		AgyCommand:    "agy mcp add agentx -- " + launch,
 		Available:     strings.TrimSpace(a.opts.MCPCommand) != "",
 	}
 }

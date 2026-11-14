@@ -251,4 +251,30 @@ describe("subagent rendering", () => {
     expect(el.textContent).toContain("2 tools");
     expect(el.textContent).toContain("/pdf, Read");
   });
+
+  it("extracts CommandLine and toolSummary from Antigravity run_command calls", () => {
+    const el = render([
+      {
+        type: "tool_call",
+        tool_name: "run_command",
+        tool_call_id: "agy_cmd_1",
+        input: {
+          CommandLine: "go test ./internal/runtime/agy/...",
+          toolSummary: "Run agy unit tests",
+          WaitMsBeforeAsync: 5000,
+        },
+      },
+    ]);
+
+    const trigger = Array.from(el.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("1 tool")
+    );
+    expect(trigger).toBeDefined();
+    act(() => {
+      trigger!.click();
+    });
+
+    expect(el.textContent).toContain("Run agy unit tests");
+    expect(el.textContent).toContain("go test ./internal/runtime/agy/...");
+  });
 });

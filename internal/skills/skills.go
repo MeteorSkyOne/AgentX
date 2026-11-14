@@ -132,6 +132,14 @@ func Roots(opts DiscoverOptions) ([]string, error) {
 		}
 		addRoot(filepath.Join(piAgentDir, "skills"))
 		addRoot(filepath.Join(homeDir, ".agents", "skills"))
+	case domain.AgentKindAgy:
+		// Antigravity reads workspace .agents/skills and .agent/skills plus user
+		// skill roots under ~/.gemini and ~/.agents/skills.
+		addWorkspaceRoots(opts.ConfigWorkspace, ".agents", ".agent", ".gemini")
+		addWorkspaceRoots(opts.RunWorkspace, ".agents", ".agent", ".gemini")
+		addRoot(filepath.Join(homeDir, ".gemini", "config", "skills"))
+		addRoot(filepath.Join(homeDir, ".gemini", "antigravity", "skills"))
+		addRoot(filepath.Join(homeDir, ".agents", "skills"))
 	case domain.AgentKindCodex:
 		addWorkspaceRoots(opts.ConfigWorkspace, ".codex", ".claude")
 		addWorkspaceRoots(opts.RunWorkspace, ".codex", ".claude")

@@ -158,6 +158,7 @@ export interface ServerSettings {
   claude_command?: string;
   codex_command?: string;
   pi_command?: string;
+  agy_command?: string;
   organization_id: string;
   listen_ip: string;
   listen_port: number;
@@ -181,6 +182,7 @@ export interface ServerSettingsUpdatePayload {
   claude_command?: string;
   codex_command?: string;
   pi_command?: string;
+  agy_command?: string;
   listen_ip: string;
   listen_port: number;
   tls: ServerTLSSettings & {
@@ -196,10 +198,11 @@ export interface ToolUpdateSettings {
   claude_enabled: boolean;
   codex_enabled: boolean;
   pi_enabled: boolean;
+  agy_enabled: boolean;
 }
 
 export interface ToolUpdateStatus {
-  tool: "claude" | "codex" | "pi";
+  tool: "claude" | "codex" | "pi" | "agy";
   display_name: string;
   command: string;
   current_version?: string;
@@ -257,7 +260,7 @@ export interface D2RenderResponse {
   cached: boolean;
 }
 
-export type MetricsProvider = "claude" | "codex" | "pi" | "fake";
+export type MetricsProvider = "claude" | "codex" | "pi" | "agy" | "fake";
 
 export interface AgentRunMetric {
   run_id: string;
@@ -430,6 +433,7 @@ export interface MCPSetup {
   claude_command: string;
   codex_command: string;
   pi_command: string;
+  agy_command: string;
   /** False when the server runs from a temporary `go run` binary. */
   available: boolean;
 }

@@ -84,4 +84,7 @@ func TestHTTPMCPSetupQuotesDatabasePath(t *testing.T) {
 	if wantPi := "pi mcp add --exposure direct agentx -- /opt/agentx/agentx mcp --db '/home/me/Agent X/agentx.db'"; setup.PiCommand != wantPi {
 		t.Fatalf("pi command = %q, want %q", setup.PiCommand, wantPi)
 	}
+	if wantAgy := "agy mcp add agentx -- /opt/agentx/agentx mcp --db '/home/me/Agent X/agentx.db'"; setup.AgyCommand != wantAgy {
+		t.Fatalf("agy command = %q, want %q", setup.AgyCommand, wantAgy)
+	}
 }

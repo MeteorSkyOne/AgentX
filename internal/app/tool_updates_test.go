@@ -340,14 +340,24 @@ func newToolUpdateTestApp(t *testing.T, rt agentruntime.Runtime) *App {
 }
 
 func TestCheckToolUpdatesReportsProbeFailurePerTool(t *testing.T) {
+	var npmCalls []string
+	var mu sync.Mutex
 	exec := func(_ context.Context, name string, args ...string) (string, error) {
-		switch name + " " + strings.Join(args, " ") {
+		joined := name + " " + strings.Join(args, " ")
+		if name == "npm" {
+			mu.Lock()
+			npmCalls = append(npmCalls, joined)
+			mu.Unlock()
+		}
+		switch joined {
 		case "claude --version":
 			return "2.1.1 (Claude Code)", nil
 		case "codex --version":
 			return "", errors.New("codex --version failed: executable file not found")
 		case "pi --version":
 			return "1.4.0", nil
+		case "agy --version":
+			return "1.5.9", nil
 		default:
 			return "2.1.2", nil
 		}
@@ -358,10 +368,10 @@ func TestCheckToolUpdatesReportsProbeFailurePerTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CheckToolUpdates error = %v, want per-tool status", err)
 	}
-	if len(overview.Tools) != 3 || overview.Tools[2].Tool != toolUpdateProviderPi {
-		t.Fatalf("overview tools = %#v, want claude, codex and pi", overview.Tools)
+	if len(overview.Tools) != 4 || overview.Tools[2].Tool != toolUpdateProviderPi || overview.Tools[3].Tool != toolUpdateProviderAgy {
+		t.Fatalf("overview tools = %#v, want claude, codex, pi and agy", overview.Tools)
 	}
-	claude, codex, pi := overview.Tools[0], overview.Tools[1], overview.Tools[2]
+	claude, codex, pi, agy := overview.Tools[0], overview.Tools[1], overview.Tools[2], overview.Tools[3]
 	if claude.State != "idle" || claude.CurrentVersion != "2.1.1" {
 		t.Fatalf("claude status = %#v, want checked 2.1.1", claude)
 	}
@@ -370,6 +380,14 @@ func TestCheckToolUpdatesReportsProbeFailurePerTool(t *testing.T) {
 	}
 	if pi.State != "idle" || pi.CurrentVersion != "1.4.0" || pi.DisplayName != "Pi" || pi.Command != "pi" {
 		t.Fatalf("pi status = %#v, want checked 1.4.0", pi)
+	}
+	if agy.State != "idle" || agy.CurrentVersion != "1.5.9" || agy.DisplayName != "Antigravity" || agy.Command != "agy" || agy.LatestVersion != "" || agy.LastError != "" {
+		t.Fatalf("agy status = %#v, want checked 1.5.9 without npm lookup", agy)
+	}
+	for _, call := range npmCalls {
+		if strings.Contains(call, "agy") {
+			t.Fatalf("unexpected npm lookup for agy: %q", call)
+		}
 	}
 }
 
@@ -384,13 +402,16 @@ func newToolUpdateTestAppWithExec(t *testing.T, rt agentruntime.Runtime, exec to
 			ClaudeEnabled: true,
 			CodexEnabled:  true,
 			PiEnabled:     true,
+			AgyEnabled:    true,
 		},
 		Runtimes: map[string]agentruntime.Runtime{
 			domain.AgentKindClaudePersistent: rt,
+			domain.AgentKindAgy:              rt,
 		},
 		ToolUpdates: ToolUpdateOptions{
 			ClaudeCommand: "claude",
 			CodexCommand:  "codex",
+			AgyCommand:    "agy",
 			Exec:          exec,
 		},
 	})

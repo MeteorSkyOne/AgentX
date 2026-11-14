@@ -59,6 +59,10 @@ type Config struct {
 	PiProjectTrust              string
 	PiExtensionDir              string
 	PiSubagentForeground        bool
+	AgyCommand                  string
+	AgyPermissionMode           string
+	AgyAppendSystemText         string
+	AgyPersistentIdleMinutes    int
 	D2Command                   string
 	D2TimeoutSeconds            int
 	D2CacheTTLMinutes           int
@@ -74,6 +78,7 @@ type ServerSettings struct {
 	ClaudeCommand string            `json:"claude_command" toml:"claude_command"`
 	CodexCommand  string            `json:"codex_command" toml:"codex_command"`
 	PiCommand     string            `json:"pi_command" toml:"pi_command"`
+	AgyCommand    string            `json:"agy_command" toml:"agy_command"`
 	ListenIP      string            `json:"listen_ip" toml:"listen_ip"`
 	ListenPort    int               `json:"listen_port" toml:"listen_port"`
 	TLS           ServerTLSSettings `json:"tls" toml:"tls"`
@@ -93,6 +98,7 @@ type ToolUpdateSettings struct {
 	ClaudeEnabled bool   `json:"claude_enabled" toml:"claude_enabled"`
 	CodexEnabled  bool   `json:"codex_enabled" toml:"codex_enabled"`
 	PiEnabled     bool   `json:"pi_enabled" toml:"pi_enabled"`
+	AgyEnabled    bool   `json:"agy_enabled" toml:"agy_enabled"`
 }
 
 type SelfUpdateSettings struct {
@@ -127,6 +133,9 @@ func Load() (Config, error) {
 	}
 	if os.Getenv("AGENTX_PI_COMMAND") == "" && settings.PiCommand != "" {
 		cfg.PiCommand = settings.PiCommand
+	}
+	if os.Getenv("AGENTX_AGY_COMMAND") == "" && settings.AgyCommand != "" {
+		cfg.AgyCommand = settings.AgyCommand
 	}
 	toolUpdates, err := LoadToolUpdateSettings(cfg.DataDir)
 	if err != nil {
@@ -192,6 +201,10 @@ func FromEnv() Config {
 		PiProjectTrust:              getenv("AGENTX_PI_PROJECT_TRUST", "approve"),
 		PiExtensionDir:              getenv("AGENTX_PI_EXTENSION_DIR", filepath.Join(dataDir, "pi-extension")),
 		PiSubagentForeground:        getenvBool("AGENTX_PI_SUBAGENTS_FOREGROUND", true),
+		AgyCommand:                  getenv("AGENTX_AGY_COMMAND", "agy"),
+		AgyPermissionMode:           getenv("AGENTX_AGY_PERMISSION_MODE", "accept-edits"),
+		AgyAppendSystemText:         getenv("AGENTX_AGY_APPEND_SYSTEM_PROMPT", ""),
+		AgyPersistentIdleMinutes:    getenvInt("AGENTX_AGY_PERSISTENT_IDLE_MINUTES", 30),
 		D2Command:                   getenv("AGENTX_D2_COMMAND", "d2"),
 		D2TimeoutSeconds:            getenvInt("AGENTX_D2_TIMEOUT_SECONDS", 10),
 		D2CacheTTLMinutes:           getenvInt("AGENTX_D2_CACHE_TTL_MINUTES", 1440),
@@ -346,6 +359,7 @@ func DefaultToolUpdateSettings() ToolUpdateSettings {
 		ClaudeEnabled: true,
 		CodexEnabled:  true,
 		PiEnabled:     true,
+		AgyEnabled:    true,
 	}
 }
 
@@ -373,7 +387,8 @@ func isZeroToolUpdateSettings(settings ToolUpdateSettings) bool {
 		!settings.AutoEnabled &&
 		!settings.ClaudeEnabled &&
 		!settings.CodexEnabled &&
-		!settings.PiEnabled
+		!settings.PiEnabled &&
+		!settings.AgyEnabled
 }
 
 func isZeroSelfUpdateSettings(settings SelfUpdateSettings) bool {
@@ -397,6 +412,7 @@ func NormalizeServerSettings(settings ServerSettings, path string) (ServerSettin
 	settings.ClaudeCommand = strings.TrimSpace(settings.ClaudeCommand)
 	settings.CodexCommand = strings.TrimSpace(settings.CodexCommand)
 	settings.PiCommand = strings.TrimSpace(settings.PiCommand)
+	settings.AgyCommand = strings.TrimSpace(settings.AgyCommand)
 	settings.ListenIP = strings.TrimSpace(settings.ListenIP)
 	if settings.ListenIP == "" {
 		settings.ListenIP = defaultListenIP
@@ -431,7 +447,7 @@ func NormalizeServerSettings(settings ServerSettings, path string) (ServerSettin
 }
 
 func NormalizeToolUpdateSettings(settings ToolUpdateSettings, path string) (ToolUpdateSettings, error) {
-	if strings.TrimSpace(settings.TimeOfDay) == "" && strings.TrimSpace(settings.Timezone) == "" && !settings.AutoEnabled && !settings.ClaudeEnabled && !settings.CodexEnabled && !settings.PiEnabled {
+	if strings.TrimSpace(settings.TimeOfDay) == "" && strings.TrimSpace(settings.Timezone) == "" && !settings.AutoEnabled && !settings.ClaudeEnabled && !settings.CodexEnabled && !settings.PiEnabled && !settings.AgyEnabled {
 		return DefaultToolUpdateSettings(), nil
 	}
 	if strings.TrimSpace(settings.TimeOfDay) == "" {
@@ -520,7 +536,7 @@ func ServerTLSAddr(settings ServerSettings) string {
 }
 
 func ServerSettingsEqual(a ServerSettings, b ServerSettings) bool {
-	return a.ClaudeCommand == b.ClaudeCommand && a.CodexCommand == b.CodexCommand && a.PiCommand == b.PiCommand && a.ListenIP == b.ListenIP &&
+	return a.ClaudeCommand == b.ClaudeCommand && a.CodexCommand == b.CodexCommand && a.PiCommand == b.PiCommand && a.AgyCommand == b.AgyCommand && a.ListenIP == b.ListenIP &&
 		a.ListenPort == b.ListenPort &&
 		a.TLS.Enabled == b.TLS.Enabled &&
 		a.TLS.ListenPort == b.TLS.ListenPort &&
@@ -546,8 +562,12 @@ func loadOrCreateRawFileConfig(path string) (fileConfig, error) {
 		return fileConfig{}, fmt.Errorf("read config file %s: %w", path, err)
 	}
 	var cfg fileConfig
-	if _, err := toml.Decode(string(body), &cfg); err != nil {
+	meta, err := toml.Decode(string(body), &cfg)
+	if err != nil {
 		return fileConfig{}, fmt.Errorf("parse config file %s: %w", path, err)
+	}
+	if meta.IsDefined("tool_updates") && !isZeroToolUpdateSettings(cfg.ToolUpdates) && !meta.IsDefined("tool_updates", "agy_enabled") {
+		cfg.ToolUpdates.AgyEnabled = true
 	}
 	return cfg, nil
 }
@@ -591,6 +611,7 @@ listen_port = %d
 claude_command = %q
 codex_command = %q
 pi_command = %q
+agy_command = %q
 
 [server.tls]
 enabled = %t
@@ -605,6 +626,7 @@ timezone = %q
 claude_enabled = %t
 codex_enabled = %t
 pi_enabled = %t
+agy_enabled = %t
 
 [self_update]
 auto_enabled = %t
@@ -613,7 +635,7 @@ timezone = %q
 channel = %q
 proxy_url = %q
 proxy_ca_file = %q
-`, settings.ListenIP, settings.ListenPort, settings.ClaudeCommand, settings.CodexCommand, settings.PiCommand, settings.TLS.Enabled, settings.TLS.ListenPort, settings.TLS.CertFile, settings.TLS.KeyFile, toolUpdates.AutoEnabled, toolUpdates.TimeOfDay, toolUpdates.Timezone, toolUpdates.ClaudeEnabled, toolUpdates.CodexEnabled, toolUpdates.PiEnabled, selfUpdates.AutoEnabled, selfUpdates.TimeOfDay, selfUpdates.Timezone, selfUpdates.Channel, selfUpdates.ProxyURL, selfUpdates.ProxyCAFile)
+`, settings.ListenIP, settings.ListenPort, settings.ClaudeCommand, settings.CodexCommand, settings.PiCommand, settings.AgyCommand, settings.TLS.Enabled, settings.TLS.ListenPort, settings.TLS.CertFile, settings.TLS.KeyFile, toolUpdates.AutoEnabled, toolUpdates.TimeOfDay, toolUpdates.Timezone, toolUpdates.ClaudeEnabled, toolUpdates.CodexEnabled, toolUpdates.PiEnabled, toolUpdates.AgyEnabled, selfUpdates.AutoEnabled, selfUpdates.TimeOfDay, selfUpdates.Timezone, selfUpdates.Channel, selfUpdates.ProxyURL, selfUpdates.ProxyCAFile)
 }
 
 func defaultDataDir() string {

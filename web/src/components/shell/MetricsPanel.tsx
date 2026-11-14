@@ -101,6 +101,7 @@ export function MetricsPanel({ project, selectedChannel, activeConversation }: M
             <option value="claude">Claude Code</option>
             <option value="codex">Codex</option>
             <option value="pi">Pi</option>
+            <option value="agy">Antigravity</option>
             <option value="fake">Fake</option>
           </Select>
         </div>
@@ -231,6 +232,8 @@ function providerLabel(provider: string): string {
       return "Codex";
     case "pi":
       return "Pi";
+    case "agy":
+      return "Antigravity";
     case "fake":
       return "Fake";
     default:

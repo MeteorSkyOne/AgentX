@@ -555,11 +555,14 @@ function toolPreview(item: DisplayProcessItem): ToolPreview {
     extractString(inputRaw, "cwd", "workdir", "working_directory") ??
     extractString(resultRaw, "cwd", "workdir", "working_directory");
   const description =
-    extractString(inputValue, "description", "reason") ??
-    extractString(inputRaw, "description", "reason") ??
-    extractString(resultRaw, "description", "reason");
+    extractString(inputValue, "description", "reason", "toolSummary") ??
+    extractString(inputRaw, "description", "reason", "toolSummary") ??
+    extractString(resultRaw, "description", "reason", "toolSummary");
   const body = resultItem ? toolOutputText(outputValue) : undefined;
-  const params = previewParams(inputValue, new Set(["command", "cmd", "cwd", "workdir", "working_directory", "description", "reason"]));
+  const params = previewParams(
+    inputValue,
+    new Set(["command", "cmd", "CommandLine", "cwd", "workdir", "working_directory", "description", "reason", "toolSummary"])
+  );
   const skill = skillInvocation(item);
 
   return {
@@ -573,7 +576,7 @@ function toolPreview(item: DisplayProcessItem): ToolPreview {
 function extractCommand(value: unknown): string | undefined {
   const record = asRecord(value);
   if (!record) return undefined;
-  const command = record.command ?? record.cmd;
+  const command = record.command ?? record.cmd ?? record.CommandLine;
   if (Array.isArray(command)) {
     return command.map((part) => shellPart(String(part))).join(" ");
   }
@@ -943,9 +946,9 @@ interface SubagentInfo {
   active: boolean;
 }
 
-/** Codex spawns subagents via "Agent"; Claude Code via "Task"; pi (pi-subagents) via "subagent". */
+/** Codex spawns subagents via "Agent"; Claude Code via "Task"; pi via "subagent"; Antigravity via "invoke_subagent". */
 function isSubagentToolName(toolName?: string): boolean {
-  return toolName === "Agent" || toolName === "Task" || toolName === "subagent";
+  return toolName === "Agent" || toolName === "Task" || toolName === "subagent" || toolName === "invoke_subagent";
 }
 
 /**
@@ -1072,7 +1075,12 @@ function subagentDescription(item: ProcessItem): string {
   return truncateSubagentDescription(
     (typeof input?.description === "string" ? input.description : null) ??
     (typeof input?.subagent_type === "string" ? input.subagent_type : null) ??
+    (typeof input?.Role === "string"
+      ? typeof input?.TypeName === "string" ? `${input.Role} (${input.TypeName})` : input.Role
+      : null) ??
+    (typeof input?.TypeName === "string" ? input.TypeName : null) ??
     (typeof input?.prompt === "string" ? input.prompt : null) ??
+    (typeof input?.Prompt === "string" ? input.Prompt : null) ??
     (typeof input?.task === "string"
       ? typeof input?.agent === "string" ? `${input.agent}: ${input.task}` : input.task
       : null) ??

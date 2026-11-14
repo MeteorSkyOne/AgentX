@@ -153,9 +153,9 @@ func isClaudeAgentKind(kind string) bool {
 
 // supportsContextProbe reports whether /status can ask the runtime for the
 // live context-window usage: Claude via its context report, pi via
-// get_session_stats.
+// get_session_stats, and Antigravity via ACP usage_update.
 func supportsContextProbe(kind string) bool {
-	return isClaudeAgentKind(kind) || kind == domain.AgentKindPi
+	return isClaudeAgentKind(kind) || kind == domain.AgentKindPi || kind == domain.AgentKindAgy
 }
 
 func (a *App) statusContextUsage(ctx context.Context, agentID string, conversationType domain.ConversationType, conversationID string) (*domain.ContextUsage, *time.Time, error) {

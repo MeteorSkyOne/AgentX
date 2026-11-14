@@ -74,8 +74,8 @@ export interface ShellDialogsProps {
   notificationSavePending: boolean;
   sendTestWebhook: () => void | Promise<void>;
   saveNotificationSettings: () => void | Promise<void>;
-  runtimeCommands: { claude: string; codex: string; pi: string };
-  setRuntimeCommands: React.Dispatch<React.SetStateAction<{ claude: string; codex: string; pi: string }>>;
+  runtimeCommands: { claude: string; codex: string; pi: string; agy: string };
+  setRuntimeCommands: React.Dispatch<React.SetStateAction<{ claude: string; codex: string; pi: string; agy: string }>>;
   serverListenIP: string;
   setServerListenIP: StringSetter;
   serverListenPort: string;
@@ -117,6 +117,8 @@ export interface ShellDialogsProps {
   setToolCodexEnabled: BooleanSetter;
   toolPiEnabled: boolean;
   setToolPiEnabled: BooleanSetter;
+  toolAgyEnabled: boolean;
+  setToolAgyEnabled: BooleanSetter;
   toolSettingsPending: boolean;
   toolActionStatus: string | null;
   toolActionError: string | null;
@@ -302,6 +304,8 @@ export function ShellDialogs({
   setToolCodexEnabled,
   toolPiEnabled,
   setToolPiEnabled,
+  toolAgyEnabled,
+  setToolAgyEnabled,
   toolSettingsPending,
   toolActionStatus,
   toolActionError,
@@ -501,6 +505,8 @@ export function ShellDialogs({
               setToolCodexEnabled={setToolCodexEnabled}
               toolPiEnabled={toolPiEnabled}
               setToolPiEnabled={setToolPiEnabled}
+              toolAgyEnabled={toolAgyEnabled}
+              setToolAgyEnabled={setToolAgyEnabled}
               toolSettingsPending={toolSettingsPending}
               toolActionStatus={toolActionStatus}
               toolActionError={toolActionError}

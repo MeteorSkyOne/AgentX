@@ -172,4 +172,20 @@ describe("getSubagentSummary", () => {
     ];
     expect(getSubagentSummary(finished)[0].active).toBe(false);
   });
+
+  it("counts Antigravity invoke_subagent calls and formats Role/TypeName", () => {
+    const summary = getSubagentSummary([
+      {
+        type: "tool_call",
+        tool_name: "invoke_subagent",
+        tool_call_id: "agy_sub_1",
+        input: { Role: "Codebase Researcher", TypeName: "research", Prompt: "Inspect ACP handlers" },
+      },
+      { type: "subagent_started", tool_call_id: "agy_sub_1" },
+    ]);
+
+    expect(summary).toHaveLength(1);
+    expect(summary[0].description).toBe("Codebase Researcher (research)");
+    expect(summary[0].active).toBe(true);
+  });
 });

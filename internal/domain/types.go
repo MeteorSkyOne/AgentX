@@ -40,6 +40,7 @@ const (
 	AgentKindClaudePersistent = "claude-persistent"
 	AgentKindCodexPersistent  = "codex-persistent"
 	AgentKindPi               = "pi"
+	AgentKindAgy              = "agy"
 )
 
 // System prompt modes for Agent.SystemPromptMode.

@@ -186,7 +186,7 @@ export function Shell({
   const [notificationActionStatus, setNotificationActionStatus] = useState<string | null>(null);
   const [notificationSavePending, setNotificationSavePending] = useState(false);
   const [notificationTestPending, setNotificationTestPending] = useState(false);
-  const [runtimeCommands, setRuntimeCommands] = useState({ claude: "", codex: "", pi: "" });
+  const [runtimeCommands, setRuntimeCommands] = useState({ claude: "", codex: "", pi: "", agy: "" });
   const [serverListenIP, setServerListenIP] = useState("127.0.0.1");
   const [serverListenPort, setServerListenPort] = useState("8080");
   const [serverTLSEnabled, setServerTLSEnabled] = useState(false);
@@ -205,6 +205,7 @@ export function Shell({
   const [toolClaudeEnabled, setToolClaudeEnabled] = useState(true);
   const [toolCodexEnabled, setToolCodexEnabled] = useState(true);
   const [toolPiEnabled, setToolPiEnabled] = useState(true);
+  const [toolAgyEnabled, setToolAgyEnabled] = useState(true);
   const [toolSettingsPending, setToolSettingsPending] = useState(false);
   const [toolActionStatus, setToolActionStatus] = useState<string | null>(null);
   const [toolActionError, setToolActionError] = useState<string | null>(null);
@@ -504,7 +505,12 @@ export function Shell({
   }
 
   function syncServerSettingsDraft() {
-    setRuntimeCommands({ claude: serverSettings?.claude_command ?? "", codex: serverSettings?.codex_command ?? "", pi: serverSettings?.pi_command ?? "" });
+    setRuntimeCommands({
+      claude: serverSettings?.claude_command ?? "",
+      codex: serverSettings?.codex_command ?? "",
+      pi: serverSettings?.pi_command ?? "",
+      agy: serverSettings?.agy_command ?? "",
+    });
     setServerListenIP(serverSettings?.listen_ip ?? "127.0.0.1");
     setServerListenPort(String(serverSettings?.listen_port ?? 8080));
     setServerTLSEnabled(serverSettings?.tls.enabled ?? false);
@@ -525,6 +531,7 @@ export function Shell({
     setToolClaudeEnabled(settings?.claude_enabled ?? true);
     setToolCodexEnabled(settings?.codex_enabled ?? true);
     setToolPiEnabled(settings?.pi_enabled ?? true);
+    setToolAgyEnabled(settings?.agy_enabled ?? true);
     setToolActionError(null);
     setToolActionStatus(null);
   }
@@ -663,6 +670,7 @@ export function Shell({
         claude_enabled: toolClaudeEnabled,
         codex_enabled: toolCodexEnabled,
         pi_enabled: toolPiEnabled,
+        agy_enabled: toolAgyEnabled,
       });
       setToolActionStatus("Saved");
     } catch (err) {
@@ -758,7 +766,10 @@ export function Shell({
     const certPEM = serverTLSCertPEM.trim();
     const keyPEM = serverTLSKeyPEM.trim();
     return {
-      claude_command: runtimeCommands.claude, codex_command: runtimeCommands.codex, pi_command: runtimeCommands.pi,
+      claude_command: runtimeCommands.claude,
+      codex_command: runtimeCommands.codex,
+      pi_command: runtimeCommands.pi,
+      agy_command: runtimeCommands.agy,
       listen_ip: serverListenIP.trim(),
       listen_port: Number(serverListenPort),
       tls: {
@@ -1210,6 +1221,8 @@ export function Shell({
         setToolCodexEnabled={setToolCodexEnabled}
         toolPiEnabled={toolPiEnabled}
         setToolPiEnabled={setToolPiEnabled}
+        toolAgyEnabled={toolAgyEnabled}
+        setToolAgyEnabled={setToolAgyEnabled}
         toolSettingsPending={toolSettingsPending}
         toolActionStatus={toolActionStatus}
         toolActionError={toolActionError}

@@ -23,6 +23,7 @@ const (
 	toolUpdateProviderClaude = "claude"
 	toolUpdateProviderCodex  = "codex"
 	toolUpdateProviderPi     = "pi"
+	toolUpdateProviderAgy    = "agy"
 	toolUpdateAll            = "all"
 	toolUpdateOutputLimit    = 16 * 1024
 	toolUpdateCheckTimeout   = 2 * time.Minute
@@ -35,6 +36,7 @@ type ToolUpdateOptions struct {
 	ClaudeCommand string
 	CodexCommand  string
 	PiCommand     string
+	AgyCommand    string
 	Exec          toolUpdateExecFunc
 	Now           func() time.Time
 }
@@ -76,6 +78,7 @@ type toolUpdateService struct {
 	claudeCommand string
 	codexCommand  string
 	piCommand     string
+	agyCommand    string
 	exec          toolUpdateExecFunc
 	now           func() time.Time
 	waitInterval  time.Duration
@@ -110,6 +113,10 @@ func newToolUpdateService(_ store.Store, dataDir string, runtimes map[string]age
 	if piCommand == "" {
 		piCommand = "pi"
 	}
+	agyCommand := strings.TrimSpace(opts.AgyCommand)
+	if agyCommand == "" {
+		agyCommand = "agy"
+	}
 	execFn := opts.Exec
 	if execFn == nil {
 		execFn = defaultToolUpdateExec
@@ -131,6 +138,7 @@ func newToolUpdateService(_ store.Store, dataDir string, runtimes map[string]age
 		claudeCommand: claudeCommand,
 		codexCommand:  codexCommand,
 		piCommand:     piCommand,
+		agyCommand:    agyCommand,
 		exec:          execFn,
 		now:           now,
 		waitInterval:  toolUpdateWaitInterval,
@@ -138,6 +146,7 @@ func newToolUpdateService(_ store.Store, dataDir string, runtimes map[string]age
 			toolUpdateProviderClaude: {State: "idle"},
 			toolUpdateProviderCodex:  {State: "idle"},
 			toolUpdateProviderPi:     {State: "idle"},
+			toolUpdateProviderAgy:    {State: "idle"},
 		},
 	}
 }
@@ -277,6 +286,7 @@ func (s *toolUpdateService) overview(active func(string) int) ToolUpdateOverview
 			s.statusLocked(toolUpdateProviderClaude, active(toolUpdateProviderClaude)),
 			s.statusLocked(toolUpdateProviderCodex, active(toolUpdateProviderCodex)),
 			s.statusLocked(toolUpdateProviderPi, active(toolUpdateProviderPi)),
+			s.statusLocked(toolUpdateProviderAgy, active(toolUpdateProviderAgy)),
 		},
 	}
 }
@@ -303,7 +313,7 @@ func (s *toolUpdateService) statusLocked(provider string, active int) ToolUpdate
 func (a *App) CheckToolUpdates(ctx context.Context, tool string) (ToolUpdateOverview, error) {
 	providers := requestedToolProviders(tool)
 	if len(providers) == 0 {
-		return ToolUpdateOverview{}, invalidInput("tool must be claude, codex, or all")
+		return ToolUpdateOverview{}, invalidInput("tool must be claude, codex, pi, agy, or all")
 	}
 	// A failed probe is recorded in that tool's status, so report it through the
 	// overview instead of failing the whole check and hiding the other tools.
@@ -318,7 +328,7 @@ func (a *App) CheckToolUpdates(ctx context.Context, tool string) (ToolUpdateOver
 func (a *App) RunToolUpdate(ctx context.Context, tool string) (ToolUpdateOverview, error) {
 	providers := requestedToolProviders(tool)
 	if len(providers) == 0 {
-		return ToolUpdateOverview{}, invalidInput("tool must be claude, codex, or all")
+		return ToolUpdateOverview{}, invalidInput("tool must be claude, codex, pi, agy, or all")
 	}
 	enabled := make([]string, 0, len(providers))
 	for _, provider := range providers {
@@ -345,7 +355,7 @@ func (a *App) RunToolUpdate(ctx context.Context, tool string) (ToolUpdateOvervie
 func (a *App) StartRunToolUpdate(ctx context.Context, tool string) (ToolUpdateOverview, error) {
 	providers := requestedToolProviders(tool)
 	if len(providers) == 0 {
-		return ToolUpdateOverview{}, invalidInput("tool must be claude, codex, or all")
+		return ToolUpdateOverview{}, invalidInput("tool must be claude, codex, pi, agy, or all")
 	}
 	started := make([]string, 0, len(providers))
 	for _, provider := range providers {
@@ -419,13 +429,18 @@ func (s *toolUpdateService) checkStarted(ctx context.Context, provider string, c
 		s.setState(provider, "error", "", err.Error())
 		return err
 	}
-	latestOut, latestErr := s.execWithTimeout(ctx, toolUpdateCheckTimeout, "npm", "view", toolUpdatePackage(provider), "version")
 	current := parseToolVersion(provider, currentOut)
-	latest := parseToolVersion(provider, latestOut)
+	var latest string
+	var latestErr error
 	var available *bool
-	if latestErr == nil && current != "" && latest != "" {
-		v := current != latest
-		available = &v
+	if pkg := toolUpdatePackage(provider); pkg != "" {
+		var latestOut string
+		latestOut, latestErr = s.execWithTimeout(ctx, toolUpdateCheckTimeout, "npm", "view", pkg, "version")
+		latest = parseToolVersion(provider, latestOut)
+		if latestErr == nil && current != "" && latest != "" {
+			v := current != latest
+			available = &v
+		}
 	}
 	now := s.now().UTC()
 	s.mu.Lock()
@@ -577,6 +592,8 @@ func (s *toolUpdateService) providerEnabled(provider string) bool {
 		return s.settings.CodexEnabled
 	case toolUpdateProviderPi:
 		return s.settings.PiEnabled
+	case toolUpdateProviderAgy:
+		return s.settings.AgyEnabled
 	default:
 		return false
 	}
@@ -590,6 +607,8 @@ func (s *toolUpdateService) commandForProvider(provider string) string {
 		return s.codexCommand
 	case toolUpdateProviderPi:
 		return s.piCommand
+	case toolUpdateProviderAgy:
+		return s.agyCommand
 	default:
 		return ""
 	}
@@ -645,6 +664,8 @@ func (a *App) resetProviderRuntime(ctx context.Context, provider string) error {
 		kinds = []string{domain.AgentKindCodexPersistent}
 	case toolUpdateProviderPi:
 		kinds = []string{domain.AgentKindPi}
+	case toolUpdateProviderAgy:
+		kinds = []string{domain.AgentKindAgy}
 	default:
 		return nil
 	}
@@ -703,6 +724,8 @@ func agentProvider(kind string) string {
 		return toolUpdateProviderCodex
 	case domain.AgentKindPi:
 		return toolUpdateProviderPi
+	case domain.AgentKindAgy:
+		return toolUpdateProviderAgy
 	default:
 		return ""
 	}
@@ -711,13 +734,15 @@ func agentProvider(kind string) string {
 func requestedToolProviders(tool string) []string {
 	switch strings.TrimSpace(tool) {
 	case "", toolUpdateAll:
-		return []string{toolUpdateProviderClaude, toolUpdateProviderCodex, toolUpdateProviderPi}
+		return []string{toolUpdateProviderClaude, toolUpdateProviderCodex, toolUpdateProviderPi, toolUpdateProviderAgy}
 	case toolUpdateProviderClaude:
 		return []string{toolUpdateProviderClaude}
 	case toolUpdateProviderCodex:
 		return []string{toolUpdateProviderCodex}
 	case toolUpdateProviderPi:
 		return []string{toolUpdateProviderPi}
+	case toolUpdateProviderAgy:
+		return []string{toolUpdateProviderAgy}
 	default:
 		return nil
 	}
@@ -729,6 +754,9 @@ func toolUpdatePackage(provider string) string {
 		return "@anthropic-ai/claude-code"
 	case toolUpdateProviderPi:
 		return "@earendil-works/pi-coding-agent"
+	case toolUpdateProviderAgy:
+		// Antigravity distributes a standalone self-updating binary (`agy update`), not an npm package.
+		return ""
 	default:
 		return "@openai/codex"
 	}
@@ -740,6 +768,8 @@ func toolUpdateDisplayName(provider string) string {
 		return "Claude Code"
 	case toolUpdateProviderPi:
 		return "Pi"
+	case toolUpdateProviderAgy:
+		return "Antigravity"
 	default:
 		return "Codex"
 	}

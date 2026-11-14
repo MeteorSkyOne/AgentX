@@ -24,6 +24,7 @@ import (
 	"github.com/meteorsky/agentx/internal/httpapi"
 	"github.com/meteorsky/agentx/internal/mcpserver"
 	"github.com/meteorsky/agentx/internal/runtime"
+	"github.com/meteorsky/agentx/internal/runtime/agy"
 	"github.com/meteorsky/agentx/internal/runtime/claude"
 	"github.com/meteorsky/agentx/internal/runtime/claudepersist"
 	"github.com/meteorsky/agentx/internal/runtime/codex"
@@ -131,6 +132,12 @@ func main() {
 			ExtensionDir:       cfg.PiExtensionDir,
 			SubagentForeground: cfg.PiSubagentForeground,
 		}),
+		domain.AgentKindAgy: agy.New(agy.Options{
+			Command:            cfg.AgyCommand,
+			PermissionMode:     cfg.AgyPermissionMode,
+			AppendSystemPrompt: cfg.AgyAppendSystemText,
+			IdleTimeout:        time.Duration(cfg.AgyPersistentIdleMinutes) * time.Minute,
+		}),
 	}
 	defer shutdownRuntimes(runtimes)
 
@@ -167,6 +174,7 @@ func main() {
 			CodexCommand:  cfg.CodexCommand,
 			ClaudeCommand: cfg.ClaudeCommand,
 			PiCommand:     cfg.PiCommand,
+			AgyCommand:    cfg.AgyCommand,
 		},
 		SelfUpdates: app.SelfUpdateOptions{
 			GitHubRepo: cfg.GitHubRepo,

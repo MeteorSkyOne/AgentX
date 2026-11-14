@@ -482,10 +482,12 @@ func TestRuntimeCommandsFromServerSettings(t *testing.T) {
 	t.Setenv("AGENTX_CLAUDE_COMMAND", "")
 	t.Setenv("AGENTX_CODEX_COMMAND", "override-codex")
 	t.Setenv("AGENTX_PI_COMMAND", "")
+	t.Setenv("AGENTX_AGY_COMMAND", "")
 	settings := DefaultServerSettings()
 	settings.ClaudeCommand = "/opt/bin/custom-claude"
 	settings.CodexCommand = "custom-codex"
 	settings.PiCommand = "custom-pi"
+	settings.AgyCommand = "/opt/bin/custom-agy"
 	if _, err := SaveServerSettings(dir, settings); err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +495,32 @@ func TestRuntimeCommandsFromServerSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ClaudeCommand != settings.ClaudeCommand || cfg.CodexCommand != "override-codex" || cfg.PiCommand != settings.PiCommand {
-		t.Fatalf("unexpected commands: claude=%q codex=%q pi=%q", cfg.ClaudeCommand, cfg.CodexCommand, cfg.PiCommand)
+	if cfg.ClaudeCommand != settings.ClaudeCommand || cfg.CodexCommand != "override-codex" || cfg.PiCommand != settings.PiCommand || cfg.AgyCommand != settings.AgyCommand {
+		t.Fatalf("unexpected commands: claude=%q codex=%q pi=%q agy=%q", cfg.ClaudeCommand, cfg.CodexCommand, cfg.PiCommand, cfg.AgyCommand)
+	}
+}
+
+func TestLoadToolUpdateSettingsDefaultsAgyEnabledForLegacyConfig(t *testing.T) {
+	dir := t.TempDir()
+	configPath := ConfigPath(dir)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(`[tool_updates]
+auto_enabled = false
+time_of_day = "04:00"
+timezone = "UTC"
+claude_enabled = true
+codex_enabled = true
+pi_enabled = true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadToolUpdateSettings(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.AgyEnabled {
+		t.Fatalf("expected AgyEnabled=true for legacy config without agy_enabled key, got %#v", loaded)
 	}
 }

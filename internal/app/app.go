@@ -892,6 +892,8 @@ func (a *App) defaultAgentName() string {
 		return "Claude Code"
 	case domain.AgentKindPi:
 		return "Pi"
+	case domain.AgentKindAgy:
+		return "Antigravity"
 	default:
 		return "Fake Agent"
 	}

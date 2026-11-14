@@ -58,7 +58,7 @@ Think of it as a chat workspace where every teammate is an agent: give each one 
 ### Operations
 
 - **Self-update.** Check for and install new AgentX releases from Settings, on demand or on a daily schedule. Choose the `release` or `dev` channel.
-- **Runtime updates.** Check for and install Claude Code, Codex, and Pi CLI updates from Settings, optionally on a daily schedule.
+- **Runtime updates.** Check for and install Claude Code, Codex, Pi, and Antigravity CLI updates from Settings, optionally on a daily schedule.
 - **TLS.** Optional HTTPS with certificate and key paths managed from the UI or `config.toml`. A restart button reloads certificates without touching the shell.
 - **Auth.** Username and password login with 30-day hashed API sessions. First-run setup is protected by a one-time setup token.
 
@@ -72,6 +72,7 @@ Think of it as a chat workspace where every teammate is an agent: give each one 
 | `claude-persistent` | Persistent | Long-lived Claude Code process speaking stream-json over stdin/stdout, with a permission-prompt tool for interactive questions |
 | `codex-persistent` | Persistent | Long-lived `codex app-server` process speaking JSON-RPC 2.0 over stdio |
 | `pi` | Persistent | Long-lived [`pi --mode rpc`](https://pi.dev) process speaking JSONL over stdio; sessions are stored under `$AGENTX_DATA_DIR/pi-sessions`. A bundled extension adds user questions, step progress, plan mode and YOLO-off command confirmation |
+| `agy` | Persistent | Long-lived Antigravity `agy acp` process speaking Agent Client Protocol (JSON-RPC 2.0 over stdio), with native session resume, thinking/effort levels, permission prompts, plan updates, and subagent tracking |
 
 Persistent processes are managed by a process pool with turn-based coordination, idle reaping (30 minutes by default), and graceful shutdown. The persistent kinds are recommended for day-to-day use.
 
@@ -84,6 +85,7 @@ Persistent processes are managed by a process pool with turn-based coordination,
   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`)
   - [Codex CLI](https://github.com/openai/codex) (`codex`)
   - [Pi](https://pi.dev) (`pi`); install [pi-subagents](https://pi.dev/packages/pi-subagents) with `pi install npm:pi-subagents` if you want pi agents to delegate to subagents
+  - Antigravity CLI (`agy`), authenticated with `agy auth login`
 - Optional: the [D2](https://d2lang.com) CLI if you want `d2` code blocks rendered as diagrams.
 
 You can start with the `fake` runtime and add real agents later.
@@ -147,7 +149,7 @@ AgentX is configured through environment variables and a small `config.toml`. En
 | `AGENTX_DATA_DIR` | `~/.agentx` | Directory for the SQLite database and `config.toml` |
 | `AGENTX_SQLITE_PATH` | `$AGENTX_DATA_DIR/agentx.db` | SQLite database file |
 | `AGENTX_ADMIN_TOKEN` | random | One-time setup token used to create the first admin |
-| `AGENTX_DEFAULT_AGENT_KIND` | `fake` | Default runtime for new agents: `fake`, `claude`, `codex`, `claude-persistent`, `codex-persistent`, `pi` |
+| `AGENTX_DEFAULT_AGENT_KIND` | `fake` | Default runtime for new agents: `fake`, `claude`, `codex`, `claude-persistent`, `codex-persistent`, `pi`, `agy` |
 | `AGENTX_DEFAULT_AGENT_MODEL` | | Default model for new agents |
 | `AGENTX_GITHUB_REPO` | `MeteorSkyOne/AgentX` | Repository used for self-update checks |
 | `AGENTX_SELF_UPDATE_CHANNEL` | `release` | Self-update channel: `release` or `dev` |
@@ -172,6 +174,10 @@ AgentX is configured through environment variables and a small `config.toml`. En
 | `AGENTX_PI_PROJECT_TRUST` | `approve` | `approve` trusts project-local pi config and extensions, `no-approve` ignores them, empty leaves it to pi's settings |
 | `AGENTX_PI_EXTENSION_DIR` | `$AGENTX_DATA_DIR/pi-extension` | Where AgentX writes its bundled pi extension (`ask_user`, `update_plan`, plan mode and YOLO gating); empty disables it |
 | `AGENTX_PI_SUBAGENTS_FOREGROUND` | `true` | Set `asyncByDefault: false` in pi-subagents' `config.json` when unset, so subagent progress streams into the AgentX reply |
+| `AGENTX_AGY_COMMAND` | `agy` | Antigravity (`agy`) CLI binary |
+| `AGENTX_AGY_PERMISSION_MODE` | `accept-edits` | Antigravity permission mode: `agent`, `accept-edits`, `bypass-permissions`, or `plan` |
+| `AGENTX_AGY_APPEND_SYSTEM_PROMPT` | | Text appended to the system prompt of every Antigravity session |
+| `AGENTX_AGY_PERSISTENT_IDLE_MINUTES` | `30` | Idle timeout before an `agy acp` process is stopped |
 | `AGENTX_TERMINAL_SHELL` | `$SHELL` | Shell used for workspace terminals |
 | `AGENTX_TERMINAL_IDLE_MINUTES` | `30` | Idle timeout for workspace terminals |
 | `AGENTX_TERMINAL_MAX_SESSIONS_PER_WORKSPACE` | `8` | Maximum concurrent terminals per workspace |
@@ -297,7 +303,7 @@ internal/store/sqlite/    SQLite (modernc.org) with Goose migrations
 internal/eventbus/        In-memory pub/sub scoped by organization and conversation
 internal/runtime/         Runtime interface
    ├── claude/ codex/ fake/           Ephemeral CLI adapters
-   ├── claudepersist/ codexpersist/   Persistent process runtimes
+   ├── claudepersist/ codexpersist/ pi/ agy/   Persistent process runtimes
    └── procpool/                      Process pool with turn coordination
 internal/skills/          SKILL.md discovery
 internal/config/          Environment variables and config.toml
