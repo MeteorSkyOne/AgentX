@@ -7,6 +7,7 @@ package agy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -149,13 +150,25 @@ func (r *Runtime) StopBackgroundTask(_ context.Context, sessionKey string, taskI
 	if !running {
 		return errNoSuchBackgroundTask
 	}
-	if kind != runtime.BackgroundTaskShell {
-		return errCannotStopBackgroundAgent
+	if kind == runtime.BackgroundTaskShell {
+		if cmdLine != "" {
+			if err := stopProcessBackgroundTask(proc.PID(), cmdLine); err != nil && !errors.Is(err, errNoSuchBackgroundTask) {
+				return err
+			}
+		}
+		mon.registry.markStopped(taskID, "Stopped by user.")
+		return nil
 	}
-	if err := stopProcessBackgroundTask(proc.PID(), cmdLine); err != nil {
-		return err
+
+	// Schedules (`monitor`) and subagents (`agent`) run inside `agy acp` with no
+	// per-task ACP cancel RPC. Terminate any background child shells first, mark
+	// tasks stopped, and recycle the pooled `agy acp` process; the next turn
+	// resumes the conversation via `session/resume`.
+	for _, shellCmd := range mon.registry.runningShellCommands() {
+		_ = stopProcessBackgroundTask(proc.PID(), shellCmd)
 	}
-	mon.registry.markStopped(taskID, "Stopped by user.")
+	mon.registry.markAllStopped("Stopped by user.")
+	r.pool.Kill(sessionKey)
 	return nil
 }
 

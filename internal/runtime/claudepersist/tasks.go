@@ -226,6 +226,24 @@ func (r *taskRegistry) kind(taskType string, toolUseID string) string {
 	return taskType
 }
 
+// markStopped immediately marks a running task as stopped and reports the
+// updated list so callers do not have to wait for the next CLI turn event.
+func (r *taskRegistry) markStopped(taskID string, summary string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	changed := r.end(taskID, "stopped", summary, "")
+	var tasks []runtime.BackgroundTask
+	if changed {
+		tasks = r.snapshotLocked()
+	}
+	r.mu.Unlock()
+	if changed && r.report != nil {
+		r.report(r.key, tasks)
+	}
+}
+
 // processExited ends every task still running: they go away with the process.
 func (r *taskRegistry) processExited() {
 	if r == nil {

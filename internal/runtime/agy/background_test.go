@@ -212,6 +212,15 @@ for raw in sys.stdin:
             send({"jsonrpc": "2.0", "id": req_id, "result": {"stopReason": "end_turn"}})
             continue
 
+        if "SPAWN_SCHEDULE" in text:
+            append_step(sid, {"step_index": 0, "source": "USER_EXPLICIT", "type": "USER_INPUT", "status": "DONE", "content": text})
+            append_step(sid, {"step_index": 1, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "tool_calls": [{"name": "schedule", "args": {"Prompt": "Poll build", "CronExpression": "*/5 * * * *"}}]})
+            append_step(sid, {"step_index": 2, "source": "MODEL", "type": "GENERIC", "status": "RUNNING", "content": f"Tool is running as a background task with task id: {sid}/task-sched\n"})
+            append_step(sid, {"step_index": 3, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "content": "Schedule started"})
+            send({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": sid, "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Schedule started"}}}})
+            send({"jsonrpc": "2.0", "id": req_id, "result": {"stopReason": "end_turn"}})
+            continue
+
         send({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": sid, "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "echo:" + text}}}})
         send({"jsonrpc": "2.0", "id": req_id, "result": {"stopReason": "end_turn"}})
         continue
@@ -708,5 +717,131 @@ func TestTaskRegistrySubagentsSchedulesAndFailures(t *testing.T) {
 	reg.processExited()
 	if reported[1].Status != "stopped" || reported[1].Summary != "The agent process exited." {
 		t.Fatalf("expected stopped schedule on process exit, got %+v", reported[1])
+	}
+}
+
+func TestTaskRegistryMultipleSystemMessagesInOneStep(t *testing.T) {
+	var reported []runtime.BackgroundTask
+	reg := newTaskRegistry("agent:channel:1", "/tmp/appdata", func(_ string, tasks []runtime.BackgroundTask) {
+		reported = append([]runtime.BackgroundTask(nil), tasks...)
+	})
+	reg.setSession("sid-1")
+
+	reg.observeStep(transcriptStep{
+		StepIndex: 1,
+		Type:      "PLANNER_RESPONSE",
+		ToolCalls: []transcriptToolCall{
+			{Name: "run_command", Args: map[string]any{"CommandLine": "echo 1", "toolSummary": "First"}},
+			{Name: "run_command", Args: map[string]any{"CommandLine": "echo 2", "toolSummary": "Second"}},
+		},
+	})
+	reg.observeStep(transcriptStep{
+		StepIndex: 2,
+		Type:      "GENERIC",
+		Content:   "Tool is running as a background task with task id: sid-1/task-1\n",
+	})
+	reg.observeStep(transcriptStep{
+		StepIndex: 3,
+		Type:      "GENERIC",
+		Content:   "Tool is running as a background task with task id: sid-1/task-2\n",
+	})
+	if len(reported) != 2 || reported[0].Status != runtime.BackgroundTaskRunning || reported[1].Status != runtime.BackgroundTaskRunning {
+		t.Fatalf("expected 2 running tasks, got %+v", reported)
+	}
+
+	// Both completions embedded into a single GENERIC tool output step.
+	reg.observeStep(transcriptStep{
+		StepIndex: 4,
+		Type:      "GENERIC",
+		Content: "Tool output\n" +
+			"<SYSTEM_MESSAGE>\n[Message] timestamp=2026-11-15T15:08:00Z sender=sid-1/task-1 priority=MESSAGE_PRIORITY_HIGH content=Command exited with code 0.\n</SYSTEM_MESSAGE>\n" +
+			"<SYSTEM_MESSAGE>\n[Message] timestamp=2026-11-15T15:08:01Z sender=sid-1/task-2 priority=MESSAGE_PRIORITY_HIGH content=Command exited with code 0.\n</SYSTEM_MESSAGE>",
+	})
+	if len(reported) != 2 || reported[0].Status != "completed" || reported[1].Status != "completed" {
+		t.Fatalf("expected both tasks completed, got %+v", reported)
+	}
+}
+
+func TestStopBackgroundTaskStopsScheduleAndResumesConversation(t *testing.T) {
+	script := writeFakeBackgroundAgyScript(t)
+	tempHome := t.TempDir()
+
+	rt := New(Options{
+		Command:      script,
+		Env:          map[string]string{"HOME": tempHome},
+		pollInterval: testBrainPollInterval,
+	})
+	t.Cleanup(func() { _ = rt.Shutdown(context.Background()) })
+
+	taskReady := make(chan struct{}, 1)
+	var (
+		taskMu sync.Mutex
+		latest []runtime.BackgroundTask
+	)
+	rt.SetBackgroundTaskHandler(func(_ string, tasks []runtime.BackgroundTask) {
+		taskMu.Lock()
+		latest = append([]runtime.BackgroundTask(nil), tasks...)
+		if len(tasks) > 0 && tasks[0].Status == runtime.BackgroundTaskRunning {
+			select {
+			case taskReady <- struct{}{}:
+			default:
+			}
+		}
+		taskMu.Unlock()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	workspace := t.TempDir()
+	key := "agent-agy:channel:sched-stop"
+	sess, err := rt.StartSession(ctx, runtime.StartSessionRequest{
+		AgentID:    "agent-agy",
+		SessionKey: key,
+		Workspace:  workspace,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Send(ctx, runtime.Input{Prompt: "SPAWN_SCHEDULE"}); err != nil {
+		t.Fatal(err)
+	}
+	for range sess.Events() {
+	}
+	sid := sess.CurrentSessionID()
+
+	<-taskReady
+	if err := rt.StopBackgroundTask(ctx, key, "task-sched"); err != nil {
+		t.Fatalf("StopBackgroundTask for schedule failed: %v", err)
+	}
+
+	taskMu.Lock()
+	got := append([]runtime.BackgroundTask(nil), latest...)
+	taskMu.Unlock()
+	if len(got) != 1 || got[0].Status != "stopped" {
+		t.Fatalf("expected schedule marked stopped, got %+v", got)
+	}
+
+	// Subsequent turn must start a fresh process and resume the session cleanly.
+	sess2, err := rt.StartSession(ctx, runtime.StartSessionRequest{
+		AgentID:           "agent-agy",
+		SessionKey:        key,
+		Workspace:         workspace,
+		PreviousSessionID: sid,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess2.Send(ctx, runtime.Input{Prompt: "after-stop"}); err != nil {
+		t.Fatal(err)
+	}
+	var final runtime.Event
+	for evt := range sess2.Events() {
+		if evt.Type != runtime.EventDelta {
+			final = evt
+		}
+	}
+	if final.Type != runtime.EventCompleted || !strings.Contains(final.Text, "echo:after-stop") {
+		t.Fatalf("resumed turn after stopping schedule failed: %+v", final)
 	}
 }

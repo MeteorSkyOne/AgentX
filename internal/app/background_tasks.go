@@ -44,8 +44,18 @@ func (a *App) handleBackgroundTasks(sessionKey string, tasks []agentruntime.Back
 	if !ok {
 		return
 	}
+	var running []agentruntime.BackgroundTask
+	for _, task := range tasks {
+		if task.Status == agentruntime.BackgroundTaskRunning {
+			running = append(running, task)
+		}
+	}
 	a.backgroundTasksMu.Lock()
-	a.backgroundTasks[sessionKey] = append([]agentruntime.BackgroundTask(nil), tasks...)
+	if len(running) == 0 {
+		delete(a.backgroundTasks, sessionKey)
+	} else {
+		a.backgroundTasks[sessionKey] = running
+	}
 	a.backgroundTasksMu.Unlock()
 
 	// Publishing looks up the conversation, so it runs off the runtime's

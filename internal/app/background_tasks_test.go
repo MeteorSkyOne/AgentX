@@ -63,7 +63,8 @@ func TestBackgroundTasksArePublishedListedReadAndStopped(t *testing.T) {
 	key := agentSessionKey(bootstrap.Agent.ID, domain.ConversationChannel, bootstrap.Channel.ID)
 	rt.report(key, []agentruntime.BackgroundTask{
 		{ID: "b1", Kind: agentruntime.BackgroundTaskShell, Description: "Build", Status: agentruntime.BackgroundTaskRunning, OutputFile: output, StartedAt: started},
-		{ID: "a1", Kind: agentruntime.BackgroundTaskAgent, Status: "completed", StartedAt: started.Add(time.Second), EndedAt: started.Add(2 * time.Second)},
+		{ID: "a1", Kind: agentruntime.BackgroundTaskAgent, Description: "Research", Status: agentruntime.BackgroundTaskRunning, StartedAt: started.Add(time.Second)},
+		{ID: "done1", Kind: agentruntime.BackgroundTaskShell, Status: "completed", StartedAt: started.Add(2 * time.Second), EndedAt: started.Add(3 * time.Second)},
 	})
 
 	select {
@@ -77,7 +78,7 @@ func TestBackgroundTasksArePublishedListedReadAndStopped(t *testing.T) {
 	}
 
 	tasks := app.ListBackgroundTasks(domain.ConversationChannel, bootstrap.Channel.ID)
-	if len(tasks) != 2 || tasks[0].ID != "b1" || !tasks[0].HasOutput || tasks[0].EndedAt != nil || tasks[1].EndedAt == nil || tasks[1].HasOutput {
+	if len(tasks) != 2 || tasks[0].ID != "b1" || !tasks[0].HasOutput || tasks[0].EndedAt != nil || tasks[1].ID != "a1" || tasks[1].HasOutput {
 		t.Fatalf("tasks = %#v", tasks)
 	}
 	if other := app.ListBackgroundTasks(domain.ConversationThread, bootstrap.Channel.ID); len(other) != 0 {
@@ -98,10 +99,28 @@ func TestBackgroundTasksArePublishedListedReadAndStopped(t *testing.T) {
 	if err := app.StopBackgroundTask(ctx, domain.ConversationChannel, bootstrap.Channel.ID, bootstrap.Agent.ID, "b1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.StopBackgroundTask(ctx, domain.ConversationChannel, bootstrap.Channel.ID, bootstrap.Agent.ID, "a1"); !errors.Is(err, ErrBackgroundTaskNotFound) {
+	if err := app.StopBackgroundTask(ctx, domain.ConversationChannel, bootstrap.Channel.ID, bootstrap.Agent.ID, "done1"); !errors.Is(err, ErrBackgroundTaskNotFound) {
 		t.Fatalf("stopping an ended task: err = %v", err)
 	}
 	if len(rt.stopped) != 1 || rt.stopped[0] != key+"/b1" {
 		t.Fatalf("stopped = %v", rt.stopped)
+	}
+
+	// Completing remaining tasks clears the conversation's background task list.
+	rt.report(key, []agentruntime.BackgroundTask{
+		{ID: "b1", Kind: agentruntime.BackgroundTaskShell, Status: "stopped", StartedAt: started, EndedAt: started.Add(4 * time.Second)},
+		{ID: "a1", Kind: agentruntime.BackgroundTaskAgent, Status: "completed", StartedAt: started.Add(time.Second), EndedAt: started.Add(5 * time.Second)},
+	})
+	select {
+	case evt := <-events:
+		payload, ok := evt.Payload.(domain.AgentBackgroundTasksPayload)
+		if evt.Type != domain.EventAgentBackgroundTasksUpdated || !ok || len(payload.Tasks) != 0 {
+			t.Fatalf("clear event = %s %#v", evt.Type, evt.Payload)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("background task clear update was not published")
+	}
+	if cleared := app.ListBackgroundTasks(domain.ConversationChannel, bootstrap.Channel.ID); len(cleared) != 0 {
+		t.Fatalf("expected finished tasks to be cleared, got %#v", cleared)
 	}
 }

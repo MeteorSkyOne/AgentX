@@ -140,7 +140,11 @@ func (r *Runtime) StopBackgroundTask(_ context.Context, sessionKey string, taskI
 	if !running {
 		return errNoSuchBackgroundTask
 	}
-	return writeStopTask(proc, taskID)
+	if err := writeStopTask(proc, taskID); err != nil {
+		return err
+	}
+	registry.markStopped(taskID, "Stopped by user.")
+	return nil
 }
 
 func (r *Runtime) Shutdown(ctx context.Context) error {

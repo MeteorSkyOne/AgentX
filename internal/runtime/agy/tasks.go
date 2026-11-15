@@ -19,8 +19,7 @@ import (
 const maxEndedTasks = 20
 
 var (
-	errNoSuchBackgroundTask      = errors.New("no such running background task")
-	errCannotStopBackgroundAgent = errors.New("antigravity background subagents and schedules cannot be stopped individually")
+	errNoSuchBackgroundTask = errors.New("no such running background task")
 
 	bgTaskStartedPattern  = regexp.MustCompile(`(?m)^Tool is running as a background task with task id:\s*(\S+)\s*$`)
 	bgTaskDescPattern     = regexp.MustCompile(`(?m)^Task Description:\s*(.+?)\s*$`)
@@ -205,12 +204,52 @@ func (r *taskRegistry) taskCommandLine(taskID string) (kind string, cmdLine stri
 	return t.Kind, cmd, true
 }
 
+func (r *taskRegistry) runningShellCommands() []string {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var cmds []string
+	for id, t := range r.tasks {
+		if t.Status != runtime.BackgroundTaskRunning || t.Kind != runtime.BackgroundTaskShell {
+			continue
+		}
+		if d := r.details[id]; d != nil && strings.TrimSpace(d.commandLine) != "" {
+			cmds = append(cmds, d.commandLine)
+		}
+	}
+	return cmds
+}
+
 func (r *taskRegistry) markStopped(taskID string, summary string) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
 	changed := r.endLocked(taskID, "stopped", summary, "", time.Now().UTC())
+	var snap []runtime.BackgroundTask
+	if changed {
+		snap = r.snapshotLocked()
+	}
+	r.mu.Unlock()
+	if changed && r.report != nil {
+		r.report(r.key, snap)
+	}
+}
+
+func (r *taskRegistry) markAllStopped(summary string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	changed := false
+	now := time.Now().UTC()
+	for id, t := range r.tasks {
+		if t.Status == runtime.BackgroundTaskRunning {
+			changed = r.endLocked(id, "stopped", summary, "", now) || changed
+		}
+	}
 	var snap []runtime.BackgroundTask
 	if changed {
 		snap = r.snapshotLocked()
@@ -407,20 +446,24 @@ func (r *taskRegistry) applyGenericStepLocked(content string, meta pendingToolMe
 }
 
 func (r *taskRegistry) applySystemMessageTextLocked(content string, fallbackTime time.Time) bool {
-	body := extractTagInner(content, "SYSTEM_MESSAGE")
-	if body == "" {
-		body = content
+	bodies := extractAllTagInners(content, "SYSTEM_MESSAGE")
+	if len(bodies) == 0 {
+		bodies = []string{content}
 	}
-	m := sysMsgHeaderPattern.FindStringSubmatch(strings.TrimSpace(body))
-	if m == nil {
-		return false
+	changed := false
+	for _, body := range bodies {
+		m := sysMsgHeaderPattern.FindStringSubmatch(strings.TrimSpace(body))
+		if m == nil {
+			continue
+		}
+		ts, sender, _, msgContent := m[1], m[2], m[3], m[4]
+		endedAt := parseStepTime(ts)
+		if endedAt.IsZero() {
+			endedAt = fallbackTime
+		}
+		changed = r.applyMessageLocked(sender, msgContent, endedAt.Format(time.RFC3339Nano), "", "") || changed
 	}
-	ts, sender, _, msgContent := m[1], m[2], m[3], m[4]
-	endedAt := parseStepTime(ts)
-	if endedAt.IsZero() {
-		endedAt = fallbackTime
-	}
-	return r.applyMessageLocked(sender, msgContent, endedAt.Format(time.RFC3339Nano), "", "")
+	return changed
 }
 
 func (r *taskRegistry) applyMessageLocked(sender string, content string, timestamp string, toolCallID string, argsJSON string) bool {
@@ -647,19 +690,30 @@ func extractSpawnedSubagentIDs(content string) []string {
 	return ids
 }
 
-func extractTagInner(text string, tag string) string {
+func extractAllTagInners(text string, tag string) []string {
 	openTag := "<" + tag + ">"
 	closeTag := "</" + tag + ">"
-	start := strings.Index(text, openTag)
-	if start < 0 {
-		return ""
+	var out []string
+	rest := text
+	for {
+		start := strings.Index(rest, openTag)
+		if start < 0 {
+			break
+		}
+		rest = rest[start+len(openTag):]
+		end := strings.Index(rest, closeTag)
+		if end < 0 {
+			if trimmed := strings.TrimSpace(rest); trimmed != "" {
+				out = append(out, trimmed)
+			}
+			break
+		}
+		if trimmed := strings.TrimSpace(rest[:end]); trimmed != "" {
+			out = append(out, trimmed)
+		}
+		rest = rest[end+len(closeTag):]
 	}
-	rest := text[start+len(openTag):]
-	end := strings.LastIndex(rest, closeTag)
-	if end < 0 {
-		return strings.TrimSpace(rest)
-	}
-	return strings.TrimSpace(rest[:end])
+	return out
 }
 
 func normalizeToolArgs(args map[string]any) map[string]any {

@@ -39,26 +39,28 @@ function task(overrides: Partial<BackgroundTask>): BackgroundTask {
 }
 
 describe("background task helpers", () => {
-  it("replaces only the updated agent's tasks, oldest first", () => {
+  it("replaces the updated agent's tasks and drops non-running ones, oldest first", () => {
     const current = [
       task({ id: "a", agent_id: "agt_1", started_at: "2026-10-26T10:00:00Z" }),
       task({ id: "b", agent_id: "agt_2", started_at: "2026-10-26T10:01:00Z" })
     ];
     const merged = mergeAgentBackgroundTasks(current, "agt_1", [
-      task({ id: "c", agent_id: "agt_1", started_at: "2026-10-26T10:02:00Z" })
+      task({ id: "c", agent_id: "agt_1", started_at: "2026-10-26T10:02:00Z" }),
+      task({ id: "done", agent_id: "agt_1", status: "completed", started_at: "2026-10-26T10:03:00Z" })
     ]);
     expect(merged.map((item) => item.id)).toEqual(["b", "c"]);
+    expect(mergeAgentBackgroundTasks(merged, "agt_1", [{ ...merged[1], status: "completed" }]).map((item) => item.id)).toEqual(["b"]);
     expect(mergeAgentBackgroundTasks(undefined, "agt_1", [])).toEqual([]);
   });
 
-  it("hides tasks that ended a while ago", () => {
-    const now = Date.parse("2026-10-26T12:00:00Z");
+  it("hides completed and stopped tasks immediately", () => {
     const tasks = [
       task({ id: "running" }),
-      task({ id: "recent", status: "completed", ended_at: "2026-10-26T11:50:00Z" }),
-      task({ id: "old", status: "completed", ended_at: "2026-10-26T10:00:00Z" })
+      task({ id: "completed", status: "completed", ended_at: "2026-10-26T11:59:59Z" }),
+      task({ id: "stopped", status: "stopped", ended_at: "2026-10-26T11:59:59Z" }),
+      task({ id: "failed", status: "failed", ended_at: "2026-10-26T11:59:59Z" })
     ];
-    expect(visibleBackgroundTasks(tasks, now).map((item) => item.id)).toEqual(["running", "recent"]);
+    expect(visibleBackgroundTasks(tasks).map((item) => item.id)).toEqual(["running"]);
   });
 
   it("formats durations compactly", () => {
@@ -81,27 +83,29 @@ function renderTasks() {
       />
     </QueryClientProvider>
   );
+  return queryClient;
 }
 
 describe("BackgroundTasks", () => {
-  it("renders nothing without tasks", async () => {
-    vi.mocked(listBackgroundTasks).mockResolvedValue([]);
+  it("renders nothing when no tasks are running", async () => {
+    vi.mocked(listBackgroundTasks).mockResolvedValue([
+      task({ id: "done", status: "completed", ended_at: new Date().toISOString() })
+    ]);
     renderTasks();
     await waitFor(() => expect(listBackgroundTasks).toHaveBeenCalledWith("channel", "chn_1"));
     expect(screen.queryByText("Background tasks")).toBeNull();
   });
 
-  it("summarizes, expands, shows output and stops a running task", async () => {
+  it("shows running tasks expanded by default, displays output, and clears on manual stop", async () => {
     vi.mocked(listBackgroundTasks).mockResolvedValue([
       task({ id: "m1", kind: "monitor", description: "Watch deploy log" }),
       task({
         id: "a1",
         agent_id: "agt_2",
         kind: "agent",
-        description: "Research",
+        description: "Completed research",
         status: "completed",
         has_output: false,
-        summary: "Found three call sites",
         ended_at: new Date().toISOString()
       })
     ]);
@@ -111,21 +115,24 @@ describe("BackgroundTasks", () => {
 
     const toggle = await screen.findByRole("button", { name: /Background tasks/ });
     expect(toggle.textContent).toContain("1 running");
-    expect(toggle.textContent).toContain("1 finished");
-    expect(screen.queryByText("Watch deploy log")).toBeNull();
-
-    fireEvent.click(toggle);
+    expect(toggle.textContent).not.toContain("finished");
+    // Expanded by default so the running task and manual Stop button are immediately accessible.
     expect(screen.getByText("Watch deploy log")).toBeTruthy();
-    expect(screen.getByText("Found three call sites")).toBeTruthy();
-    expect(screen.getByText("Codex")).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "Stop task" })).toHaveLength(1);
+    expect(screen.queryByText("Completed research")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Show output" }));
     expect(await screen.findByText("deploy 42% done")).toBeTruthy();
     expect(screen.getByText("Earlier output omitted.")).toBeTruthy();
     expect(fetchBackgroundTaskOutput).toHaveBeenCalledWith("channel", "chn_1", "agt_1", "m1");
 
+    // Can collapse and re-expand.
+    fireEvent.click(toggle);
+    expect(screen.queryByText("Watch deploy log")).toBeNull();
+    fireEvent.click(toggle);
+    expect(screen.getByText("Watch deploy log")).toBeTruthy();
+
     fireEvent.click(screen.getByRole("button", { name: "Stop task" }));
     await waitFor(() => expect(stopBackgroundTask).toHaveBeenCalledWith("channel", "chn_1", "agt_1", "m1"));
+    await waitFor(() => expect(screen.queryByText("Background tasks")).toBeNull());
   });
 });

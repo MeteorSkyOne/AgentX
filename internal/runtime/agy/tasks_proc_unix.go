@@ -22,16 +22,16 @@ type childProcInfo struct {
 
 // stopProcessBackgroundTask terminates a background shell command spawned by
 // `agy acp` (which launches each `run_command` in its own process group with
-// `bash -c <cmdLine>`). Matching both PPID == agyPID and the command line keeps
-// long-lived sibling children such as MCP servers untouched.
+// `bash -c <cmdLine>`). Matching descendants of agyPID and the command line
+// keeps long-lived sibling children such as MCP servers untouched.
 func stopProcessBackgroundTask(agyPID int, cmdLine string) error {
 	cmdLine = strings.TrimSpace(cmdLine)
 	if agyPID <= 0 || cmdLine == "" {
 		return errNoSuchBackgroundTask
 	}
-	children := listChildProcesses(agyPID)
+	descendants, rootPGID := listDescendantProcesses(agyPID)
 	var targets []childProcInfo
-	for _, c := range children {
+	for _, c := range descendants {
 		if c.pid <= 1 || c.pid == agyPID {
 			continue
 		}
@@ -44,7 +44,7 @@ func stopProcessBackgroundTask(agyPID int, cmdLine string) error {
 	}
 
 	for _, t := range targets {
-		signalChildGroupOrPID(t, syscall.SIGTERM)
+		signalChildGroupOrPID(t, rootPGID, syscall.SIGTERM)
 	}
 
 	deadline := time.Now().Add(300 * time.Millisecond)
@@ -62,7 +62,7 @@ func stopProcessBackgroundTask(agyPID int, cmdLine string) error {
 		time.Sleep(20 * time.Millisecond)
 	}
 	for _, t := range targets {
-		signalChildGroupOrPID(t, syscall.SIGKILL)
+		signalChildGroupOrPID(t, rootPGID, syscall.SIGKILL)
 	}
 	return nil
 }
@@ -93,17 +93,47 @@ func isProcessAlive(pid int) bool {
 	return st != "" && !strings.HasPrefix(st, "Z")
 }
 
-func signalChildGroupOrPID(c childProcInfo, sig syscall.Signal) {
+func signalChildGroupOrPID(c childProcInfo, rootPGID int, sig syscall.Signal) {
 	// Only signal the negative process group when the child is its own group
-	// leader (PID == PGID), which is how `agy` starts `run_command` shells.
-	if c.pgid > 1 && c.pgid == c.pid {
+	// leader (PID == PGID) and distinct from agy's own process group, which is
+	// how `agy` starts `run_command` shells.
+	if c.pgid > 1 && c.pgid == c.pid && c.pgid != rootPGID {
 		_ = syscall.Kill(-c.pgid, sig)
 		return
 	}
 	_ = syscall.Kill(c.pid, sig)
 }
 
-func listChildProcesses(parentPID int) []childProcInfo {
+func listDescendantProcesses(rootPID int) ([]childProcInfo, int) {
+	all := listAllProcesses()
+	var rootPGID int
+	byPPID := make(map[int][]childProcInfo)
+	for _, p := range all {
+		if p.pid == rootPID {
+			rootPGID = p.pgid
+			continue
+		}
+		byPPID[p.ppid] = append(byPPID[p.ppid], p)
+	}
+	var descendants []childProcInfo
+	queue := []int{rootPID}
+	seen := map[int]struct{}{rootPID: {}}
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+		for _, child := range byPPID[curr] {
+			if _, ok := seen[child.pid]; ok {
+				continue
+			}
+			seen[child.pid] = struct{}{}
+			descendants = append(descendants, child)
+			queue = append(queue, child.pid)
+		}
+	}
+	return descendants, rootPGID
+}
+
+func listAllProcesses() []childProcInfo {
 	if entries, err := os.ReadDir("/proc"); err == nil {
 		var out []childProcInfo
 		for _, entry := range entries {
@@ -119,7 +149,7 @@ func listChildProcesses(parentPID int) []childProcInfo {
 				continue
 			}
 			state, ppid, pgid, ok := parseProcStatStatePPIDAndPGID(statBytes)
-			if !ok || ppid != parentPID || state == "Z" || state == "X" || state == "x" {
+			if !ok || state == "Z" || state == "X" || state == "x" {
 				continue
 			}
 			cmdBytes, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "cmdline"))
@@ -146,7 +176,7 @@ func listChildProcesses(parentPID int) []childProcInfo {
 		pid, err1 := strconv.Atoi(fields[0])
 		ppid, err2 := strconv.Atoi(fields[1])
 		pgid, err3 := strconv.Atoi(fields[2])
-		if err1 != nil || err2 != nil || err3 != nil || ppid != parentPID {
+		if err1 != nil || err2 != nil || err3 != nil || pid <= 1 {
 			continue
 		}
 		idx := strings.Index(line, fields[3])
