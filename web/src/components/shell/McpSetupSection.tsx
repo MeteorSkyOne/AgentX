@@ -20,8 +20,9 @@ export function McpSetupSection({ enabled }: { enabled: boolean }) {
       <div>
         <h3 className="text-sm font-medium">Post lookup MCP</h3>
         <p className="text-xs text-muted-foreground">
-          Lets local AI agents read a post by its copied ID (tools: get_post, search_post) without
-          inheriting that post's agent session. Read-only, runs over stdio on this machine.
+          Lets local AI agents read a post by its copied ID (tools: get_post, search_post,
+          get_attachment) without inheriting that post's agent session. Read-only, runs over stdio
+          on this machine.
         </p>
       </div>
       {setupQuery.isLoading && <p className="text-xs text-muted-foreground">Loading</p>}

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/meteorsky/agentx/internal/app"
+	"github.com/meteorsky/agentx/internal/domain"
 	"github.com/meteorsky/agentx/internal/eventbus"
 	sqlitestore "github.com/meteorsky/agentx/internal/store/sqlite"
 )
@@ -491,5 +492,74 @@ func TestRunCLIResetAdminUpdatesPasswordAndClearsSessions(t *testing.T) {
 	}
 	if login.User.ID != setup.User.ID {
 		t.Fatalf("login user id = %q, want %q", login.User.ID, setup.User.ID)
+	}
+}
+
+func TestRunCLIMCPServesPostImageAttachment(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "agentx.db")
+
+	st, err := sqlitestore.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := app.New(st, eventbus.New(), app.Options{AdminToken: "secret", DataDir: dir})
+	setup, err := a.SetupAdmin(ctx, app.SetupAdminRequest{
+		SetupToken: "secret",
+		Username:   "admin",
+		Password:   "password-1234",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orgs, err := a.ListOrganizations(ctx, setup.User.ID)
+	if err != nil || len(orgs) == 0 {
+		t.Fatalf("ListOrganizations err=%v len=%d", err, len(orgs))
+	}
+	projects, err := a.ListProjects(ctx, orgs[0].ID)
+	if err != nil || len(projects) == 0 {
+		t.Fatalf("ListProjects err=%v len=%d", err, len(projects))
+	}
+	forum, err := a.CreateChannel(ctx, projects[0].ID, "forum", domain.ChannelTypeThread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pngBytes := []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+		0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
+		0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+		0x00, 0x03, 0x01, 0x01, 0x00, 0x18, 0xdd, 0x8d,
+		0xb0, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+		0x44, 0xae, 0x42, 0x60, 0x82,
+	}
+	thread, starterMessage, err := a.CreateThread(ctx, setup.User.ID, forum.ID, "Neuron discovery", "How were these neurons found?", []app.AttachmentUpload{{
+		Filename:    "neurons.png",
+		ContentType: "image/png",
+		Data:        pngBytes,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attID := starterMessage.Attachments[0].ID
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_post","arguments":{"post_id":"` + thread.ID + `"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_attachment","arguments":{"post_id":"` + thread.ID + `","attachment_id":"` + attID + `"}}}`,
+	}, "\n") + "\n"
+	var stdout, stderr bytes.Buffer
+	handled, code := runCLI(ctx, []string{"mcp", "--db", dbPath}, strings.NewReader(input), &stdout, &stderr)
+	if !handled || code != 0 {
+		t.Fatalf("runCLI mcp handled=%v code=%d stderr=%q", handled, code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "`"+attID+"`") || !strings.Contains(out, `"type":"image"`) || !strings.Contains(out, `"mimeType":"image/png"`) {
+		t.Fatalf("mcp stdout missing attachment id or image block:\n%s", out)
 	}
 }

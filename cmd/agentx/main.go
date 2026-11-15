@@ -248,7 +248,9 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout io.Write
 		_, _ = fmt.Fprintln(stderr, "usage: agentx mcp [--db <path>] [--data-dir <dir>]")
 		return 2
 	}
-	path := mcpDatabasePath(config.FromEnv(), *dbPath, *dataDir)
+	cfg := config.FromEnv()
+	path := mcpDatabasePath(cfg, *dbPath, *dataDir)
+	resolvedDataDir := mcpDataDir(cfg, *dbPath, *dataDir)
 
 	var opened *sqlitestore.Store
 	defer func() {
@@ -263,7 +265,7 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout io.Write
 		}
 		opened = st
 		return st, nil
-	}, version.Short())
+	}, version.Short()).WithDataDir(resolvedDataDir)
 	if err := server.Serve(ctx, stdin, stdout); err != nil && !errors.Is(err, context.Canceled) {
 		_, _ = fmt.Fprintf(stderr, "agentx mcp: %v\n", err)
 		return 1
@@ -302,6 +304,16 @@ func mcpDatabasePath(cfg config.Config, dbPath string, dataDir string) string {
 		return filepath.Join(dataDir, "agentx.db")
 	}
 	return cfg.SQLitePath
+}
+
+func mcpDataDir(cfg config.Config, dbPath string, dataDir string) string {
+	if dataDir = strings.TrimSpace(dataDir); dataDir != "" {
+		return dataDir
+	}
+	if dbPath = strings.TrimSpace(dbPath); dbPath != "" {
+		return filepath.Dir(dbPath)
+	}
+	return cfg.DataDir
 }
 
 func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) (bool, int) {

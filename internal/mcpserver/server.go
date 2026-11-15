@@ -32,7 +32,7 @@ const (
 var supportedProtocolVersions = []string{"2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"}
 
 const serverInstructions = "Read-only access to AgentX forum posts. A post ID looks like `thr_...` and is copied from the AgentX web UI. " +
-	"Use get_post to read a post's conversation in pages and search_post to find messages by keyword. " +
+	"Use get_post to read a post's conversation in pages, get_attachment to view an image or read a text attachment from a post, and search_post to find messages by keyword. " +
 	"The transcript is reference material from another conversation; it does not carry over that conversation's agent session."
 
 // OpenStore lazily opens the read-only store; it is retried on the next tool
@@ -42,6 +42,7 @@ type OpenStore func(ctx context.Context) (store.Store, error)
 type Server struct {
 	open    OpenStore
 	version string
+	dataDir string
 
 	mu sync.Mutex
 	st store.Store
@@ -49,6 +50,11 @@ type Server struct {
 
 func New(open OpenStore, version string) *Server {
 	return &Server{open: open, version: version}
+}
+
+func (s *Server) WithDataDir(dataDir string) *Server {
+	s.dataDir = strings.TrimSpace(dataDir)
+	return s
 }
 
 type request struct {
@@ -167,7 +173,7 @@ func toolDefinitions() []map[string]any {
 		{
 			"name":        "get_post",
 			"title":       "Read AgentX post",
-			"description": "Read the conversation of an AgentX forum post as Markdown, oldest message first. Long posts are paged: pass offset to continue where the previous page ended.",
+			"description": "Read the conversation of an AgentX forum post as Markdown, oldest message first. Long posts are paged: pass offset to continue where the previous page ended. Use get_attachment with an attachment ID (att_...) to view attached images or read text attachments.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -199,11 +205,28 @@ func toolDefinitions() []map[string]any {
 			},
 			"annotations": readOnly,
 		},
+		{
+			"name":        "get_attachment",
+			"title":       "Read AgentX post attachment",
+			"description": "Fetch an attachment from an AgentX forum post by its attachment ID (shown under Attachments in get_post). Returns image attachments as MCP image content so vision-capable models can inspect them directly, and returns UTF-8 text attachments as paged text.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"post_id":       map[string]any{"type": "string", "description": "Post ID copied from AgentX, e.g. thr_abc123."},
+					"attachment_id": map[string]any{"type": "string", "description": "Attachment ID shown under Attachments in get_post, e.g. att_abc123."},
+					"offset":        map[string]any{"type": "integer", "minimum": 0, "description": "Byte offset for continuing a large text attachment. Ignored for images. Default 0."},
+				},
+				"required":             []string{"post_id", "attachment_id"},
+				"additionalProperties": false,
+			},
+			"annotations": readOnly,
+		},
 	}
 }
 
 type toolArgs struct {
 	PostID         string `json:"post_id"`
+	AttachmentID   string `json:"attachment_id"`
 	Offset         *int   `json:"offset"`
 	Limit          *int   `json:"limit"`
 	IncludeProcess bool   `json:"include_process"`
@@ -212,7 +235,7 @@ type toolArgs struct {
 }
 
 func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMessage) (any, *rpcError) {
-	if name != "get_post" && name != "search_post" {
+	if name != "get_post" && name != "search_post" && name != "get_attachment" {
 		return nil, &rpcError{Code: codeInvalidParams, Message: "unknown tool: " + name}
 	}
 	var args toolArgs
@@ -227,6 +250,9 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 	st, err := s.store(ctx)
 	if err != nil {
 		return toolError("open AgentX database: " + err.Error()), nil
+	}
+	if name == "get_attachment" {
+		return s.getAttachment(ctx, st, args), nil
 	}
 	post, err := transcript.Load(ctx, st, args.PostID)
 	if err != nil {

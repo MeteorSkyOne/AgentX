@@ -160,7 +160,11 @@ func writeMessage(b *strings.Builder, message Message, indexByID map[string]int,
 	if len(message.Attachments) > 0 {
 		b.WriteString("\nAttachments:\n")
 		for _, attachment := range message.Attachments {
-			fmt.Fprintf(b, "- %s (%s, %d bytes)\n", attachment.Filename, attachment.ContentType, attachment.SizeBytes)
+			if attachment.ID != "" {
+				fmt.Fprintf(b, "- %s (`%s`, %s, %d bytes)\n", attachment.Filename, attachment.ID, attachment.ContentType, attachment.SizeBytes)
+			} else {
+				fmt.Fprintf(b, "- %s (%s, %d bytes)\n", attachment.Filename, attachment.ContentType, attachment.SizeBytes)
+			}
 		}
 	}
 	if !includeProcess {
@@ -343,6 +347,9 @@ func Search(post Post, query string, opts SearchOptions) []Match {
 		text := message.Body
 		for _, attachment := range message.Attachments {
 			text += "\n" + attachment.Filename
+			if attachment.ID != "" {
+				text += " " + attachment.ID
+			}
 		}
 		visibleLen := utf8.RuneCountInString(text)
 		if opts.IncludeProcess {

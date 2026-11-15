@@ -52,9 +52,11 @@ type Message struct {
 }
 
 type Attachment struct {
-	Filename    string `json:"filename"`
-	ContentType string `json:"content_type,omitempty"`
-	SizeBytes   int64  `json:"size_bytes"`
+	ID          string                       `json:"id,omitempty"`
+	Filename    string                       `json:"filename"`
+	ContentType string                       `json:"content_type,omitempty"`
+	Kind        domain.MessageAttachmentKind `json:"kind,omitempty"`
+	SizeBytes   int64                        `json:"size_bytes"`
 }
 
 // Load reads a post and all of its messages, resolving sender display names.
@@ -122,8 +124,10 @@ func Load(ctx context.Context, st store.Store, postID string) (Post, error) {
 		}
 		for _, attachment := range attachments {
 			entry.Attachments = append(entry.Attachments, Attachment{
+				ID:          attachment.ID,
 				Filename:    attachment.Filename,
 				ContentType: attachment.ContentType,
+				Kind:        attachment.Kind,
 				SizeBytes:   attachment.SizeBytes,
 			})
 		}

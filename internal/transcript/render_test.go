@@ -64,11 +64,18 @@ func TestSearchMatchesAllTermsCaseInsensitively(t *testing.T) {
 	post := Post{Messages: []Message{
 		{Index: 1, Body: "Deploy the Rollback script"},
 		{Index: 2, Body: "rollback only"},
-		{Index: 3, Body: "nothing here", Attachments: []Attachment{{Filename: "deploy-rollback.md"}}},
+		{Index: 3, Body: "nothing here", Attachments: []Attachment{{ID: "att_rb", Filename: "deploy-rollback.md", ContentType: "text/markdown", SizeBytes: 42}}},
 	}}
 	matches := Search(post, "ROLLBACK deploy", SearchOptions{})
 	if len(matches) != 2 || matches[0].Message.Index != 1 || matches[1].Message.Index != 3 {
 		t.Fatalf("matches = %#v", matches)
+	}
+	if byID := Search(post, "att_rb", SearchOptions{}); len(byID) != 1 || byID[0].Message.Index != 3 {
+		t.Fatalf("search by attachment id = %#v", byID)
+	}
+	rendered := Markdown(post, RenderOptions{})
+	if !strings.Contains(rendered, "- deploy-rollback.md (`att_rb`, text/markdown, 42 bytes)") {
+		t.Fatalf("rendered attachment missing id:\n%s", rendered)
 	}
 }
 
