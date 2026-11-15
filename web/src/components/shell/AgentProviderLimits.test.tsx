@@ -31,6 +31,26 @@ describe("AgentProviderLimitsView", () => {
     expect(screen.getByText("10%")).toBeTruthy();
   });
 
+  it("renders Antigravity grouped limit windows", () => {
+    render(
+      <AgentProviderLimitsView
+        limits={agyLimits()}
+        isLoading={false}
+        isFetching={false}
+        onRefresh={() => undefined}
+      />
+    );
+
+    expect(screen.getByText("Live")).toBeTruthy();
+    expect(screen.getByText(/Signed in/).textContent).toContain("google");
+    expect(screen.getByText("5-hour · Gemini Models")).toBeTruthy();
+    expect(screen.getByText("Weekly · Gemini Models")).toBeTruthy();
+    expect(screen.getByText("5-hour · Claude and GPT models")).toBeTruthy();
+    expect(screen.getByText("Weekly · Claude and GPT models")).toBeTruthy();
+    expect(screen.getByText("16%")).toBeTruthy();
+    expect(screen.getByText("9%")).toBeTruthy();
+  });
+
   it("renders Claude unavailable state", () => {
     render(
       <AgentProviderLimitsView
@@ -100,6 +120,8 @@ describe("provider limit helpers", () => {
   it("detects supported provider limit agents", () => {
     expect(isProviderLimitAgent("codex")).toBe(true);
     expect(isProviderLimitAgent("claude")).toBe(true);
+    expect(isProviderLimitAgent("agy")).toBe(true);
+    expect(isProviderLimitAgent("pi")).toBe(false);
     expect(isProviderLimitAgent("fake")).toBe(false);
     expect(isProviderLimitAgent(undefined)).toBe(false);
   });
@@ -152,5 +174,50 @@ function claudeUnavailableLimits(): AgentProviderLimits {
     fetched_at: "2026-04-28T12:00:00Z",
     cache_ttl_seconds: 45,
     message: "Claude Code OAuth credentials were not found; numeric usage limits are unavailable.",
+  };
+}
+
+function agyLimits(): AgentProviderLimits {
+  return {
+    agent_id: "agt_agy",
+    provider: "agy",
+    status: "ok",
+    auth: {
+      logged_in: true,
+      method: "oauth",
+      provider: "google",
+    },
+    windows: [
+      {
+        kind: "five_hour_gemini_models",
+        label: "5-hour · Gemini Models",
+        used_percent: 15.9,
+        window_minutes: 300,
+        resets_at: "2026-11-15T13:08:09Z",
+      },
+      {
+        kind: "seven_day_gemini_models",
+        label: "Weekly · Gemini Models",
+        used_percent: 8.5,
+        window_minutes: 10080,
+        resets_at: "2026-11-21T07:00:09Z",
+      },
+      {
+        kind: "five_hour_claude_and_gpt_models",
+        label: "5-hour · Claude and GPT models",
+        used_percent: 0,
+        window_minutes: 300,
+        resets_at: "2026-11-15T17:29:45Z",
+      },
+      {
+        kind: "seven_day_claude_and_gpt_models",
+        label: "Weekly · Claude and GPT models",
+        used_percent: 0.8,
+        window_minutes: 10080,
+        resets_at: "2026-11-21T07:06:13Z",
+      },
+    ],
+    fetched_at: "2026-11-15T12:29:45Z",
+    cache_ttl_seconds: 45,
   };
 }

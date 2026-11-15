@@ -38,7 +38,7 @@ Think of it as a chat workspace where every teammate is an agent: give each one 
 - **Slash commands.** `/new`, `/stop`, `/compact`, `/plan`, `/init`, `/model`, `/effort`, `/commit`, `/push`, `/review`, and more, with `@handle` targeting and composer autocomplete.
 - **Team runs.** Multi-agent collaboration with leader/worker phases and per-channel batch and run budgets.
 - **Skills.** Agent skills discovered from `SKILL.md` files in the workspace and agent home are listed per conversation.
-- **Provider usage.** Per-model usage windows for Claude and Codex are shown in the UI so you can see how much of a plan is left.
+- **Provider usage.** Per-model usage windows for Claude, Codex, and Antigravity are shown in the UI so you can see how much of a plan is left.
 
 ### Workspaces
 

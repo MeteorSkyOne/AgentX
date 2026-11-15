@@ -11,6 +11,7 @@ import {
   agentProviderHasPersistentToggle,
   conversationActivityLabel,
   defaultAgentInstructionPath,
+  isProviderLimitAgent,
 } from "./utils";
 
 describe("conversation activity label", () => {
@@ -36,5 +37,6 @@ describe("antigravity (agy) runtime helpers", () => {
     expect(agentEffortOptions("agy")).toBe(AGENT_EFFORT_OPTIONS);
     expect(agentKindLabel("agy")).toBe("Antigravity");
     expect(defaultAgentInstructionPath("agy")).toBe("GEMINI.md");
+    expect(isProviderLimitAgent("agy")).toBe(true);
   });
 });

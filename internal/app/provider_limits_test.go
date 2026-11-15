@@ -338,6 +338,174 @@ JSON
 	assertProviderLimitJSONRedacted(t, got, "forbidden-token", "person@example.com", "Secret Org")
 }
 
+func TestProviderLimitServiceAgyReadsUsageGroups(t *testing.T) {
+	script := writeExecutable(t, "agy", `#!/bin/sh
+if [ "$AGENTX_TEST_ENV" != "from-agy-agent" ]; then
+  echo "missing agent env" >&2
+  exit 3
+fi
+if [ "$1" != "--print" ] || [ "$2" != "/usage" ] || [ "$3" != "--output-format" ] || [ "$4" != "json" ] || [ "$5" != "--settings" ]; then
+  echo "unexpected args: $*" >&2
+  exit 2
+fi
+cat <<'JSON'
+{
+  "conversation_id": "",
+  "status": "SUCCESS",
+  "response": "Gemini Models\tWeekly Limit Remaining\t91%\t2030-01-08T00:00:00Z\nGemini Models\tFive Hour Limit Remaining\t84%\t2030-01-01T05:00:00Z\nClaude and GPT models\tWeekly Limit Remaining\t99%\t2030-01-08T00:00:00Z\nClaude and GPT models\tFive Hour Limit Remaining\t100%\t2030-01-01T05:00:00Z\n",
+  "command": {
+    "name": "usage",
+    "data": {
+      "email": "person@example.com",
+      "organization": "Secret Org",
+      "groups": [
+        {
+          "name": "Gemini Models",
+          "buckets": [
+            {"id": "gemini-weekly", "name": "Weekly Limit Remaining", "window": "weekly", "remaining_fraction": 0.915, "reset_time": "2030-01-08T00:00:00Z"},
+            {"id": "gemini-5h", "name": "Five Hour Limit Remaining", "window": "5h", "remaining_fraction": 0.84, "reset_time": "2030-01-01T05:00:00Z"}
+          ]
+        },
+        {
+          "name": "Claude and GPT models",
+          "buckets": [
+            {"id": "3p-weekly", "name": "Weekly Limit Remaining", "window": "weekly", "remaining_fraction": 0.99, "reset_time": "2030-01-08T00:00:00Z"},
+            {"id": "3p-5h", "name": "Five Hour Limit Remaining", "window": "5h", "remaining_fraction": 1, "reset_time": "2030-01-01T05:00:00Z"}
+          ]
+        }
+      ]
+    }
+  }
+}
+JSON
+`)
+
+	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	service := newProviderLimitService(ProviderLimitOptions{
+		AgyCommand:   script,
+		ProbeTimeout: time.Second,
+		Now:          func() time.Time { return now },
+	})
+
+	got := service.Read(context.Background(), domain.Agent{
+		ID:        "agt_agy",
+		Kind:      domain.AgentKindAgy,
+		Env:       map[string]string{"AGENTX_TEST_ENV": "from-agy-agent"},
+		UpdatedAt: now,
+	}, false)
+
+	if got.Status != ProviderLimitStatusOK || got.Provider != domain.AgentKindAgy {
+		t.Fatalf("status = %q provider = %q, message = %q", got.Status, got.Provider, got.Message)
+	}
+	if !got.Auth.LoggedIn || got.Auth.Method != "oauth" || got.Auth.Provider != "google" {
+		t.Fatalf("auth = %#v", got.Auth)
+	}
+	if len(got.Windows) != 4 {
+		t.Fatalf("windows = %#v, want 4 windows", got.Windows)
+	}
+	if got.Windows[0].Kind != "five_hour_gemini_models" || got.Windows[0].Label != "5-hour · Gemini Models" || got.Windows[0].WindowMinutes != 300 || got.Windows[0].UsedPercent == nil || *got.Windows[0].UsedPercent != 16 {
+		t.Fatalf("window[0] = %#v", got.Windows[0])
+	}
+	if got.Windows[1].Kind != "seven_day_gemini_models" || got.Windows[1].Label != "Weekly · Gemini Models" || got.Windows[1].WindowMinutes != 10080 || got.Windows[1].UsedPercent == nil || *got.Windows[1].UsedPercent != 8.5 {
+		t.Fatalf("window[1] = %#v", got.Windows[1])
+	}
+	if got.Windows[2].Kind != "five_hour_claude_and_gpt_models" || got.Windows[2].Label != "5-hour · Claude and GPT models" || got.Windows[2].UsedPercent == nil || *got.Windows[2].UsedPercent != 0 {
+		t.Fatalf("window[2] = %#v", got.Windows[2])
+	}
+	if got.Windows[3].Kind != "seven_day_claude_and_gpt_models" || got.Windows[3].Label != "Weekly · Claude and GPT models" || got.Windows[3].UsedPercent == nil || *got.Windows[3].UsedPercent != 1 {
+		t.Fatalf("window[3] = %#v", got.Windows[3])
+	}
+	assertProviderLimitJSONRedacted(t, got, "person@example.com", "Secret Org")
+}
+
+func TestAgyWindowsRecoverExhaustedZeroRemainingFromTSV(t *testing.T) {
+	var payload map[string]any
+	raw := `{
+		"status": "SUCCESS",
+		"response": "Gemini Models\tFive Hour Limit Remaining\t0%\t2030-01-01T05:00:00Z\n",
+		"command": {
+			"name": "usage",
+			"data": {
+				"groups": [
+					{
+						"name": "Gemini Models",
+						"buckets": [
+							{"id": "gemini-5h", "name": "Five Hour Limit Remaining", "window": "5h", "reset_time": "2030-01-01T05:00:00Z"},
+							{"id": "gemini-disabled", "name": "Disabled Limit", "window": "weekly", "disabled": true, "remaining_fraction": 0.5}
+						]
+					}
+				]
+			}
+		}
+	}`
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	windows := agyWindowsFromUsagePayload(payload, time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
+	if len(windows) != 1 {
+		t.Fatalf("windows = %#v, want 1 enabled window", windows)
+	}
+	if windows[0].UsedPercent == nil || *windows[0].UsedPercent != 100 {
+		t.Fatalf("exhausted window = %#v, want 100%% used", windows[0])
+	}
+}
+
+func TestProviderLimitServiceAgyNotLoggedInCancelsInteractivePrompt(t *testing.T) {
+	script := writeExecutable(t, "agy-unauth", `#!/bin/sh
+echo "Authentication required. Please visit the URL to log in:" >&2
+echo "  https://accounts.google.com/o/oauth2/auth?client_id=test" >&2
+sleep 10
+`)
+
+	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	service := newProviderLimitService(ProviderLimitOptions{
+		AgyCommand:   script,
+		ProbeTimeout: 5 * time.Second,
+		Now:          func() time.Time { return now },
+	})
+
+	startedAt := time.Now()
+	got := service.Read(context.Background(), domain.Agent{
+		ID:        "agt_agy_unauth",
+		Kind:      domain.AgentKindAgy,
+		UpdatedAt: now,
+	}, false)
+	if elapsed := time.Since(startedAt); elapsed >= 2*time.Second {
+		t.Fatalf("unauthenticated probe took %s, want immediate cancellation", elapsed)
+	}
+	if got.Status != ProviderLimitStatusUnavailable {
+		t.Fatalf("status = %q, want %q; message = %q", got.Status, ProviderLimitStatusUnavailable, got.Message)
+	}
+	if got.Auth.LoggedIn || got.Auth.Provider != "google" {
+		t.Fatalf("auth = %#v", got.Auth)
+	}
+	if !strings.Contains(got.Message, "Antigravity is not logged in") {
+		t.Fatalf("message = %q", got.Message)
+	}
+}
+
+func TestRealAgyProviderLimits(t *testing.T) {
+	if os.Getenv("AGENTX_AGY_E2E") != "1" {
+		t.Skip("set AGENTX_AGY_E2E=1 to run against a real agy binary")
+	}
+	cmd := strings.TrimSpace(os.Getenv("AGENTX_AGY_COMMAND"))
+	if cmd == "" {
+		cmd = "agy"
+	}
+	service := newProviderLimitService(ProviderLimitOptions{
+		AgyCommand: cmd,
+	})
+	got := service.Read(context.Background(), domain.Agent{
+		ID:        "agt_agy_e2e",
+		Kind:      domain.AgentKindAgy,
+		UpdatedAt: time.Now().UTC(),
+	}, true)
+	t.Logf("live agy provider limits: status=%s auth=%+v windows=%+v message=%q", got.Status, got.Auth, got.Windows, got.Message)
+	if got.Status != ProviderLimitStatusOK || !got.Auth.LoggedIn || len(got.Windows) == 0 {
+		t.Fatalf("unexpected live agy limits: %+v", got)
+	}
+}
+
 func TestProviderLimitServiceUnavailableAndTimeoutPaths(t *testing.T) {
 	now := time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)
 	service := newProviderLimitService(ProviderLimitOptions{Now: func() time.Time { return now }})
@@ -346,7 +514,7 @@ func TestProviderLimitServiceUnavailableAndTimeoutPaths(t *testing.T) {
 		Kind:      domain.AgentKindFake,
 		UpdatedAt: now,
 	}, false)
-	if got.Status != ProviderLimitStatusUnavailable || !strings.Contains(got.Message, "Claude Code and Codex") {
+	if got.Status != ProviderLimitStatusUnavailable || !strings.Contains(got.Message, "Claude Code, Codex, and Antigravity") {
 		t.Fatalf("unsupported result = %#v", got)
 	}
 

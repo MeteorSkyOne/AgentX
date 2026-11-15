@@ -4462,6 +4462,65 @@ JSON
 	}
 }
 
+func TestSlashStatusReportsAgyLimitsAndContextUsage(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlitestore.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	agyUsage := writeExecutable(t, "agy-usage", `#!/bin/sh
+cat <<'JSON'
+{"status":"SUCCESS","command":{"name":"usage","data":{"groups":[{"name":"Gemini Models","buckets":[{"id":"gemini-weekly","name":"Weekly Limit Remaining","window":"weekly","remaining_fraction":0.9,"reset_time":"2099-01-08T00:00:00Z"},{"id":"gemini-5h","name":"Five Hour Limit Remaining","window":"5h","remaining_fraction":0.8,"reset_time":"2099-01-01T05:00:00Z"}]}]}}}
+JSON
+`)
+	total := int64(54000)
+	window := int64(1000000)
+	percent := 5.4
+	rt := &contextUsageRuntime{usage: &agentruntime.ContextUsage{
+		TotalTokens:         &total,
+		ContextWindowTokens: &window,
+		UsedPercent:         &percent,
+		Model:               "gemini-4-carbon-high",
+		Source:              "usage_update",
+	}}
+	app := New(st, eventbus.New(), Options{
+		AdminToken:       "secret",
+		DataDir:          t.TempDir(),
+		DefaultAgentKind: domain.AgentKindAgy,
+		ProviderLimits:   ProviderLimitOptions{AgyCommand: agyUsage, ProbeTimeout: time.Second},
+		Runtimes: map[string]agentruntime.Runtime{
+			domain.AgentKindAgy: rt,
+		},
+	})
+	defer shutdownAppForTest(t, app)
+	bootstrap, err := app.Bootstrap(ctx, testSetupRequest("Meteorsky"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	message, err := app.SendMessage(ctx, SendMessageRequest{
+		UserID:           bootstrap.User.ID,
+		OrganizationID:   bootstrap.Organization.ID,
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   bootstrap.Channel.ID,
+		Body:             "/status",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(message.Body, "Context: 54,000 / 1,000,000 tokens (5.4%)") {
+		t.Fatalf("status body = %q", message.Body)
+	}
+	if !strings.Contains(message.Body, "Auth: logged in (oauth, google)") {
+		t.Fatalf("status body = %q", message.Body)
+	}
+	if !strings.Contains(message.Body, "5-hour · Gemini Models 20% used") || !strings.Contains(message.Body, "Weekly · Gemini Models 10% used") {
+		t.Fatalf("status body = %q", message.Body)
+	}
+}
+
 func TestParseClaudeContextOutputRemainingPercent(t *testing.T) {
 	usage := parseClaudeContextOutput("Context left until auto-compact: 62%")
 	if usage == nil || usage.UsedPercent == nil || *usage.UsedPercent != 38 {

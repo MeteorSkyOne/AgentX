@@ -28,7 +28,7 @@ func TestHTTPAgentLimitsAuthorizationAndUnsupportedProvider(t *testing.T) {
 	if limits.Status != app.ProviderLimitStatusUnavailable || limits.Provider != domain.AgentKindFake {
 		t.Fatalf("limits = %#v", limits)
 	}
-	if !strings.Contains(limits.Message, "Claude Code and Codex") {
+	if !strings.Contains(limits.Message, "Claude Code, Codex, and Antigravity") {
 		t.Fatalf("message = %q", limits.Message)
 	}
 }
@@ -63,6 +63,11 @@ cat <<'JSON'
 {"loggedIn":true,"method":"oauth","provider":"claude.ai","subscriptionType":"pro"}
 JSON
 `)
+	agyScript := writeHTTPExecutable(t, "agy", `#!/bin/sh
+cat <<'JSON'
+{"status":"SUCCESS","command":{"name":"usage","data":{"groups":[{"name":"Gemini Models","buckets":[{"id":"gemini-weekly","name":"Weekly Limit Remaining","window":"weekly","remaining_fraction":0.9,"reset_time":"2030-01-08T00:00:00Z"},{"id":"gemini-5h","name":"Five Hour Limit Remaining","window":"5h","remaining_fraction":0.75,"reset_time":"2030-01-01T05:00:00Z"}]}]}}}
+JSON
+`)
 	claudeHome := t.TempDir()
 	writeHTTPClaudeCredentials(t, claudeHome, `{"claudeAiOauth":{"accessToken":"claude-token"}}`)
 	usageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -77,6 +82,7 @@ JSON
 	env := newTestEnvWithProviderLimits(t, app.ProviderLimitOptions{
 		CodexCommand:   codexScript,
 		ClaudeCommand:  claudeScript,
+		AgyCommand:     agyScript,
 		ClaudeUsageURL: usageServer.URL,
 		ProbeTimeout:   time.Second,
 	})
@@ -113,6 +119,22 @@ JSON
 	}
 	if len(claudeLimits.Windows) != 2 || claudeLimits.Windows[0].Kind != "five_hour" || claudeLimits.Windows[1].Kind != "seven_day" {
 		t.Fatalf("claude windows = %#v", claudeLimits.Windows)
+	}
+
+	var agyAgent domain.Agent
+	postJSON(t, env.server.URL+"/api/organizations/"+bootstrap.Organization.ID+"/agents", bootstrap.SessionToken, map[string]any{
+		"name":   "Agy Probe",
+		"handle": "agy-probe",
+		"kind":   domain.AgentKindAgy,
+	}, http.StatusOK, &agyAgent)
+
+	var agyLimits app.AgentProviderLimits
+	getJSON(t, env.server.URL+"/api/agents/"+agyAgent.ID+"/limits", bootstrap.SessionToken, http.StatusOK, &agyLimits)
+	if agyLimits.Status != app.ProviderLimitStatusOK || !agyLimits.Auth.LoggedIn || agyLimits.Provider != domain.AgentKindAgy {
+		t.Fatalf("agy limits = %#v", agyLimits)
+	}
+	if len(agyLimits.Windows) != 2 || agyLimits.Windows[0].Kind != "five_hour_gemini_models" || agyLimits.Windows[1].Kind != "seven_day_gemini_models" {
+		t.Fatalf("agy windows = %#v", agyLimits.Windows)
 	}
 }
 

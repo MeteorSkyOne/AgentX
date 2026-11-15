@@ -79,7 +79,7 @@ function ProviderLimitWindowBar({ window }: { window: AgentProviderLimitWindow }
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2 text-xs">
-        <span className="truncate font-medium">{window.label}</span>
+        <span className="truncate font-medium" title={window.label}>{window.label}</span>
         <span className="shrink-0 text-muted-foreground">{formatProviderLimitPercent(window.used_percent)}</span>
       </div>
       <div

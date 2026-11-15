@@ -169,6 +169,7 @@ func main() {
 		ProviderLimits: app.ProviderLimitOptions{
 			CodexCommand:  cfg.CodexCommand,
 			ClaudeCommand: cfg.ClaudeCommand,
+			AgyCommand:    cfg.AgyCommand,
 		},
 		ToolUpdates: app.ToolUpdateOptions{
 			CodexCommand:  cfg.CodexCommand,

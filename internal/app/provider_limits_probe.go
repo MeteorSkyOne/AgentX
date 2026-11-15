@@ -153,35 +153,43 @@ func candidateAuthMaps(payload map[string]any) []map[string]any {
 
 func providerProbeEnv(overrides map[string]string) []string {
 	allowed := map[string]struct{}{
-		"ALL_PROXY":           {},
-		"APPDATA":             {},
-		"CLAUDE_CONFIG_DIR":   {},
-		"CURL_CA_BUNDLE":      {},
-		"GIT_SSL_CAINFO":      {},
-		"HOME":                {},
-		"HTTP_PROXY":          {},
-		"HTTPS_PROXY":         {},
-		"LOCALAPPDATA":        {},
-		"LOGNAME":             {},
-		"NODE_EXTRA_CA_CERTS": {},
-		"NO_PROXY":            {},
-		"PATH":                {},
-		"REQUESTS_CA_BUNDLE":  {},
-		"SHELL":               {},
-		"SSL_CERT_DIR":        {},
-		"SSL_CERT_FILE":       {},
-		"TEMP":                {},
-		"TMP":                 {},
-		"TMPDIR":              {},
-		"USER":                {},
-		"USERPROFILE":         {},
-		"XDG_CACHE_HOME":      {},
-		"XDG_CONFIG_HOME":     {},
-		"XDG_DATA_HOME":       {},
-		"all_proxy":           {},
-		"http_proxy":          {},
-		"https_proxy":         {},
-		"no_proxy":            {},
+		"AGY_ACCOUNT":                    {},
+		"AGY_ADC_AUTH":                   {},
+		"ALL_PROXY":                      {},
+		"ANTIGRAVITY_CONFIG_REL_DIR":     {},
+		"ANTIGRAVITY_PROJECT_ID":         {},
+		"APPDATA":                        {},
+		"CLAUDE_CONFIG_DIR":              {},
+		"CLOUDSDK_CONFIG":                {},
+		"CURL_CA_BUNDLE":                 {},
+		"DBUS_SESSION_BUS_ADDRESS":       {},
+		"GIT_SSL_CAINFO":                 {},
+		"GOOGLE_APPLICATION_CREDENTIALS": {},
+		"HOME":                           {},
+		"HTTP_PROXY":                     {},
+		"HTTPS_PROXY":                    {},
+		"LOCALAPPDATA":                   {},
+		"LOGNAME":                        {},
+		"NODE_EXTRA_CA_CERTS":            {},
+		"NO_PROXY":                       {},
+		"PATH":                           {},
+		"REQUESTS_CA_BUNDLE":             {},
+		"SHELL":                          {},
+		"SSL_CERT_DIR":                   {},
+		"SSL_CERT_FILE":                  {},
+		"TEMP":                           {},
+		"TMP":                            {},
+		"TMPDIR":                         {},
+		"USER":                           {},
+		"USERPROFILE":                    {},
+		"XDG_CACHE_HOME":                 {},
+		"XDG_CONFIG_HOME":                {},
+		"XDG_DATA_HOME":                  {},
+		"XDG_RUNTIME_DIR":                {},
+		"all_proxy":                      {},
+		"http_proxy":                     {},
+		"https_proxy":                    {},
+		"no_proxy":                       {},
 	}
 	env := make([]string, 0, len(allowed)+len(overrides))
 	index := make(map[string]int, len(allowed)+len(overrides))
@@ -409,6 +417,9 @@ func unixTimeField(values map[string]any, keys ...string) (time.Time, bool) {
 			trimmed := strings.TrimSpace(value)
 			if i, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
 				return time.Unix(i, 0).UTC(), true
+			}
+			if parsed, err := time.Parse(time.RFC3339Nano, trimmed); err == nil {
+				return parsed.UTC(), true
 			}
 			if parsed, err := time.Parse(time.RFC3339, trimmed); err == nil {
 				return parsed.UTC(), true

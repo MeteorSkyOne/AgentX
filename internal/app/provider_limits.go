@@ -15,13 +15,15 @@ import (
 
 const (
 	defaultProviderLimitCacheTTL     = 45 * time.Second
-	defaultProviderLimitProbeTimeout = 10 * time.Second
+	defaultProviderLimitProbeTimeout = 15 * time.Second
 	providerProbeWaitDelay           = 500 * time.Millisecond
 	providerProbeScannerBufferMax    = 1024 * 1024
 	codexFiveHourWindowMinutes       = 300
 	codexWeeklyWindowMinutes         = 10080
 	claudeFiveHourWindowMinutes      = 300
 	claudeWeeklyWindowMinutes        = 10080
+	agyFiveHourWindowMinutes         = 300
+	agyWeeklyWindowMinutes           = 10080
 	claudeCredentialsService         = "Claude Code-credentials"
 	defaultClaudeUsageAPIURL         = "https://api.anthropic.com/api/oauth/usage"
 	claudeUsageAPIBeta               = "oauth-2025-04-20"
@@ -38,6 +40,7 @@ const (
 type ProviderLimitOptions struct {
 	CodexCommand   string
 	ClaudeCommand  string
+	AgyCommand     string
 	ClaudeUsageURL string
 	HTTPClient     *http.Client
 	CacheTTL       time.Duration
@@ -74,6 +77,7 @@ type ProviderLimitWindow struct {
 type providerLimitService struct {
 	codexCommand   string
 	claudeCommand  string
+	agyCommand     string
 	claudeUsageURL string
 	httpClient     *http.Client
 	cacheTTL       time.Duration
@@ -96,6 +100,7 @@ var (
 	errClaudeUsageNoCredentials = errors.New("claude usage credentials not found")
 	errClaudeUsageRateLimited   = errors.New("claude usage api rate limited")
 	errClaudeUsageUnauthorized  = errors.New("claude usage api rejected oauth token")
+	errAgyNotLoggedIn           = errors.New("agy not logged in")
 	emailRedactionPattern       = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
 	authFieldRedactPattern      = regexp.MustCompile(`(?i)(["']?(?:email|organization|organization_name|organizationName|org_name|orgName)["']?\s*[:=]\s*)(["'][^"']*["']|[^\s,}]+)`)
 )
@@ -108,6 +113,10 @@ func newProviderLimitService(opts ProviderLimitOptions) *providerLimitService {
 	claudeCommand := strings.TrimSpace(opts.ClaudeCommand)
 	if claudeCommand == "" {
 		claudeCommand = "claude"
+	}
+	agyCommand := strings.TrimSpace(opts.AgyCommand)
+	if agyCommand == "" {
+		agyCommand = "agy"
 	}
 	claudeUsageURL := strings.TrimSpace(opts.ClaudeUsageURL)
 	if claudeUsageURL == "" {
@@ -128,6 +137,7 @@ func newProviderLimitService(opts ProviderLimitOptions) *providerLimitService {
 	return &providerLimitService{
 		codexCommand:   codexCommand,
 		claudeCommand:  claudeCommand,
+		agyCommand:     agyCommand,
 		claudeUsageURL: claudeUsageURL,
 		httpClient:     opts.HTTPClient,
 		cacheTTL:       cacheTTL,
@@ -210,10 +220,12 @@ func (s *providerLimitService) fetch(ctx context.Context, agent domain.Agent, fe
 		return s.fetchCodex(ctx, agent, fetchedAt)
 	case domain.AgentKindClaude, domain.AgentKindClaudePersistent:
 		return s.fetchClaude(ctx, agent, fetchedAt)
+	case domain.AgentKindAgy:
+		return s.fetchAgy(ctx, agent, fetchedAt)
 	default:
 		result := s.baseResult(agent, provider, fetchedAt)
 		result.Status = ProviderLimitStatusUnavailable
-		result.Message = "Usage limits are available only for Claude Code and Codex agents."
+		result.Message = "Usage limits are available only for Claude Code, Codex, and Antigravity agents."
 		return result
 	}
 }

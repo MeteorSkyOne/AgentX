@@ -113,7 +113,8 @@ export function isProviderLimitAgent(kind?: string): boolean {
     kind === "codex" ||
     kind === "claude" ||
     kind === "codex-persistent" ||
-    kind === "claude-persistent"
+    kind === "claude-persistent" ||
+    kind === "agy"
   );
 }
 
