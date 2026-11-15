@@ -61,8 +61,9 @@ type pendingQuestionKey struct {
 }
 
 type pendingQuestion struct {
-	session agentruntime.Session
-	run     *activeAgentRun
+	session    agentruntime.Session
+	run        *activeAgentRun
+	onResolved func()
 }
 
 type activeRunKey struct {
@@ -324,6 +325,9 @@ func (a *App) RespondToInputRequest(_ context.Context, conversationType domain.C
 
 	if !ok {
 		return errors.New("no pending question found")
+	}
+	if pq.onResolved != nil {
+		pq.onResolved()
 	}
 	if pq.run != nil {
 		pq.run.clearPendingQuestion(questionID)

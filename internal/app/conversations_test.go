@@ -1220,6 +1220,98 @@ func TestAgentRunMetricTPSUsesDurationForBatchedOutput(t *testing.T) {
 	}
 }
 
+func TestAgentRunMetricMultiStepUsesActiveGenerationInsteadOfFinalReplyWindow(t *testing.T) {
+	startedAt := time.Date(2026, 11, 15, 8, 43, 15, 0, time.UTC)
+	firstThoughtAt := startedAt.Add(1400 * time.Millisecond)
+	finalTextAt := startedAt.Add(262400 * time.Millisecond)
+	completedAt := startedAt.Add(262700 * time.Millisecond)
+	outputTokens := int64(3391)
+
+	tracker := agentRunTracker{
+		RunID: "run_multistep",
+		UserMessage: domain.Message{
+			ID:               "msg_multistep",
+			OrganizationID:   "org_test",
+			ConversationType: domain.ConversationChannel,
+			ConversationID:   "chn_test",
+			CreatedAt:        startedAt,
+		},
+		Agent:     domain.Agent{ID: "agt_test", Name: "carbon", Kind: domain.AgentKindAgy},
+		StartedAt: startedAt,
+	}
+
+	metric := tracker.metric(agentRunMetricInput{
+		Status:             "completed",
+		FirstTokenAt:       &finalTextAt,
+		GenerationDuration: 300 * time.Millisecond,
+		CompletedAt:        completedAt,
+		Usage: &agentruntime.Usage{
+			OutputTokens:       &outputTokens,
+			FirstTokenAt:       &firstThoughtAt,
+			GenerationDuration: 20 * time.Second,
+		},
+	})
+
+	if metric.DurationMS == nil || *metric.DurationMS != 262700 {
+		t.Fatalf("duration_ms = %v, want 262700", metric.DurationMS)
+	}
+	if metric.TTFTMS == nil || *metric.TTFTMS != 1400 {
+		t.Fatalf("ttft_ms = %v, want 1400 (from first thought chunk, not 262400)", metric.TTFTMS)
+	}
+	if metric.TPS == nil || *metric.TPS < 169.5 || *metric.TPS > 169.6 {
+		t.Fatalf("tps = %v, want ~169.55 (3391 / 20s), not ~11304", metric.TPS)
+	}
+}
+
+func TestAgentRunMetricUsesClaudeDurationAPIMSAndPreservesMergedUsage(t *testing.T) {
+	startedAt := time.Date(2026, 11, 15, 9, 0, 0, 0, time.UTC)
+	firstAt := startedAt.Add(800 * time.Millisecond)
+	completedAt := startedAt.Add(60 * time.Second)
+	inputTokens := int64(1200)
+	outputTokens := int64(450)
+	apiMS := int64(5000)
+
+	prev := &agentruntime.Usage{
+		Model:        "claude-sonnet-4-5",
+		InputTokens:  &inputTokens,
+		OutputTokens: &outputTokens,
+		Context:      &agentruntime.ContextUsage{Model: "claude-sonnet-4-5"},
+	}
+	next := &agentruntime.Usage{
+		DurationAPIMS: &apiMS,
+		FirstTokenAt:  &firstAt,
+	}
+	merged := mergeRunUsage(prev, next)
+	if merged.OutputTokens == nil || *merged.OutputTokens != 450 || merged.Context == nil {
+		t.Fatalf("mergeRunUsage dropped previous fields: %+v", merged)
+	}
+
+	tracker := agentRunTracker{
+		RunID: "run_claude_api",
+		UserMessage: domain.Message{
+			ID:               "msg_claude_api",
+			OrganizationID:   "org_test",
+			ConversationType: domain.ConversationChannel,
+			ConversationID:   "chn_test",
+			CreatedAt:        startedAt,
+		},
+		Agent:     domain.Agent{ID: "agt_claude", Name: "claude", Kind: domain.AgentKindClaudePersistent},
+		StartedAt: startedAt,
+	}
+	metric := tracker.metric(agentRunMetricInput{
+		Status:             "completed",
+		GenerationDuration: 58 * time.Second,
+		CompletedAt:        completedAt,
+		Usage:              merged,
+	})
+	if metric.TPS == nil || *metric.TPS != 90 {
+		t.Fatalf("tps = %v, want 90 (450 tokens / 5s api duration)", metric.TPS)
+	}
+	if metric.TTFTMS == nil || *metric.TTFTMS != 800 {
+		t.Fatalf("ttft_ms = %v, want 800", metric.TTFTMS)
+	}
+}
+
 func TestAgentRunMetricCacheHitUsesTotalInputSideTokens(t *testing.T) {
 	startedAt := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
 	inputTokens := int64(3)

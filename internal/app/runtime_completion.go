@@ -246,18 +246,64 @@ func (a *App) setAgentSessionContextUsage(ctx context.Context, agentID string, c
 	return a.store.Sessions().SetAgentSessionContextUsage(ctx, agentID, conversationType, conversationID, contextUsageToDomain(usage.Context))
 }
 
-// mergeRunUsage keeps the latest usage of a run while carrying the last known
-// context-window snapshot forward. Claude reports context usage on assistant
-// events but not on the final result event, so a plain overwrite would drop it
-// right before completion.
+// mergeRunUsage keeps the latest usage of a run while carrying forward non-nil
+// fields (context-window snapshot, token totals, and timing) when a later
+// event omits them. For example, Claude reports context usage on assistant
+// events without repeating it on the final result, while Codex app-server can
+// report token counts on thread/tokenUsage/updated before turn/completed
+// closes the turn's generation timer.
 func mergeRunUsage(previous *agentruntime.Usage, next *agentruntime.Usage) *agentruntime.Usage {
 	if next == nil {
 		return previous
 	}
-	if next.Context != nil || previous == nil || previous.Context == nil {
+	if previous == nil {
 		return next
 	}
 	merged := *next
-	merged.Context = previous.Context
+	if merged.Model == "" {
+		merged.Model = previous.Model
+	}
+	if merged.InputTokens == nil {
+		merged.InputTokens = previous.InputTokens
+	}
+	if merged.CachedInputTokens == nil {
+		merged.CachedInputTokens = previous.CachedInputTokens
+	}
+	if merged.CacheCreationInputTokens == nil {
+		merged.CacheCreationInputTokens = previous.CacheCreationInputTokens
+	}
+	if merged.CacheReadInputTokens == nil {
+		merged.CacheReadInputTokens = previous.CacheReadInputTokens
+	}
+	if merged.OutputTokens == nil {
+		merged.OutputTokens = previous.OutputTokens
+	}
+	if merged.ReasoningOutputTokens == nil {
+		merged.ReasoningOutputTokens = previous.ReasoningOutputTokens
+	}
+	if merged.TotalTokens == nil {
+		merged.TotalTokens = previous.TotalTokens
+	}
+	if merged.TotalCostUSD == nil {
+		merged.TotalCostUSD = previous.TotalCostUSD
+	}
+	if merged.DurationMS == nil {
+		merged.DurationMS = previous.DurationMS
+	}
+	if merged.DurationAPIMS == nil {
+		merged.DurationAPIMS = previous.DurationAPIMS
+	}
+	if merged.Context == nil {
+		merged.Context = previous.Context
+	}
+	if merged.Raw == nil {
+		merged.Raw = previous.Raw
+	}
+	if previous.FirstTokenAt != nil && (merged.FirstTokenAt == nil || previous.FirstTokenAt.Before(*merged.FirstTokenAt)) {
+		merged.FirstTokenAt = previous.FirstTokenAt
+	}
+	if merged.GenerationDuration <= 0 {
+		merged.GenerationDuration = previous.GenerationDuration
+	}
 	return &merged
 }

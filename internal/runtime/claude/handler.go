@@ -211,6 +211,10 @@ func MergeUsage(a *runtime.Usage, b *runtime.Usage) *runtime.Usage {
 	merged.DurationMS = addTokens(a.DurationMS, b.DurationMS)
 	merged.DurationAPIMS = addTokens(a.DurationAPIMS, b.DurationAPIMS)
 	merged.TotalCostUSD = addCost(a.TotalCostUSD, b.TotalCostUSD)
+	if a.FirstTokenAt != nil && (merged.FirstTokenAt == nil || a.FirstTokenAt.Before(*merged.FirstTokenAt)) {
+		merged.FirstTokenAt = a.FirstTokenAt
+	}
+	merged.GenerationDuration = a.GenerationDuration + b.GenerationDuration
 	return &merged
 }
 

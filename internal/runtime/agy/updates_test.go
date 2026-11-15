@@ -2,6 +2,7 @@ package agy
 
 import (
 	"testing"
+	"time"
 
 	"github.com/meteorsky/agentx/internal/runtime"
 )
@@ -177,5 +178,68 @@ func TestPermissionOptionSelection(t *testing.T) {
 	}
 	if got := selectPermissionOption(choices, "something unknown"); got != "deny_once" {
 		t.Fatalf("selectPermissionOption(unknown) = %q, want conservative deny_once", got)
+	}
+}
+
+func TestTurnStateTracksBufferedThoughtsAndExcludesToolWaitInTiming(t *testing.T) {
+	t0 := time.Date(2026, 11, 15, 8, 43, 15, 0, time.UTC)
+	st := newTurnStateAt("commit & push and watch CI", t0)
+
+	// Step 1: buffered thought chunks stream from 1.2s to 4.2s (3s), then run_command starts.
+	_ = st.handleUpdateAt(record{
+		"sessionUpdate": "agent_thought_chunk",
+		"content":       record{"type": "text", "text": "Checking git status..."},
+	}, t0.Add(1200*time.Millisecond))
+	_ = st.handleUpdateAt(record{
+		"sessionUpdate": "tool_call",
+		"toolCallId":    "cmd-watch",
+		"name":          "run_command",
+		"status":        "in_progress",
+	}, t0.Add(4200*time.Millisecond))
+
+	// 4 minutes pass while waiting for GitHub Actions.
+	_ = st.handleUpdateAt(record{
+		"sessionUpdate": "tool_call_update",
+		"toolCallId":    "cmd-watch",
+		"name":          "run_command",
+		"status":        "completed",
+	}, t0.Add(244200*time.Millisecond))
+
+	// Step 2: 15s of thinking + 300ms of final one-sentence reply.
+	_ = st.handleUpdateAt(record{
+		"sessionUpdate": "agent_thought_chunk",
+		"content":       record{"type": "text", "text": "Release finished; summarizing..."},
+	}, t0.Add(247400*time.Millisecond))
+	_ = st.handleUpdateAt(record{
+		"sessionUpdate": "agent_message_chunk",
+		"content":       record{"type": "text", "text": "Updated"},
+	}, t0.Add(262400*time.Millisecond))
+	_ = st.handleUpdateAt(record{
+		"sessionUpdate": "agent_message_chunk",
+		"content":       record{"type": "text", "text": " successfully."},
+	}, t0.Add(262700*time.Millisecond))
+
+	completedAt := t0.Add(262700 * time.Millisecond)
+	usage := st.timer.ApplyAt(buildUsage(record{
+		"stopReason": "end_turn",
+		"usage": record{
+			"inputTokens":   float64(245000),
+			"outputTokens":  float64(3391),
+			"thoughtTokens": float64(3200),
+			"totalTokens":   float64(248391),
+		},
+	}, "gemini-3-pro", completedAt.Sub(t0).Milliseconds(), nil), completedAt)
+
+	if usage == nil || usage.FirstTokenAt == nil {
+		t.Fatalf("expected FirstTokenAt on usage, got %+v", usage)
+	}
+	if !usage.FirstTokenAt.Equal(t0.Add(1200 * time.Millisecond)) {
+		t.Fatalf("FirstTokenAt = %v, want %v", usage.FirstTokenAt, t0.Add(1200*time.Millisecond))
+	}
+	// Step 1 (3s) + Step 2 (15.3s) = 18.3s, excluding the 240s tool wait and
+	// avoiding the 300ms final-text-only window that previously produced >11k TPS.
+	wantGen := 3*time.Second + 15300*time.Millisecond
+	if usage.GenerationDuration != wantGen {
+		t.Fatalf("GenerationDuration = %v, want %v", usage.GenerationDuration, wantGen)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type StartSessionRequest struct {
@@ -149,8 +150,15 @@ type Usage struct {
 	TotalCostUSD             *float64
 	DurationMS               *int64
 	DurationAPIMS            *int64
-	Context                  *ContextUsage
-	Raw                      any
+	// FirstTokenAt is the UTC timestamp of the first model output observed in
+	// the turn (thinking, tool call, plan, or reply text), including chunks a
+	// runtime buffers before emitting a coalesced event.
+	FirstTokenAt *time.Time
+	// GenerationDuration is the active model generation time summed across LLM
+	// steps in the turn, excluding local tool execution and user input waits.
+	GenerationDuration time.Duration
+	Context            *ContextUsage
+	Raw                any
 }
 
 type ContextUsage struct {

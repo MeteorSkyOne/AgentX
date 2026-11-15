@@ -245,6 +245,7 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 
 	sessionKey := agentSessionKey(agent.ID, userMessage.ConversationType, userMessage.ConversationID)
 	startedPublished := false
+	attemptStartedAt := startedAt
 	for {
 		session, err := rt.StartSession(ctx, agentruntime.StartSessionRequest{
 			AgentID:              agent.ID,
@@ -309,7 +310,7 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 
 		var thinkingBuf strings.Builder
 		var processBuf []domain.ProcessItem
-		var firstTokenAt *time.Time
+		turnTimer := agentruntime.NewTurnTimer(attemptStartedAt)
 		var usage *agentruntime.Usage
 		retryWithoutPreviousSession := false
 	eventLoop:
@@ -332,6 +333,8 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 					activeRun.closeSession(context.WithoutCancel(ctx), session)
 					return
 				}
+				now := time.Now().UTC()
+				turnTimer.ObserveEventAt(evt, now)
 				if evt.Usage != nil {
 					usage = mergeRunUsage(usage, evt.Usage)
 					activeRun.setContextUsage(usage.Context)
@@ -347,10 +350,6 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 				}
 				switch evt.Type {
 				case agentruntime.EventDelta:
-					if firstTokenAt == nil && strings.TrimSpace(evt.Text) != "" {
-						now := time.Now().UTC()
-						firstTokenAt = &now
-					}
 					if evt.Thinking != "" {
 						thinkingBuf.WriteString(evt.Thinking)
 					}
@@ -369,10 +368,7 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 					})
 				case agentruntime.EventCompleted:
 					a.removePendingQuestions(userMessage.ConversationType, userMessage.ConversationID)
-					completedAt := time.Now().UTC()
-					if firstTokenAt == nil && strings.TrimSpace(evt.Text) != "" {
-						firstTokenAt = &completedAt
-					}
+					completedAt := now
 					if evt.Thinking != "" {
 						thinkingBuf.WriteString(evt.Thinking)
 					}
@@ -383,11 +379,12 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 					}
 					goal, plan := activeRun.progress()
 					botMessage, err := a.completeAgentRun(ctx, userMessage, agent, runID, session.CurrentSessionID(), evt.Text, thinkingBuf.String(), processBuf, goal, plan, runTracker.metric(agentRunMetricInput{
-						Status:            "completed",
-						ProviderSessionID: session.CurrentSessionID(),
-						FirstTokenAt:      firstTokenAt,
-						CompletedAt:       completedAt,
-						Usage:             usage,
+						Status:             "completed",
+						ProviderSessionID:  session.CurrentSessionID(),
+						FirstTokenAt:       turnTimer.FirstTokenAt(),
+						GenerationDuration: turnTimer.FinishAt(completedAt),
+						CompletedAt:        completedAt,
+						Usage:              usage,
 					}), usage, team)
 					if err != nil {
 						sendResult(domain.Message{}, err)
@@ -410,13 +407,14 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 				case agentruntime.EventCanceled:
 					terminalStatus = "canceled"
 					a.removePendingQuestions(userMessage.ConversationType, userMessage.ConversationID)
-					completedAt := time.Now().UTC()
+					completedAt := now
 					a.recordAgentRunMetric(ctx, runTracker.metric(agentRunMetricInput{
-						Status:            "canceled",
-						ProviderSessionID: session.CurrentSessionID(),
-						CompletedAt:       completedAt,
-						FirstTokenAt:      firstTokenAt,
-						Usage:             usage,
+						Status:             "canceled",
+						ProviderSessionID:  session.CurrentSessionID(),
+						CompletedAt:        completedAt,
+						FirstTokenAt:       turnTimer.FirstTokenAt(),
+						GenerationDuration: turnTimer.FinishAt(completedAt),
+						Usage:              usage,
 					}))
 					a.setCanceledAgentSession(ctx, agent.ID, userMessage, session.CurrentSessionID())
 					a.persistAgentSessionContextUsage(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, usage)
@@ -439,7 +437,11 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 							conversationType: userMessage.ConversationType,
 							conversationID:   userMessage.ConversationID,
 							questionID:       evt.InputRequest.QuestionID,
-						}, &pendingQuestion{session: session, run: activeRun})
+						}, &pendingQuestion{
+							session:    session,
+							run:        activeRun,
+							onResolved: turnTimer.InputWaitCompleted,
+						})
 						a.publishConversationEvent(domain.Event{
 							Type:             domain.EventAgentInputRequest,
 							OrganizationID:   userMessage.OrganizationID,
@@ -461,16 +463,19 @@ func (a *App) runReservedAgentForMessageWithTarget(reserved reservedAgentRun, us
 							return
 						}
 						previousSessionID = ""
+						attemptStartedAt = time.Now().UTC()
 						retryWithoutPreviousSession = true
 						break eventLoop
 					}
 					slog.Error("agent runtime event failed", append(runAttrs, "provider_session_id", session.CurrentSessionID(), "error", err)...)
+					completedAt := now
 					a.recordAgentRunMetric(ctx, runTracker.metric(agentRunMetricInput{
-						Status:            "failed",
-						ProviderSessionID: session.CurrentSessionID(),
-						CompletedAt:       time.Now().UTC(),
-						FirstTokenAt:      firstTokenAt,
-						Usage:             usage,
+						Status:             "failed",
+						ProviderSessionID:  session.CurrentSessionID(),
+						CompletedAt:        completedAt,
+						FirstTokenAt:       turnTimer.FirstTokenAt(),
+						GenerationDuration: turnTimer.FinishAt(completedAt),
+						Usage:              usage,
 					}))
 					a.setFailedAgentSession(ctx, agent.ID, userMessage, session.CurrentSessionID())
 					a.persistAgentSessionContextUsage(ctx, agent.ID, userMessage.ConversationType, userMessage.ConversationID, usage)

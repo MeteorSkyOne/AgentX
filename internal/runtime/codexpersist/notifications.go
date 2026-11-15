@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/meteorsky/agentx/internal/id"
 	"github.com/meteorsky/agentx/internal/runtime"
@@ -22,10 +23,18 @@ type notificationState struct {
 	completedAgentText strings.Builder
 	streamedPlanItems  map[string]bool
 	completedPlanText  string
+	timer              *runtime.TurnTimer
 }
 
 func newNotificationState() *notificationState {
-	return &notificationState{streamedPlanItems: make(map[string]bool)}
+	return newNotificationStateWithTimer(runtime.NewTurnTimer(time.Now().UTC()))
+}
+
+func newNotificationStateWithTimer(timer *runtime.TurnTimer) *notificationState {
+	return &notificationState{
+		streamedPlanItems: make(map[string]bool),
+		timer:             timer,
+	}
 }
 
 func (st *notificationState) writeText(text string) {
@@ -38,6 +47,7 @@ func (st *notificationState) writePendingAgentText(itemID, text string) {
 	if text == "" {
 		return
 	}
+	st.timer.ObserveStream()
 	if itemID != "" && st.pendingAgentItemID != "" && itemID != st.pendingAgentItemID {
 		// A new message item started streaming before the previous one
 		// reported completion; treat the previous one as completed.
@@ -104,7 +114,7 @@ func (s *persistentSession) processNotifications(ctx context.Context) {
 		case msg, ok := <-s.rpc.Notifications():
 			if !ok {
 				if text := state.textString(); text != "" {
-					s.emit(runtime.Event{Type: runtime.EventCompleted, Text: text})
+					s.emit(runtime.Event{Type: runtime.EventCompleted, Text: text, Usage: state.timer.Apply(nil)})
 				} else {
 					s.emit(runtime.Event{Type: runtime.EventFailed, Error: "notification channel closed"})
 				}
@@ -112,7 +122,7 @@ func (s *persistentSession) processNotifications(ctx context.Context) {
 			}
 
 			if msg.ID != nil {
-				s.handleServerRequest(msg)
+				s.handleServerRequest(msg, state.timer)
 				continue
 			}
 			if s.isForeignThreadNotification(msg) {
@@ -154,6 +164,7 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 	case "item/plan/delta":
 		delta, _ := params["delta"].(string)
 		if delta != "" {
+			state.timer.ObserveStream()
 			if itemID := stringVal(params, "itemId"); itemID != "" {
 				state.streamedPlanItems[itemID] = true
 			}
@@ -164,12 +175,24 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 	case "item/reasoning/textDelta":
 		delta, _ := params["delta"].(string)
 		if delta != "" {
+			state.timer.ObserveStream()
 			s.emit(runtime.Event{Type: runtime.EventDelta, Thinking: delta})
+		}
+
+	case "item/reasoning/summaryTextDelta":
+		delta, _ := params["delta"].(string)
+		if delta != "" {
+			state.timer.ObserveStream()
 		}
 
 	case "item/started":
 		item, _ := params["item"].(map[string]any)
 		if pi := itemToProcessItem(item, "started"); pi != nil {
+			if pi.Type == "tool_call" {
+				state.timer.ToolStarted(pi.ToolCallID)
+			} else {
+				state.timer.ObserveOutput()
+			}
 			if state.hasCompletedAgentText() {
 				s.emit(state.flushCompletedAgentTextAsThinking())
 			}
@@ -182,17 +205,28 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 	case "item/completed":
 		item, _ := params["item"].(map[string]any)
 		if isAgentMessageItem(item) {
-			state.completeAgentMessage(completedAgentMessageText(item))
+			wasStreamed := state.pendingAgentText.Len() > 0
+			fullText := completedAgentMessageText(item)
+			state.completeAgentMessage(fullText)
+			if !wasStreamed && fullText != "" {
+				state.timer.ObserveOutput()
+			}
 		}
 		if text, streamed := completedPlanText(item, state); text != "" {
 			if streamed {
 				state.completedPlanText = text
 			} else {
+				state.timer.ObserveOutput()
 				state.writeText(text)
 				s.emit(runtime.Event{Type: runtime.EventDelta, Text: text})
 			}
 		}
 		if pi := itemToProcessItem(item, "completed"); pi != nil {
+			if pi.Type == "tool_call" || pi.Type == "tool_result" {
+				state.timer.ToolCompleted(pi.ToolCallID)
+			} else {
+				state.timer.ObserveOutput()
+			}
 			if state.hasCompletedAgentText() {
 				s.emit(state.flushCompletedAgentTextAsThinking())
 			}
@@ -210,7 +244,7 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 
 	case "turn/completed":
 		text := state.textString()
-		usage := turnCompletedUsage(params)
+		usage := state.timer.Apply(turnCompletedUsage(params))
 		status := turnStatus(params)
 		s.clearActiveTurn()
 		if status == "interrupted" {
@@ -231,6 +265,7 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 		}
 
 	case "turn/plan/updated":
+		state.timer.ObserveOutput()
 		s.emit(runtime.Event{Type: runtime.EventDelta, Plan: planStateFromNotification(params)})
 
 	case "error":
@@ -241,7 +276,7 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 	case "thread/closed":
 		text := state.textString()
 		if text != "" {
-			s.emit(runtime.Event{Type: runtime.EventCompleted, Text: text})
+			s.emit(runtime.Event{Type: runtime.EventCompleted, Text: text, Usage: state.timer.Apply(nil)})
 		} else {
 			s.emit(runtime.Event{Type: runtime.EventFailed, Error: "thread closed"})
 		}
@@ -250,7 +285,7 @@ func (s *persistentSession) handleNotification(msg jsonRPCMessage, state *notifi
 	return false
 }
 
-func (s *persistentSession) handleServerRequest(msg jsonRPCMessage) {
+func (s *persistentSession) handleServerRequest(msg jsonRPCMessage, timer *runtime.TurnTimer) {
 	switch msg.Method {
 	case "item/commandExecution/requestApproval",
 		"item/fileChange/requestApproval",
@@ -261,7 +296,7 @@ func (s *persistentSession) handleServerRequest(msg jsonRPCMessage) {
 			slog.Warn("codexpersist: failed to auto-approve", "method", msg.Method, "error", err)
 		}
 	case "item/tool/requestUserInput":
-		s.handleUserInputRequest(msg)
+		s.handleUserInputRequest(msg, timer)
 	default:
 		if err := s.rpc.RespondToRequest(msg.ID, map[string]any{}); err != nil {
 			slog.Warn("codexpersist: failed to respond to server request", "method", msg.Method, "error", err)
@@ -269,7 +304,7 @@ func (s *persistentSession) handleServerRequest(msg jsonRPCMessage) {
 	}
 }
 
-func (s *persistentSession) handleUserInputRequest(msg jsonRPCMessage) {
+func (s *persistentSession) handleUserInputRequest(msg jsonRPCMessage, timer *runtime.TurnTimer) {
 	params := notificationParams(msg)
 
 	var question string
@@ -309,6 +344,8 @@ func (s *persistentSession) handleUserInputRequest(msg jsonRPCMessage) {
 	}
 
 	questionID := id.New("qst")
+	timer.InputWaitStarted()
+	defer timer.InputWaitCompleted()
 	s.emit(runtime.Event{
 		Type: runtime.EventInputRequest,
 		InputRequest: &runtime.InputRequest{

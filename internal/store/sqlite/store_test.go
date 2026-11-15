@@ -736,6 +736,68 @@ func TestMetricsQueriesFilterByScopeAndProvider(t *testing.T) {
 	if len(summaryRows) != 1 || summaryRows[0].AgentID != fixture.agent1.ID || summaryRows[0].RunCount != 2 || summaryRows[0].InputTokens == nil || *summaryRows[0].InputTokens != 150 {
 		t.Fatalf("summary rows = %#v", summaryRows)
 	}
+	// run_metrics_1: 20 tokens at 10 TPS (2s active generation).
+	// run_metrics_3: 10 tokens with nil TPS, 1000ms duration (1s fallback).
+	// Combined: 30 tokens / 3s = 10 TPS.
+	if summaryRows[0].TPS == nil || *summaryRows[0].TPS < 9.99 || *summaryRows[0].TPS > 10.01 {
+		t.Fatalf("summary tps = %v, want 10", summaryRows[0].TPS)
+	}
+
+	// A multi-step tool-calling run (e.g. 262s total duration with 240s tool wait,
+	// 300 tokens generated in 3s = 100 TPS) plus a failed zero-token run must not
+	// dilute summary TPS with tool-wait or failed-run wall-clock duration.
+	toolRunOutput := int64(300)
+	if err := st.Metrics().Create(ctx, domain.AgentRunMetric{
+		RunID:            "run_metrics_tool_wait",
+		OrganizationID:   fixture.org.ID,
+		ProjectID:        "prj_metrics",
+		ChannelID:        "chn_metrics",
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   "chn_metrics",
+		MessageID:        "msg_prompt_4",
+		AgentID:          fixture.agent1.ID,
+		AgentName:        fixture.agent1.Name,
+		Provider:         domain.AgentKindCodex,
+		Model:            "gpt-test",
+		Status:           "completed",
+		StartedAt:        fixture.now.Add(3 * time.Second),
+		CompletedAt:      &completedAt,
+		TTFTMS:           int64Ptr(1000),
+		DurationMS:       int64Ptr(262000),
+		TPS:              float64Ptr(100),
+		OutputTokens:     &toolRunOutput,
+		CreatedAt:        fixture.now.Add(3 * time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Metrics().Create(ctx, domain.AgentRunMetric{
+		RunID:            "run_metrics_failed_codex",
+		OrganizationID:   fixture.org.ID,
+		ProjectID:        "prj_metrics",
+		ChannelID:        "chn_metrics",
+		ConversationType: domain.ConversationChannel,
+		ConversationID:   "chn_metrics",
+		MessageID:        "msg_prompt_5",
+		AgentID:          fixture.agent1.ID,
+		AgentName:        fixture.agent1.Name,
+		Provider:         domain.AgentKindCodex,
+		Model:            "gpt-test",
+		Status:           "failed",
+		StartedAt:        fixture.now.Add(4 * time.Second),
+		CompletedAt:      &completedAt,
+		DurationMS:       int64Ptr(90000),
+		CreatedAt:        fixture.now.Add(4 * time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	summaryRows, err = st.Metrics().ListAgentSummariesByProject(ctx, "prj_metrics", store.MetricsFilter{Limit: 10, Provider: domain.AgentKindCodex})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Total output = 20 + 10 + 300 = 330 tokens; active generation = 2s + 1s + 3s = 6s => 55 TPS.
+	if len(summaryRows) != 1 || summaryRows[0].TPS == nil || *summaryRows[0].TPS < 54.99 || *summaryRows[0].TPS > 55.01 {
+		t.Fatalf("summary tps after tool-wait & failed runs = %v, want 55", summaryRows[0].TPS)
+	}
 }
 
 func TestBindingUpsertReplacesAgentAndWorkspace(t *testing.T) {

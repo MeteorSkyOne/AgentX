@@ -25,6 +25,7 @@ type turnState struct {
 	lastStop  string
 	lastError string
 	startedAt time.Time
+	timer     *runtime.TurnTimer
 	subagents *subagentTracker
 	// openTools maps tool call ids to tool names for tool_execution_end items
 	// that omit the name.
@@ -32,8 +33,10 @@ type turnState struct {
 }
 
 func newTurnState() *turnState {
+	now := time.Now().UTC()
 	return &turnState{
-		startedAt: time.Now(),
+		startedAt: now,
+		timer:     runtime.NewTurnTimer(now),
 		subagents: newSubagentTracker(),
 		openTools: map[string]string{},
 	}
@@ -94,6 +97,10 @@ func (s *persistentSession) handleRecord(ctx context.Context, rec record, state 
 		s.promoteText(state)
 		callID := stringVal(rec, "toolCallId")
 		toolName := stringVal(rec, "toolName")
+		parentID := stringVal(rec, "parentToolCallId")
+		if parentID == "" {
+			state.timer.ToolStarted(callID)
+		}
 		if callID != "" {
 			state.openTools[callID] = toolName
 		}
@@ -104,7 +111,7 @@ func (s *persistentSession) handleRecord(ctx context.Context, rec record, state 
 			Status:           "started",
 			Input:            rec["args"],
 			Raw:              rec,
-			ParentToolCallID: stringVal(rec, "parentToolCallId"),
+			ParentToolCallID: parentID,
 		}
 		items := []runtime.ProcessItem{item}
 		items = append(items, state.subagents.started(rec)...)
@@ -121,6 +128,10 @@ func (s *persistentSession) handleRecord(ctx context.Context, rec record, state 
 
 	case "tool_execution_end":
 		callID := stringVal(rec, "toolCallId")
+		parentID := stringVal(rec, "parentToolCallId")
+		if parentID == "" {
+			state.timer.ToolCompleted(callID)
+		}
 		toolName := stringVal(rec, "toolName")
 		if toolName == "" {
 			toolName = state.openTools[callID]
@@ -142,7 +153,7 @@ func (s *persistentSession) handleRecord(ctx context.Context, rec record, state 
 			Status:           status,
 			Output:           output,
 			Raw:              rec,
-			ParentToolCallID: stringVal(rec, "parentToolCallId"),
+			ParentToolCallID: parentID,
 		}
 		items := []runtime.ProcessItem{item}
 		items = append(items, state.subagents.ended(rec)...)
@@ -183,7 +194,7 @@ func (s *persistentSession) handleRecord(ctx context.Context, rec record, state 
 			stringVal(rec, "extensionPath"), stringVal(rec, "event"), stringVal(rec, "error")))
 
 	case "extension_ui_request":
-		s.handleExtensionUIRequest(ctx, rec)
+		s.handleExtensionUIRequest(ctx, rec, state)
 
 	case "agent_settled":
 		return s.finishTurn(ctx, state, boolVal(rec, "aborted"))
@@ -198,10 +209,17 @@ func (s *persistentSession) handleAssistantUpdate(evt record, state *turnState) 
 		if delta == "" {
 			return
 		}
+		state.timer.ObserveStream()
 		state.text.WriteString(delta)
 		s.emit(runtime.Event{Type: runtime.EventDelta, Text: delta})
 	case "thinking_delta":
-		state.thinking.WriteString(stringVal(evt, "delta"))
+		delta := stringVal(evt, "delta")
+		if delta != "" {
+			state.timer.ObserveStream()
+			state.thinking.WriteString(delta)
+		}
+	case "toolcall_start", "toolcall_delta":
+		state.timer.ObserveStream()
 	case "thinking_end":
 		content := stringVal(evt, "content")
 		if content == "" {
@@ -209,6 +227,7 @@ func (s *persistentSession) handleAssistantUpdate(evt record, state *turnState) 
 		}
 		state.thinking.Reset()
 		if content != "" {
+			state.timer.ObserveOutput()
 			s.emit(runtime.Event{Type: runtime.EventDelta, Thinking: content})
 		}
 	}
@@ -242,8 +261,13 @@ func (s *persistentSession) promoteText(state *turnState) {
 
 func (s *persistentSession) finishTurn(ctx context.Context, state *turnState, aborted bool) bool {
 	s.setRunning(false)
+	completedAt := time.Now().UTC()
+	state.timer.FinishAt(completedAt)
 	text := state.text.String()
-	usage := state.usage.toRuntime(time.Since(state.startedAt).Milliseconds(), s.fetchContextUsage(ctx))
+	usage := state.timer.ApplyAt(
+		state.usage.toRuntime(completedAt.Sub(state.startedAt).Milliseconds(), s.fetchContextUsage(ctx)),
+		completedAt,
+	)
 	switch {
 	case aborted || s.interrupted() || state.lastStop == "aborted":
 		s.emit(runtime.Event{Type: runtime.EventCanceled, Text: text, Usage: usage})
@@ -262,7 +286,7 @@ func (s *persistentSession) finishTurn(ctx context.Context, state *turnState, ab
 // handleExtensionUIRequest services pi's extension UI subprotocol. Dialog
 // methods become AgentX input requests and block the turn until answered;
 // fire-and-forget methods are surfaced as notes or ignored.
-func (s *persistentSession) handleExtensionUIRequest(ctx context.Context, rec record) {
+func (s *persistentSession) handleExtensionUIRequest(ctx context.Context, rec record, state *turnState) {
 	requestID := stringVal(rec, "id")
 	method := stringVal(rec, "method")
 	switch method {
@@ -309,6 +333,8 @@ func (s *persistentSession) handleExtensionUIRequest(ctx context.Context, rec re
 		}
 	}
 
+	state.timer.InputWaitStarted()
+	defer state.timer.InputWaitCompleted()
 	s.emit(runtime.Event{
 		Type: runtime.EventInputRequest,
 		InputRequest: &runtime.InputRequest{

@@ -25,15 +25,21 @@ type turnState struct {
 	goal         *runtime.GoalState
 	goalStarted  time.Time
 	contextUsage *runtime.ContextUsage
+	timer        *runtime.TurnTimer
 }
 
 func newTurnState(prompt string) *turnState {
+	return newTurnStateAt(prompt, time.Now().UTC())
+}
+
+func newTurnStateAt(prompt string, startedAt time.Time) *turnState {
 	st := &turnState{
 		tools: make(map[string]*trackedTool),
+		timer: runtime.NewTurnTimer(startedAt),
 	}
 	if goal := initialGoalFromPrompt(prompt); goal != nil {
 		st.goal = goal
-		st.goalStarted = time.Now()
+		st.goalStarted = startedAt
 	}
 	return st
 }
@@ -136,6 +142,10 @@ func (s *turnState) promotePreToolText() *runtime.Event {
 }
 
 func (s *turnState) handleUpdate(update record) []runtime.Event {
+	return s.handleUpdateAt(update, time.Now().UTC())
+}
+
+func (s *turnState) handleUpdateAt(update record, now time.Time) []runtime.Event {
 	if update == nil {
 		return nil
 	}
@@ -146,6 +156,7 @@ func (s *turnState) handleUpdate(update record) []runtime.Event {
 	case "agent_thought_chunk":
 		chunk := extractUpdateText(update)
 		if chunk != "" {
+			s.timer.ObserveStreamAt(now)
 			s.thinking.WriteString(chunk)
 		}
 
@@ -155,6 +166,7 @@ func (s *turnState) handleUpdate(update record) []runtime.Event {
 		}
 		chunk := extractUpdateText(update)
 		if chunk != "" {
+			s.timer.ObserveStreamAt(now)
 			s.text.WriteString(chunk)
 			events = append(events, runtime.Event{
 				Type: runtime.EventDelta,
@@ -169,7 +181,7 @@ func (s *turnState) handleUpdate(update record) []runtime.Event {
 		if promoted := s.promotePreToolText(); promoted != nil {
 			events = append(events, *promoted)
 		}
-		if items := s.handleToolUpdate(kind, update); len(items) > 0 {
+		if items := s.handleToolUpdate(kind, update, now); len(items) > 0 {
 			events = append(events, runtime.Event{
 				Type:    runtime.EventDelta,
 				Process: items,
@@ -181,6 +193,7 @@ func (s *turnState) handleUpdate(update record) []runtime.Event {
 			events = append(events, *flushed)
 		}
 		if plan := parsePlanUpdate(update); plan != nil {
+			s.timer.ObserveOutputAt(now)
 			s.plan = plan
 			events = append(events, runtime.Event{
 				Type: runtime.EventDelta,
@@ -223,7 +236,7 @@ func (s *turnState) flushRemaining() []runtime.Event {
 	return events
 }
 
-func (s *turnState) handleToolUpdate(kind string, update record) []runtime.ProcessItem {
+func (s *turnState) handleToolUpdate(kind string, update record, now time.Time) []runtime.ProcessItem {
 	callID := stringVal(update, "toolCallId")
 	if callID == "" {
 		callID = stringVal(update, "id")
@@ -268,6 +281,9 @@ func (s *turnState) handleToolUpdate(kind string, update record) []runtime.Proce
 	var items []runtime.ProcessItem
 	if !entry.started && (kind == "tool_call" || status == "in_progress" || status == "pending" || isTerminalToolStatus(status)) {
 		entry.started = true
+		if entry.parentToolCallID == "" {
+			s.timer.ToolStartedAt(callID, now)
+		}
 		callStatus := status
 		if callStatus == "" || isTerminalToolStatus(callStatus) {
 			callStatus = "in_progress"
@@ -291,6 +307,9 @@ func (s *turnState) handleToolUpdate(kind string, update record) []runtime.Proce
 
 	if !entry.completed && isTerminalToolStatus(status) {
 		entry.completed = true
+		if entry.parentToolCallID == "" {
+			s.timer.ToolCompletedAt(callID, now)
+		}
 		normStatus := normalizeToolResultStatus(status)
 		output := toolOutputFromUpdate(update)
 		items = append(items, runtime.ProcessItem{

@@ -40,12 +40,18 @@ type goalTurnTracker struct {
 	turnActive bool
 	goalDone   bool
 	usage      *runtime.Usage // token usage accumulated across the goal's turns
+	timer      *runtime.TurnTimer
 }
 
 func newGoalTurnTracker() *goalTurnTracker {
 	// A turn is already in flight when the tracker is created: handleGoalSet
 	// starts the first turn via turn/start before entering the loop.
-	return &goalTurnTracker{state: newNotificationState(), turnActive: true}
+	timer := runtime.NewTurnTimer(time.Now().UTC())
+	return &goalTurnTracker{
+		state:      newNotificationStateWithTimer(timer),
+		turnActive: true,
+		timer:      timer,
+	}
 }
 
 // flush moves the current turn's final agent text into the goal transcript and
@@ -59,7 +65,7 @@ func newGoalTurnTracker() *goalTurnTracker {
 func (t *goalTurnTracker) flush(usage *runtime.Usage, processCount int) *runtime.Event {
 	t.usage = mergeGoalUsage(t.usage, usage)
 	text := strings.TrimSpace(t.state.textString())
-	t.state = newNotificationState()
+	t.state = newNotificationStateWithTimer(t.timer)
 	if text == "" {
 		if usage != nil {
 			return &runtime.Event{Type: runtime.EventDelta, Usage: usage}
@@ -75,7 +81,11 @@ func (t *goalTurnTracker) flush(usage *runtime.Usage, processCount int) *runtime
 // across every turn, so the final run metric reflects the whole goal rather than
 // only the last turn's tokens.
 func (t *goalTurnTracker) completedEvent() runtime.Event {
-	return runtime.Event{Type: runtime.EventCompleted, Text: t.transcript.String(), Usage: t.usage}
+	return runtime.Event{
+		Type:  runtime.EventCompleted,
+		Text:  t.transcript.String(),
+		Usage: t.timer.Apply(t.usage),
+	}
 }
 
 // handleControl consumes the goal/turn lifecycle notifications. It returns
@@ -86,12 +96,17 @@ func (t *goalTurnTracker) handleControl(msg jsonRPCMessage, processCount int) (e
 	switch msg.Method {
 	case "turn/completed":
 		t.turnActive = false
+		t.timer.PauseStep()
 		usage := turnCompletedUsage(params)
 		if turnStatus(params) == "interrupted" {
 			if e := t.flush(usage, processCount); e != nil {
 				events = append(events, *e)
 			}
-			events = append(events, runtime.Event{Type: runtime.EventCanceled, Text: t.transcript.String()})
+			events = append(events, runtime.Event{
+				Type:  runtime.EventCanceled,
+				Text:  t.transcript.String(),
+				Usage: t.timer.Apply(t.usage),
+			})
 			return events, goalCtrlStop, true
 		}
 		if e := t.flush(usage, processCount); e != nil {
@@ -206,7 +221,7 @@ func (s *persistentSession) processGoalNotifications(ctx context.Context) {
 				return
 			}
 			if msg.ID != nil {
-				s.handleServerRequest(msg)
+				s.handleServerRequest(msg, tracker.timer)
 				continue
 			}
 			if s.isForeignThreadNotification(msg) {
@@ -216,6 +231,7 @@ func (s *persistentSession) processGoalNotifications(ctx context.Context) {
 				// A turn is actively producing output, so codex is still working
 				// on the goal: cancel any pending "stopped" grace timer.
 				tracker.turnActive = true
+				tracker.timer.ResumeStep()
 				idleC = nil
 			}
 			switch {
@@ -301,6 +317,12 @@ func mergeGoalUsage(acc *runtime.Usage, next *runtime.Usage) *runtime.Usage {
 	}
 	if next.Model != "" {
 		acc.Model = next.Model
+	}
+	if next.FirstTokenAt != nil && (acc.FirstTokenAt == nil || next.FirstTokenAt.Before(*acc.FirstTokenAt)) {
+		acc.FirstTokenAt = next.FirstTokenAt
+	}
+	if next.GenerationDuration > 0 {
+		acc.GenerationDuration += next.GenerationDuration
 	}
 	return acc
 }

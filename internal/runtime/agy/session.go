@@ -426,7 +426,7 @@ func (s *persistentSession) handleTurnMessage(ctx context.Context, sid string, s
 		if !msg.IDPresent {
 			return
 		}
-		s.handlePermissionRequest(ctx, msg.ID, msg.Params)
+		s.handlePermissionRequest(ctx, state, msg.ID, msg.Params)
 
 	default:
 		if msg.IDPresent {
@@ -435,7 +435,7 @@ func (s *persistentSession) handleTurnMessage(ctx context.Context, sid string, s
 	}
 }
 
-func (s *persistentSession) handlePermissionRequest(ctx context.Context, reqID any, params record) {
+func (s *persistentSession) handlePermissionRequest(ctx context.Context, state *turnState, reqID any, params record) {
 	question, toolCallID, choices := permissionQuestionFromParams(params)
 	if s.rt.effectiveSkipPermissions(s.req) {
 		if allowID := findChoiceByKind(choices, true); allowID != "" {
@@ -458,6 +458,8 @@ func (s *persistentSession) handlePermissionRequest(ctx context.Context, reqID a
 		}
 	}
 ready:
+	state.timer.InputWaitStarted()
+	defer state.timer.InputWaitCompleted()
 	qid := "agy-perm-" + strconv.FormatInt(s.questionSeq.Add(1), 10)
 	opts := make([]runtime.InputRequestOption, 0, len(choices))
 	for _, c := range choices {
@@ -506,16 +508,21 @@ func (s *persistentSession) finishTurn(state *turnState, result record, err erro
 		s.emit(evt)
 	}
 
+	completedAt := time.Now().UTC()
 	stopReason := strings.ToLower(strings.TrimSpace(stringVal(result, "stopReason")))
 	if stopReason == "cancelled" || stopReason == "canceled" || s.wasInterrupted() || errors.Is(err, context.Canceled) {
 		_ = state.finishGoal("cancelled", nil)
-		s.emit(runtime.Event{Type: runtime.EventCanceled})
+		s.emit(runtime.Event{
+			Type:  runtime.EventCanceled,
+			Usage: state.timer.ApplyAt(nil, completedAt),
+		})
 		return
 	}
 	if err != nil {
 		s.emit(runtime.Event{
 			Type:  runtime.EventFailed,
 			Error: s.formatTurnError(err),
+			Usage: state.timer.ApplyAt(nil, completedAt),
 		})
 		return
 	}
@@ -528,7 +535,10 @@ func (s *persistentSession) finishTurn(state *turnState, result record, err erro
 	if ctxUsage == nil {
 		ctxUsage = s.rpc.contextUsage()
 	}
-	usage := buildUsage(result, modelID, time.Since(started).Milliseconds(), ctxUsage)
+	usage := state.timer.ApplyAt(
+		buildUsage(result, modelID, completedAt.Sub(started).Milliseconds(), ctxUsage),
+		completedAt,
+	)
 	var totalTokens *int64
 	if usage != nil {
 		totalTokens = usage.TotalTokens

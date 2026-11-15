@@ -26,12 +26,13 @@ type agentRunTracker struct {
 }
 
 type agentRunMetricInput struct {
-	Status            string
-	ProviderSessionID string
-	ResponseMessageID string
-	FirstTokenAt      *time.Time
-	CompletedAt       time.Time
-	Usage             *agentruntime.Usage
+	Status             string
+	ProviderSessionID  string
+	ResponseMessageID  string
+	FirstTokenAt       *time.Time
+	GenerationDuration time.Duration
+	CompletedAt        time.Time
+	Usage              *agentruntime.Usage
 }
 
 func (t agentRunTracker) metric(input agentRunMetricInput) domain.AgentRunMetric {
@@ -41,6 +42,10 @@ func (t agentRunTracker) metric(input agentRunMetricInput) domain.AgentRunMetric
 		completedAtPtr = &completedAt
 	}
 	usage := input.Usage
+	firstTokenAt := input.FirstTokenAt
+	if usage != nil && usage.FirstTokenAt != nil {
+		firstTokenAt = usage.FirstTokenAt
+	}
 	metric := domain.AgentRunMetric{
 		RunID:             t.RunID,
 		OrganizationID:    t.UserMessage.OrganizationID,
@@ -57,7 +62,7 @@ func (t agentRunTracker) metric(input agentRunMetricInput) domain.AgentRunMetric
 		Model:             strings.TrimSpace(t.Agent.Model),
 		Status:            input.Status,
 		StartedAt:         t.StartedAt,
-		FirstTokenAt:      input.FirstTokenAt,
+		FirstTokenAt:      firstTokenAt,
 		CompletedAt:       completedAtPtr,
 		CreatedAt:         time.Now().UTC(),
 	}
@@ -86,15 +91,15 @@ func (t agentRunTracker) metric(input agentRunMetricInput) domain.AgentRunMetric
 		}
 		metric.DurationMS = &duration
 	}
-	if input.FirstTokenAt != nil {
-		ttft := input.FirstTokenAt.Sub(t.StartedAt).Milliseconds()
+	if firstTokenAt != nil {
+		ttft := firstTokenAt.Sub(t.StartedAt).Milliseconds()
 		if ttft < 0 {
 			ttft = 0
 		}
 		metric.TTFTMS = &ttft
 	}
 	if completedAtPtr != nil && metric.OutputTokens != nil {
-		seconds := metricTPSSeconds(t.StartedAt, completedAt, input.FirstTokenAt)
+		seconds := metricGenerationSeconds(t.StartedAt, completedAt, firstTokenAt, input.GenerationDuration, usage)
 		if seconds > 0 {
 			tps := float64(*metric.OutputTokens) / seconds
 			metric.TPS = &tps
@@ -102,6 +107,19 @@ func (t agentRunTracker) metric(input agentRunMetricInput) domain.AgentRunMetric
 	}
 	metric.CacheHitRate = metricCacheHitRate(metric)
 	return metric
+}
+
+func metricGenerationSeconds(startedAt time.Time, completedAt time.Time, firstTokenAt *time.Time, observedDuration time.Duration, usage *agentruntime.Usage) float64 {
+	if usage != nil && usage.GenerationDuration > 0 {
+		return usage.GenerationDuration.Seconds()
+	}
+	if usage != nil && usage.DurationAPIMS != nil && *usage.DurationAPIMS > 0 {
+		return float64(*usage.DurationAPIMS) / 1000.0
+	}
+	if observedDuration > 0 {
+		return observedDuration.Seconds()
+	}
+	return metricTPSSeconds(startedAt, completedAt, firstTokenAt)
 }
 
 func metricTPSSeconds(startedAt time.Time, completedAt time.Time, firstTokenAt *time.Time) float64 {

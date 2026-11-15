@@ -214,6 +214,8 @@ SELECT '' AS run_id, org_id,
   CASE
     WHEN SUM(COALESCE(output_tokens, 0)) > 0 AND SUM(
       CASE
+        WHEN COALESCE(output_tokens, 0) <= 0 THEN 0
+        WHEN tps IS NOT NULL AND tps > 0 THEN CAST(output_tokens AS REAL) / tps
         WHEN duration_ms IS NULL THEN 0
         WHEN ttft_ms IS NOT NULL AND duration_ms - ttft_ms >= 250 THEN (duration_ms - ttft_ms) / 1000.0
         ELSE duration_ms / 1000.0
@@ -221,6 +223,8 @@ SELECT '' AS run_id, org_id,
     ) > 0
     THEN SUM(COALESCE(output_tokens, 0)) / SUM(
       CASE
+        WHEN COALESCE(output_tokens, 0) <= 0 THEN 0
+        WHEN tps IS NOT NULL AND tps > 0 THEN CAST(output_tokens AS REAL) / tps
         WHEN duration_ms IS NULL THEN 0
         WHEN ttft_ms IS NOT NULL AND duration_ms - ttft_ms >= 250 THEN (duration_ms - ttft_ms) / 1000.0
         ELSE duration_ms / 1000.0
