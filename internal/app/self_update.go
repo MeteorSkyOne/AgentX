@@ -522,15 +522,25 @@ func (s *selfUpdateService) replaceExecutable(newBinary string) error {
 	if err != nil {
 		return err
 	}
-	current, err = filepath.EvalSymlinks(current)
-	if err != nil {
+	if resolved, err := filepath.EvalSymlinks(current); err == nil {
+		current = resolved
+	} else if errors.Is(err, os.ErrNotExist) {
+		if resolvedDir, dirErr := filepath.EvalSymlinks(filepath.Dir(current)); dirErr == nil {
+			current = filepath.Join(resolvedDir, filepath.Base(current))
+		}
+	} else {
 		return err
 	}
-	info, err := os.Stat(current)
-	if err != nil {
+
+	perm := os.FileMode(0o755)
+	currentExists := true
+	if info, err := os.Stat(current); err == nil {
+		perm = info.Mode().Perm() | 0o700
+	} else if errors.Is(err, os.ErrNotExist) {
+		currentExists = false
+	} else {
 		return err
 	}
-	perm := info.Mode().Perm() | 0o700
 
 	// Stage the new binary in the install directory first so the final swap is an
 	// atomic same-filesystem rename. Renaming straight from the download temp dir
@@ -548,11 +558,15 @@ func (s *selfUpdateService) replaceExecutable(newBinary string) error {
 
 	backup := current + ".old"
 	_ = os.Remove(backup)
-	if err := os.Rename(current, backup); err != nil {
-		return fmt.Errorf("backup current binary: %w", err)
+	if currentExists {
+		if err := os.Rename(current, backup); err != nil {
+			return fmt.Errorf("backup current binary: %w", err)
+		}
 	}
 	if err := os.Rename(staged, current); err != nil {
-		_ = os.Rename(backup, current)
+		if currentExists {
+			_ = os.Rename(backup, current)
+		}
 		return fmt.Errorf("install new binary: %w", err)
 	}
 	s.mu.Lock()
