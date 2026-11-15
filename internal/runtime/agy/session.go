@@ -43,6 +43,7 @@ type inputAnswer struct {
 type persistentSession struct {
 	process *procpool.ManagedProcess
 	rpc     *rpcClient
+	monitor *brainMonitor
 	key     string
 	rt      *Runtime
 	req     runtime.StartSessionRequest
@@ -65,7 +66,7 @@ type persistentSession struct {
 	questionSeq        atomic.Int64
 }
 
-func newPersistentSession(proc *procpool.ManagedProcess, rpc *rpcClient, key string, rt *Runtime, req runtime.StartSessionRequest) *persistentSession {
+func newPersistentSession(proc *procpool.ManagedProcess, rpc *rpcClient, monitor *brainMonitor, key string, rt *Runtime, req runtime.StartSessionRequest) *persistentSession {
 	sid := usablePreviousSessionID(req.PreviousSessionID)
 	if sid == "" {
 		sid = "agy:" + key
@@ -73,6 +74,7 @@ func newPersistentSession(proc *procpool.ManagedProcess, rpc *rpcClient, key str
 	return &persistentSession{
 		process:      proc,
 		rpc:          rpc,
+		monitor:      monitor,
 		key:          key,
 		rt:           rt,
 		req:          req,
@@ -127,6 +129,7 @@ func (s *persistentSession) Send(ctx context.Context, input runtime.Input) error
 		s.emitFailed(err.Error(), false)
 		return nil
 	}
+	s.monitor.beginForegroundTurn()
 	s.mu.Lock()
 	s.turnHeld = true
 	s.mu.Unlock()
@@ -275,11 +278,13 @@ func (s *persistentSession) ContextUsage(ctx context.Context) (*runtime.ContextU
 func (s *persistentSession) runTurn(ctx context.Context, input runtime.Input) {
 	defer func() {
 		s.setRunning(false)
+		s.monitor.endForegroundTurn()
 		s.releaseTurn()
 		s.mu.Lock()
 		s.alive = false
 		s.mu.Unlock()
 		s.closeEventStream()
+		s.monitor.kickPending()
 	}()
 
 	started := time.Now()
@@ -418,6 +423,9 @@ func (s *persistentSession) handleTurnMessage(ctx context.Context, sid string, s
 			return
 		}
 		update := mapVal(msg.Params, "update")
+		if s.monitor != nil && s.monitor.registry != nil {
+			s.monitor.registry.observeACPToolUpdate(update)
+		}
 		for _, evt := range state.handleUpdate(update) {
 			s.emit(evt)
 		}
@@ -588,6 +596,7 @@ func (s *persistentSession) ensureSession(ctx context.Context) error {
 		s.needsNewSession = false
 		s.mu.Unlock()
 		s.rpc.setActiveSession(sid, res)
+		s.monitor.activateSession(sid, false)
 		return nil
 	}
 
@@ -596,10 +605,12 @@ func (s *persistentSession) ensureSession(ctx context.Context) error {
 		s.mu.Lock()
 		s.sessionID = activeID
 		s.mu.Unlock()
+		s.monitor.activateSession(activeID, false)
 		return nil
 	}
 
 	if desiredID == activeID {
+		s.monitor.activateSession(activeID, false)
 		return nil
 	}
 
@@ -628,6 +639,7 @@ func (s *persistentSession) ensureSession(ctx context.Context) error {
 	s.needsNewSession = false
 	s.mu.Unlock()
 	s.rpc.setActiveSession(sid, res)
+	s.monitor.activateSession(sid, true)
 	return nil
 }
 
@@ -639,6 +651,7 @@ func (s *persistentSession) bestEffortCloseSession(sessionID string) {
 	defer cancel()
 	_, _ = s.rpc.Call(closeCtx, "session/close", record{"sessionId": sessionID})
 	s.rpc.clearActiveSession()
+	s.monitor.closeSession()
 }
 
 func (s *persistentSession) sessionParams(sessionID string) record {
@@ -694,6 +707,9 @@ func (s *persistentSession) reconcileConfig(ctx context.Context) error {
 				"value":     matched,
 			})
 			if err != nil {
+				if ctx.Err() != nil || errors.Is(err, procpool.ErrProcessDead) {
+					return err
+				}
 				logWarn("set mode config option failed", "mode", matched, "error", err)
 			} else {
 				s.rpc.updateConfigFromResult(res)
@@ -705,6 +721,8 @@ func (s *persistentSession) reconcileConfig(ctx context.Context) error {
 			"modeId":    targetMode,
 		}); err == nil {
 			s.rpc.updateConfigFromResult(res)
+		} else if ctx.Err() != nil || errors.Is(err, procpool.ErrProcessDead) {
+			return err
 		}
 	}
 
@@ -735,6 +753,9 @@ func (s *persistentSession) reconcileConfig(ctx context.Context) error {
 					"modelId":   wantModel,
 				})
 				if err != nil {
+					if ctx.Err() != nil || errors.Is(err, procpool.ErrProcessDead) {
+						return err
+					}
 					s.emitNote(fmt.Sprintf("Model %q is not available in Antigravity; keeping %s.", wantModel, firstNonEmpty(modelOpt.CurrentValue, currentModel, "default")))
 				} else {
 					s.rpc.updateConfigFromResult(res)
@@ -746,6 +767,8 @@ func (s *persistentSession) reconcileConfig(ctx context.Context) error {
 				"modelId":   wantModel,
 			}); err == nil {
 				s.rpc.updateConfigFromResult(res)
+			} else if ctx.Err() != nil || errors.Is(err, procpool.ErrProcessDead) {
+				return err
 			}
 		}
 	}
@@ -761,6 +784,9 @@ func (s *persistentSession) reconcileConfig(ctx context.Context) error {
 				"value":     targetThought,
 			})
 			if err != nil {
+				if ctx.Err() != nil || errors.Is(err, procpool.ErrProcessDead) {
+					return err
+				}
 				logWarn("set thought_level config option failed", "thought_level", targetThought, "error", err)
 			} else {
 				s.rpc.updateConfigFromResult(res)

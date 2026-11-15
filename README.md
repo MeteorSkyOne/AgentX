@@ -72,7 +72,7 @@ Think of it as a chat workspace where every teammate is an agent: give each one 
 | `claude-persistent` | Persistent | Long-lived Claude Code process speaking stream-json over stdin/stdout, with a permission-prompt tool for interactive questions |
 | `codex-persistent` | Persistent | Long-lived `codex app-server` process speaking JSON-RPC 2.0 over stdio |
 | `pi` | Persistent | Long-lived [`pi --mode rpc`](https://pi.dev) process speaking JSONL over stdio; sessions are stored under `$AGENTX_DATA_DIR/pi-sessions`. A bundled extension adds user questions, step progress, plan mode and YOLO-off command confirmation |
-| `agy` | Persistent | Long-lived Antigravity `agy acp` process speaking Agent Client Protocol (JSON-RPC 2.0 over stdio), with native session resume, thinking/effort levels, permission prompts, plan updates, and subagent tracking |
+| `agy` | Persistent | Long-lived Antigravity `agy acp` process speaking Agent Client Protocol (JSON-RPC 2.0 over stdio), with native session resume, thinking/effort levels, permission prompts, plan updates, subagent and background task/wakeup tracking, and usage limits |
 
 Persistent processes are managed by a process pool with turn-based coordination, idle reaping (30 minutes by default), and graceful shutdown. The persistent kinds are recommended for day-to-day use.
 

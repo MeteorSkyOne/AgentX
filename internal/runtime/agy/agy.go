@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/meteorsky/agentx/internal/runtime"
@@ -32,11 +33,21 @@ type Options struct {
 	ExtraArgs          []string
 	Env                map[string]string
 	IdleTimeout        time.Duration
+
+	pollInterval time.Duration
+	claimTimeout time.Duration
 }
 
 type Runtime struct {
 	opts Options
 	pool *procpool.ProcessPool
+	// backgroundTurn receives turns Antigravity starts on its own when a
+	// background task, subagent, or schedule wakes the session; see
+	// runtime.BackgroundTurnNotifier.
+	backgroundTurn atomic.Pointer[func(sessionKey string) bool]
+	// backgroundTasks receives each session's background task list as it
+	// changes; see runtime.BackgroundTaskReporter.
+	backgroundTasks atomic.Pointer[func(sessionKey string, tasks []runtime.BackgroundTask)]
 }
 
 func New(opts Options) *Runtime {
@@ -48,6 +59,12 @@ func New(opts Options) *Runtime {
 	}
 	if opts.IdleTimeout <= 0 {
 		opts.IdleTimeout = 30 * time.Minute
+	}
+	if opts.pollInterval <= 0 {
+		opts.pollInterval = defaultBrainPollInterval
+	}
+	if opts.claimTimeout <= 0 {
+		opts.claimTimeout = defaultBackgroundTurnClaimTimeout
 	}
 	return &Runtime{
 		opts: opts,
@@ -66,8 +83,10 @@ func (r *Runtime) StartSession(ctx context.Context, req runtime.StartSessionRequ
 		return nil, err
 	}
 
+	env := mergeEnv(os.Environ(), r.opts.Env, req.Env)
 	rpc := getRPCClient(proc)
-	sess := newPersistentSession(proc, rpc, key, r, req)
+	mon := getBrainMonitor(proc, key, r, env)
+	sess := newPersistentSession(proc, rpc, mon, key, r, req)
 	if isNew {
 		if err := sess.initializeProcess(ctx); err != nil {
 			r.pool.Detach(proc)
@@ -75,9 +94,11 @@ func (r *Runtime) StartSession(ctx context.Context, req runtime.StartSessionRequ
 			return nil, err
 		}
 	} else {
-		// Reused process: process any buffered config/usage updates and discard
-		// leftover turn notifications before starting the next turn.
-		rpc.drainAndCacheUpdates()
+		if !proc.InUse() {
+			// Reused idle process: process any buffered config/usage updates and
+			// discard leftover turn notifications before starting the next turn.
+			rpc.drainAndCacheUpdates()
+		}
 		prevID := usablePreviousSessionID(req.PreviousSessionID)
 		if prevID == "" {
 			sess.needsNewSession = true
@@ -86,6 +107,56 @@ func (r *Runtime) StartSession(ctx context.Context, req runtime.StartSessionRequ
 		}
 	}
 	return sess, nil
+}
+
+func (r *Runtime) SetBackgroundTurnHandler(handler func(sessionKey string) bool) {
+	if handler == nil {
+		r.backgroundTurn.Store(nil)
+		return
+	}
+	r.backgroundTurn.Store(&handler)
+}
+
+func (r *Runtime) startBackgroundTurn(sessionKey string) bool {
+	handler := r.backgroundTurn.Load()
+	return handler != nil && (*handler)(sessionKey)
+}
+
+func (r *Runtime) SetBackgroundTaskHandler(handler func(sessionKey string, tasks []runtime.BackgroundTask)) {
+	if handler == nil {
+		r.backgroundTasks.Store(nil)
+		return
+	}
+	r.backgroundTasks.Store(&handler)
+}
+
+func (r *Runtime) reportBackgroundTasks(sessionKey string, tasks []runtime.BackgroundTask) {
+	if handler := r.backgroundTasks.Load(); handler != nil {
+		(*handler)(sessionKey, tasks)
+	}
+}
+
+func (r *Runtime) StopBackgroundTask(_ context.Context, sessionKey string, taskID string) error {
+	proc, ok := r.pool.Get(sessionKey)
+	if !ok {
+		return errNoSuchBackgroundTask
+	}
+	mon := monitorOf(proc)
+	if mon == nil || mon.registry == nil {
+		return errNoSuchBackgroundTask
+	}
+	kind, cmdLine, running := mon.registry.taskCommandLine(taskID)
+	if !running {
+		return errNoSuchBackgroundTask
+	}
+	if kind != runtime.BackgroundTaskShell {
+		return errCannotStopBackgroundAgent
+	}
+	if err := stopProcessBackgroundTask(proc.PID(), cmdLine); err != nil {
+		return err
+	}
+	mon.registry.markStopped(taskID, "Stopped by user.")
+	return nil
 }
 
 func (r *Runtime) Shutdown(ctx context.Context) error {

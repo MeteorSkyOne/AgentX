@@ -396,6 +396,17 @@ func (mp *ManagedProcess) Kill() {
 	<-mp.done
 }
 
+func (mp *ManagedProcess) PID() int {
+	if mp == nil || mp.cmd == nil || mp.cmd.Process == nil {
+		return 0
+	}
+	return mp.cmd.Process.Pid
+}
+
+func (mp *ManagedProcess) Touch() {
+	mp.lastUsedAt.Store(time.Now())
+}
+
 func (mp *ManagedProcess) LastUsedAt() time.Time {
 	if t, ok := mp.lastUsedAt.Load().(time.Time); ok {
 		return t
