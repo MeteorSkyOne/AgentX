@@ -3,11 +3,16 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"os"
 	"os/exec"
 	"regexp"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"time"
@@ -20,25 +25,30 @@ import (
 )
 
 const (
-	toolUpdateProviderClaude = "claude"
-	toolUpdateProviderCodex  = "codex"
-	toolUpdateProviderPi     = "pi"
-	toolUpdateProviderAgy    = "agy"
-	toolUpdateAll            = "all"
-	toolUpdateOutputLimit    = 16 * 1024
-	toolUpdateCheckTimeout   = 2 * time.Minute
-	toolUpdateInstallTimeout = 30 * time.Minute
-	toolUpdateWaitInterval   = 500 * time.Millisecond
+	toolUpdateProviderClaude  = "claude"
+	toolUpdateProviderCodex   = "codex"
+	toolUpdateProviderPi      = "pi"
+	toolUpdateProviderAgy     = "agy"
+	toolUpdateAll             = "all"
+	toolUpdateOutputLimit     = 16 * 1024
+	toolUpdateCheckTimeout    = 2 * time.Minute
+	toolUpdateInstallTimeout  = 30 * time.Minute
+	toolUpdateWaitInterval    = 500 * time.Millisecond
+	defaultAgyManifestBaseURL = "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app"
+	agyManifestResponseLimit  = 64 * 1024
+	toolUpdateUserAgent       = "AgentX/tool-update"
 )
 
 type ToolUpdateOptions struct {
-	Settings      config.ToolUpdateSettings
-	ClaudeCommand string
-	CodexCommand  string
-	PiCommand     string
-	AgyCommand    string
-	Exec          toolUpdateExecFunc
-	Now           func() time.Time
+	Settings           config.ToolUpdateSettings
+	ClaudeCommand      string
+	CodexCommand       string
+	PiCommand          string
+	AgyCommand         string
+	AgyManifestBaseURL string
+	HTTPClient         *http.Client
+	Exec               toolUpdateExecFunc
+	Now                func() time.Time
 }
 
 type toolUpdateExecFunc func(ctx context.Context, name string, args ...string) (string, error)
@@ -75,13 +85,15 @@ type toolUpdateService struct {
 	runtimes map[string]agentruntime.Runtime
 	settings config.ToolUpdateSettings
 
-	claudeCommand string
-	codexCommand  string
-	piCommand     string
-	agyCommand    string
-	exec          toolUpdateExecFunc
-	now           func() time.Time
-	waitInterval  time.Duration
+	claudeCommand      string
+	codexCommand       string
+	piCommand          string
+	agyCommand         string
+	agyManifestBaseURL string
+	httpClient         *http.Client
+	exec               toolUpdateExecFunc
+	now                func() time.Time
+	waitInterval       time.Duration
 
 	mu     sync.Mutex
 	states map[string]*toolUpdateState
@@ -117,6 +129,14 @@ func newToolUpdateService(_ store.Store, dataDir string, runtimes map[string]age
 	if agyCommand == "" {
 		agyCommand = "agy"
 	}
+	agyManifestBaseURL := strings.TrimSpace(opts.AgyManifestBaseURL)
+	if agyManifestBaseURL == "" {
+		agyManifestBaseURL = defaultAgyManifestBaseURL
+	}
+	httpClient := opts.HTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: toolUpdateCheckTimeout}
+	}
 	execFn := opts.Exec
 	if execFn == nil {
 		execFn = defaultToolUpdateExec
@@ -132,16 +152,18 @@ func newToolUpdateService(_ store.Store, dataDir string, runtimes map[string]age
 		settings = config.DefaultToolUpdateSettings()
 	}
 	return &toolUpdateService{
-		dataDir:       dataDir,
-		runtimes:      runtimes,
-		settings:      settings,
-		claudeCommand: claudeCommand,
-		codexCommand:  codexCommand,
-		piCommand:     piCommand,
-		agyCommand:    agyCommand,
-		exec:          execFn,
-		now:           now,
-		waitInterval:  toolUpdateWaitInterval,
+		dataDir:            dataDir,
+		runtimes:           runtimes,
+		settings:           settings,
+		claudeCommand:      claudeCommand,
+		codexCommand:       codexCommand,
+		piCommand:          piCommand,
+		agyCommand:         agyCommand,
+		agyManifestBaseURL: agyManifestBaseURL,
+		httpClient:         httpClient,
+		exec:               execFn,
+		now:                now,
+		waitInterval:       toolUpdateWaitInterval,
 		states: map[string]*toolUpdateState{
 			toolUpdateProviderClaude: {State: "idle"},
 			toolUpdateProviderCodex:  {State: "idle"},
@@ -430,17 +452,11 @@ func (s *toolUpdateService) checkStarted(ctx context.Context, provider string, c
 		return err
 	}
 	current := parseToolVersion(provider, currentOut)
-	var latest string
-	var latestErr error
+	latest, latestErr := s.fetchLatestVersion(ctx, provider)
 	var available *bool
-	if pkg := toolUpdatePackage(provider); pkg != "" {
-		var latestOut string
-		latestOut, latestErr = s.execWithTimeout(ctx, toolUpdateCheckTimeout, "npm", "view", pkg, "version")
-		latest = parseToolVersion(provider, latestOut)
-		if latestErr == nil && current != "" && latest != "" {
-			v := current != latest
-			available = &v
-		}
+	if latestErr == nil && current != "" && latest != "" {
+		v := current != latest
+		available = &v
 	}
 	now := s.now().UTC()
 	s.mu.Lock()
@@ -746,6 +762,86 @@ func requestedToolProviders(tool string) []string {
 	default:
 		return nil
 	}
+}
+
+func (s *toolUpdateService) fetchLatestVersion(ctx context.Context, provider string) (string, error) {
+	if provider == toolUpdateProviderAgy {
+		return s.fetchAgyLatestVersion(ctx)
+	}
+	pkg := toolUpdatePackage(provider)
+	if pkg == "" {
+		return "", nil
+	}
+	latestOut, err := s.execWithTimeout(ctx, toolUpdateCheckTimeout, "npm", "view", pkg, "version")
+	return parseToolVersion(provider, latestOut), err
+}
+
+func (s *toolUpdateService) fetchAgyLatestVersion(ctx context.Context) (string, error) {
+	platform, err := agyManifestPlatform(goruntime.GOOS, goruntime.GOARCH, isMuslLinux)
+	if err != nil {
+		return "", err
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, toolUpdateCheckTimeout)
+	defer cancel()
+	manifestURL := strings.TrimRight(s.agyManifestBaseURL, "/") + "/manifests/" + platform + ".json"
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, manifestURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", toolUpdateUserAgent)
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("manifest request returned %s", resp.Status)
+	}
+	var manifest struct {
+		Version string `json:"version"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, agyManifestResponseLimit)).Decode(&manifest); err != nil {
+		return "", fmt.Errorf("decode manifest: %w", err)
+	}
+	latest := parseToolVersion(toolUpdateProviderAgy, manifest.Version)
+	if latest == "" {
+		return "", errors.New("manifest missing version")
+	}
+	return latest, nil
+}
+
+func agyManifestPlatform(goos string, goarch string, isMusl func() bool) (string, error) {
+	switch goarch {
+	case "amd64", "arm64":
+	default:
+		return "", fmt.Errorf("unsupported Antigravity platform %s/%s", goos, goarch)
+	}
+	switch goos {
+	case "darwin", "windows":
+		return goos + "_" + goarch, nil
+	case "android":
+		if goarch != "arm64" {
+			return "", fmt.Errorf("unsupported Antigravity platform %s/%s", goos, goarch)
+		}
+		return "android_arm64", nil
+	case "linux":
+		if isMusl != nil && isMusl() {
+			return "linux_" + goarch + "_musl", nil
+		}
+		return "linux_" + goarch, nil
+	default:
+		return "", fmt.Errorf("unsupported Antigravity platform %s/%s", goos, goarch)
+	}
+}
+
+func isMuslLinux() bool {
+	for _, path := range []string{"/lib/libc.musl-x86_64.so.1", "/lib/libc.musl-aarch64.so.1"} {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func toolUpdatePackage(provider string) string {

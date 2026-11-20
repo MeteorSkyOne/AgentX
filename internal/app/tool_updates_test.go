@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -381,8 +383,8 @@ func TestCheckToolUpdatesReportsProbeFailurePerTool(t *testing.T) {
 	if pi.State != "idle" || pi.CurrentVersion != "1.4.0" || pi.DisplayName != "Pi" || pi.Command != "pi" {
 		t.Fatalf("pi status = %#v, want checked 1.4.0", pi)
 	}
-	if agy.State != "idle" || agy.CurrentVersion != "1.5.9" || agy.DisplayName != "Antigravity" || agy.Command != "agy" || agy.LatestVersion != "" || agy.LastError != "" {
-		t.Fatalf("agy status = %#v, want checked 1.5.9 without npm lookup", agy)
+	if agy.State != "idle" || agy.CurrentVersion != "1.5.9" || agy.DisplayName != "Antigravity" || agy.Command != "agy" || agy.LatestVersion != "1.5.13" || agy.UpdateAvailable == nil || !*agy.UpdateAvailable || agy.LastError != "" {
+		t.Fatalf("agy status = %#v, want checked 1.5.9 -> 1.5.13 with update available", agy)
 	}
 	for _, call := range npmCalls {
 		if strings.Contains(call, "agy") {
@@ -391,8 +393,104 @@ func TestCheckToolUpdatesReportsProbeFailurePerTool(t *testing.T) {
 	}
 }
 
+func TestCheckToolUpdatesAgyUpToDateAndManifestError(t *testing.T) {
+	var manifestPath string
+	var statusCode atomic.Int32
+	statusCode.Store(http.StatusOK)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		manifestPath = r.URL.Path
+		if code := int(statusCode.Load()); code != http.StatusOK {
+			http.Error(w, "upstream error", code)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version":"1.5.13"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	exec := func(_ context.Context, name string, args ...string) (string, error) {
+		if name == "agy" && len(args) == 1 && args[0] == "--version" {
+			return "1.5.13", nil
+		}
+		return "", nil
+	}
+	app := New(nil, eventbus.New(), Options{
+		DataDir:            t.TempDir(),
+		ToolUpdateSettings: config.DefaultToolUpdateSettings(),
+		ToolUpdates: ToolUpdateOptions{
+			AgyCommand:         "agy",
+			AgyManifestBaseURL: srv.URL,
+			HTTPClient:         srv.Client(),
+			Exec:               exec,
+		},
+	})
+
+	overview, err := app.CheckToolUpdates(context.Background(), toolUpdateProviderAgy)
+	if err != nil {
+		t.Fatalf("CheckToolUpdates(agy) error = %v", err)
+	}
+	agy := overview.Tools[3]
+	if !strings.HasPrefix(manifestPath, "/manifests/") || !strings.HasSuffix(manifestPath, ".json") {
+		t.Fatalf("manifest path = %q, want /manifests/<platform>.json", manifestPath)
+	}
+	if agy.State != "idle" || agy.CurrentVersion != "1.5.13" || agy.LatestVersion != "1.5.13" || agy.UpdateAvailable == nil || *agy.UpdateAvailable {
+		t.Fatalf("agy status = %#v, want up-to-date 1.5.13", agy)
+	}
+
+	statusCode.Store(http.StatusBadGateway)
+	overview, err = app.CheckToolUpdates(context.Background(), toolUpdateProviderAgy)
+	if err != nil {
+		t.Fatalf("CheckToolUpdates(agy) on manifest failure error = %v", err)
+	}
+	agy = overview.Tools[3]
+	if agy.State != "idle" || agy.CurrentVersion != "1.5.13" || agy.LatestVersion != "" || agy.UpdateAvailable != nil {
+		t.Fatalf("agy status on manifest failure = %#v, want current version without latest", agy)
+	}
+	if !strings.Contains(agy.Message, "Latest version unavailable") {
+		t.Fatalf("agy message = %q, want latest unavailable notice", agy.Message)
+	}
+}
+
+func TestAgyManifestPlatform(t *testing.T) {
+	cases := []struct {
+		goos   string
+		goarch string
+		musl   bool
+		want   string
+		err    bool
+	}{
+		{goos: "linux", goarch: "amd64", want: "linux_amd64"},
+		{goos: "linux", goarch: "arm64", want: "linux_arm64"},
+		{goos: "linux", goarch: "amd64", musl: true, want: "linux_amd64_musl"},
+		{goos: "darwin", goarch: "arm64", want: "darwin_arm64"},
+		{goos: "darwin", goarch: "amd64", want: "darwin_amd64"},
+		{goos: "windows", goarch: "amd64", want: "windows_amd64"},
+		{goos: "windows", goarch: "arm64", want: "windows_arm64"},
+		{goos: "android", goarch: "arm64", want: "android_arm64"},
+		{goos: "linux", goarch: "386", err: true},
+		{goos: "freebsd", goarch: "amd64", err: true},
+	}
+	for _, tc := range cases {
+		got, err := agyManifestPlatform(tc.goos, tc.goarch, func() bool { return tc.musl })
+		if tc.err {
+			if err == nil {
+				t.Fatalf("agyManifestPlatform(%s, %s, %v) = %q, want error", tc.goos, tc.goarch, tc.musl, got)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Fatalf("agyManifestPlatform(%s, %s, %v) = (%q, %v), want (%q, nil)", tc.goos, tc.goarch, tc.musl, got, err, tc.want)
+		}
+	}
+}
+
 func newToolUpdateTestAppWithExec(t *testing.T, rt agentruntime.Runtime, exec toolUpdateExecFunc) *App {
 	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version":"1.5.13"}`))
+	}))
+	t.Cleanup(srv.Close)
 	return New(nil, eventbus.New(), Options{
 		DataDir: t.TempDir(),
 		ToolUpdateSettings: config.ToolUpdateSettings{
@@ -409,10 +507,12 @@ func newToolUpdateTestAppWithExec(t *testing.T, rt agentruntime.Runtime, exec to
 			domain.AgentKindAgy:              rt,
 		},
 		ToolUpdates: ToolUpdateOptions{
-			ClaudeCommand: "claude",
-			CodexCommand:  "codex",
-			AgyCommand:    "agy",
-			Exec:          exec,
+			ClaudeCommand:      "claude",
+			CodexCommand:       "codex",
+			AgyCommand:         "agy",
+			AgyManifestBaseURL: srv.URL,
+			HTTPClient:         srv.Client(),
+			Exec:               exec,
 		},
 	})
 }
